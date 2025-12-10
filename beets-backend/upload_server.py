@@ -931,7 +931,172 @@ def create_invite():
         conn.close()
 
 
+
+# --- Playlist Routes ---
+
+@app.route('/playlists', methods=['GET'])
+def get_playlists():
+    """Get all playlists"""
+    try:
+        conn = sqlite3.connect('music/users.db')
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, name, created_at FROM playlists ORDER BY created_at DESC")
+        playlists = [{'id': row[0], 'name': row[1], 'created_at': row[2]} for row in cursor.fetchall()]
+        
+        # Get track counts for each playlist
+        for pl in playlists:
+            cursor.execute("SELECT COUNT(*) FROM playlist_tracks WHERE playlist_id = ?", (pl['id'],))
+            pl['count'] = cursor.fetchone()[0]
+            
+        conn.close()
+        return jsonify({'playlists': playlists})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/playlists', methods=['POST'])
+def create_playlist():
+    """Create a new playlist"""
+    try:
+        data = request.get_json()
+        name = data.get('name')
+        if not name:
+            return jsonify({'error': 'Name is required'}), 400
+            
+        conn = sqlite3.connect('music/users.db')
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO playlists (name) VALUES (?)", (name,))
+        playlist_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'id': playlist_id, 'name': name, 'count': 0}), 201
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/playlists/<int:playlist_id>', methods=['PUT'])
+def update_playlist(playlist_id):
+    """Rename a playlist"""
+    try:
+        data = request.get_json()
+        name = data.get('name')
+        if not name:
+            return jsonify({'error': 'Name is required'}), 400
+            
+        conn = sqlite3.connect('music/users.db')
+        cursor = conn.cursor()
+        cursor.execute("UPDATE playlists SET name = ? WHERE id = ?", (name, playlist_id))
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/playlists/<int:playlist_id>', methods=['DELETE'])
+def delete_playlist(playlist_id):
+    """Delete a playlist"""
+    try:
+        conn = sqlite3.connect('music/users.db')
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM playlist_tracks WHERE playlist_id = ?", (playlist_id,))
+        cursor.execute("DELETE FROM playlists WHERE id = ?", (playlist_id,))
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/playlists/<int:playlist_id>/tracks', methods=['GET'])
+def get_playlist_tracks(playlist_id):
+    """Get tracks for a playlist with full metadata"""
+    try:
+        # Get track IDs from playlist DB
+        conn = sqlite3.connect('music/users.db')
+        cursor = conn.cursor()
+        cursor.execute("SELECT track_id FROM playlist_tracks WHERE playlist_id = ? ORDER BY position ASC", (playlist_id,))
+        track_ids = [row[0] for row in cursor.fetchall()]
+        conn.close()
+        
+        if not track_ids:
+            return jsonify({'items': []})
+
+        # Get track metadata from library DB
+        lib_conn = sqlite3.connect(LIBRARY_DB)
+        lib_conn.row_factory = sqlite3.Row
+        lib_cursor = lib_conn.cursor()
+        
+        placeholders = ','.join('?' for _ in track_ids)
+        # We need to preserve order, so we fetch all and sort in python or use CASE/WHEN (complex for sqlite)
+        lib_cursor.execute(f"SELECT * FROM items WHERE id IN ({placeholders})", track_ids)
+        rows = lib_cursor.fetchall()
+        lib_conn.close()
+        
+        # Convert to list of dicts and reorder
+        tracks_map = {row['id']: dict(row) for row in rows}
+        ordered_tracks = [tracks_map[tid] for tid in track_ids if tid in tracks_map]
+        
+        return jsonify({'items': ordered_tracks})
+    except Exception as e:
+        print(f"Error fetching playlist tracks: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/playlists/<int:playlist_id>/tracks', methods=['POST'])
+def add_tracks_to_playlist(playlist_id):
+    """Add tracks to playlist"""
+    try:
+        data = request.get_json()
+        track_ids = data.get('track_ids', [])
+        
+        conn = sqlite3.connect('music/users.db')
+        cursor = conn.cursor()
+        
+        # Get current max position
+        cursor.execute("SELECT MAX(position) FROM playlist_tracks WHERE playlist_id = ?", (playlist_id,))
+        result = cursor.fetchone()
+        start_pos = (result[0] or 0) + 1
+        
+        for i, tid in enumerate(track_ids):
+            try:
+                cursor.execute(
+                    "INSERT INTO playlist_tracks (playlist_id, track_id, position) VALUES (?, ?, ?)", 
+                    (playlist_id, tid, start_pos + i)
+                )
+            except sqlite3.IntegrityError:
+                pass # Ignore duplicates if unique constraint hit (though primary key is composite)
+                
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/playlists/<int:playlist_id>/tracks', methods=['DELETE'])
+def remove_tracks_from_playlist(playlist_id):
+    """Remove tracks from playlist"""
+    try:
+        data = request.get_json()
+        track_ids = data.get('track_ids', [])
+        
+        conn = sqlite3.connect('music/users.db')
+        cursor = conn.cursor()
+        
+        placeholders = ','.join('?' for _ in track_ids)
+        cursor.execute(f"DELETE FROM playlist_tracks WHERE playlist_id = ? AND track_id IN ({placeholders})", 
+                      (playlist_id, *track_ids))
+                      
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 if __name__ == '__main__':
+    # Initialize DB on start if needed (optional since we have init_db script)
+    pass
     app.run(host='0.0.0.0', port=8338)
+
 
 
