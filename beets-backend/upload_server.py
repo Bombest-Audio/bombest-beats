@@ -1,8 +1,11 @@
 import os
 import re
+import json
 import subprocess
 import sqlite3
-from flask import Flask, request, jsonify
+import wave
+import struct
+from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 
@@ -11,10 +14,12 @@ CORS(app)
 
 UPLOAD_FOLDER = os.path.join(os.getcwd(), 'uploads')
 MUSIC_FOLDER = os.path.join(os.getcwd(), 'music')
+WAVEFORM_FOLDER = os.path.join(os.getcwd(), 'waveforms')
 LIBRARY_DB = os.path.expanduser('~/bombest-beats/beets-backend/music/library.db')
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(MUSIC_FOLDER, exist_ok=True)
+os.makedirs(WAVEFORM_FOLDER, exist_ok=True)
 
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
@@ -57,6 +62,111 @@ def set_audio_title(filepath, title):
     except Exception as e:
         print(f"Could not set title metadata: {e}")
     return False
+
+def generate_waveform_peaks(audio_path, num_peaks=200):
+    """Generate waveform peaks data from an audio file"""
+    try:
+        # Convert to WAV if needed using ffmpeg, then read
+        temp_wav = audio_path + '.temp.wav'
+        
+        # Use ffmpeg to convert to mono WAV for easy reading
+        subprocess.run(
+            ['ffmpeg', '-y', '-i', audio_path, '-ac', '1', '-ar', '22050', temp_wav],
+            check=True, capture_output=True
+        )
+        
+        # Read WAV file
+        with wave.open(temp_wav, 'rb') as wav:
+            n_frames = wav.getnframes()
+            sample_width = wav.getsampwidth()
+            
+            # Read all frames
+            frames = wav.readframes(n_frames)
+            
+            # Convert to samples based on sample width
+            if sample_width == 1:
+                fmt = f'{n_frames}b'  # signed char
+            elif sample_width == 2:
+                fmt = f'{n_frames}h'  # signed short
+            else:
+                fmt = f'{n_frames}i'  # signed int
+            
+            samples = list(struct.unpack(fmt, frames))
+        
+        # Clean up temp file
+        if os.path.exists(temp_wav):
+            os.remove(temp_wav)
+        
+        # Calculate peaks
+        samples_per_peak = max(1, len(samples) // num_peaks)
+        peaks = []
+        
+        for i in range(num_peaks):
+            start = i * samples_per_peak
+            end = min(start + samples_per_peak, len(samples))
+            chunk = samples[start:end]
+            
+            if chunk:
+                # Get max absolute value in this chunk
+                max_val = max(abs(min(chunk)), abs(max(chunk)))
+                # Normalize to 0-1 range
+                normalized = max_val / (2 ** (sample_width * 8 - 1)) if max_val > 0 else 0
+                peaks.append(round(normalized, 3))
+            else:
+                peaks.append(0)
+        
+        return peaks
+        
+    except Exception as e:
+        print(f"Waveform generation error: {e}")
+        return None
+
+def get_track_path(track_id):
+    """Get the file path for a track from the database"""
+    try:
+        conn = sqlite3.connect(LIBRARY_DB)
+        cursor = conn.cursor()
+        cursor.execute("SELECT path FROM items WHERE id = ?", (track_id,))
+        result = cursor.fetchone()
+        conn.close()
+        if result:
+            return result[0]
+    except Exception as e:
+        print(f"Get track path error: {e}")
+    return None
+
+@app.route('/waveform/<int:track_id>', methods=['GET'])
+def get_waveform(track_id):
+    """Get or generate waveform peaks for a track"""
+    waveform_file = os.path.join(WAVEFORM_FOLDER, f'{track_id}.json')
+    
+    # Check if waveform already exists
+    if os.path.exists(waveform_file):
+        with open(waveform_file, 'r') as f:
+            return jsonify(json.load(f))
+    
+    # Generate waveform
+    track_path = get_track_path(track_id)
+    if not track_path:
+        return jsonify({'error': 'Track not found'}), 404
+    
+    # Handle path encoding (beets stores as bytes)
+    if isinstance(track_path, bytes):
+        track_path = track_path.decode('utf-8')
+    
+    if not os.path.exists(track_path):
+        return jsonify({'error': 'Audio file not found'}), 404
+    
+    peaks = generate_waveform_peaks(track_path)
+    if peaks is None:
+        return jsonify({'error': 'Failed to generate waveform'}), 500
+    
+    # Save for future requests
+    waveform_data = {'peaks': peaks, 'track_id': track_id}
+    with open(waveform_file, 'w') as f:
+        json.dump(waveform_data, f)
+    
+    return jsonify(waveform_data)
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
@@ -154,3 +264,4 @@ def remove_duplicates():
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8338)
+
