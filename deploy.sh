@@ -40,7 +40,7 @@ ssh $SERVER "bash -s" <<EOF
     
     # Initialize DB (dummy) if needed, but we probably want to sync music?
     # For now, we assume music exists or is managed there.
-    # python manage.py init 
+    python init_db.py 
 
     # Kill existing servers
     pkill -f "beet" || true
