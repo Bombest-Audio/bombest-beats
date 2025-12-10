@@ -1,0 +1,8 @@
+directory: ~/bombest-beats/beets-backend/music
+library: ~/bombest-beats/beets-backend/music/library.db
+plugins: web fetchart embedart scrub chroma lyrics lastgenre
+
+web:
+    host: 0.0.0.0
+    port: 8337
+    cors: '*'

@@ -1,0 +1,8 @@
+beets
+flask
+flask-cors
+pyacoustid
+pylast
+langdetect
+beautifulsoup4
+mutagen
