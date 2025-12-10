@@ -203,6 +203,22 @@ def upload_file():
                 check=True
             )
             
+            # Update the title in the database for the most recently added track
+            # Beets doesn't always preserve metadata, so we set it directly
+            try:
+                conn = sqlite3.connect(LIBRARY_DB)
+                cursor = conn.cursor()
+                # Get the most recently added item (highest ID)
+                cursor.execute("SELECT id FROM items ORDER BY id DESC LIMIT 1")
+                result = cursor.fetchone()
+                if result:
+                    new_id = result[0]
+                    cursor.execute("UPDATE items SET title = ? WHERE id = ?", (track_name, new_id))
+                    conn.commit()
+                conn.close()
+            except Exception as db_err:
+                print(f"Warning: Could not update title in database: {db_err}")
+            
             # Clean up uploaded file
             if os.path.exists(filepath):
                 os.remove(filepath)
@@ -262,6 +278,119 @@ def remove_duplicates():
         return jsonify({'error': f'Failed to remove duplicates: {str(e)}'}), 500
 
 
+@app.route('/track/<int:track_id>', methods=['PUT'])
+def update_track(track_id):
+    """Update track metadata in database and audio file"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+        
+        title = data.get('title')
+        artist = data.get('artist')
+        album = data.get('album')
+        
+        conn = sqlite3.connect(LIBRARY_DB)
+        cursor = conn.cursor()
+        
+        # Get current track path
+        cursor.execute("SELECT path FROM items WHERE id = ?", (track_id,))
+        result = cursor.fetchone()
+        if not result:
+            conn.close()
+            return jsonify({'error': 'Track not found'}), 404
+        
+        track_path = result[0]
+        if isinstance(track_path, bytes):
+            track_path = track_path.decode('utf-8')
+        
+        # Update database
+        updates = []
+        params = []
+        if title is not None:
+            updates.append("title = ?")
+            params.append(title)
+        if artist is not None:
+            updates.append("artist = ?")
+            params.append(artist)
+        if album is not None:
+            updates.append("album = ?")
+            params.append(album)
+        
+        if updates:
+            params.append(track_id)
+            cursor.execute(f"UPDATE items SET {', '.join(updates)} WHERE id = ?", params)
+            conn.commit()
+        
+        conn.close()
+        
+        # Update audio file metadata
+        if os.path.exists(track_path):
+            try:
+                from mutagen import File
+                audio = File(track_path, easy=True)
+                if audio is not None:
+                    if title is not None:
+                        audio['title'] = title
+                    if artist is not None:
+                        audio['artist'] = artist
+                    if album is not None:
+                        audio['album'] = album
+                    audio.save()
+            except Exception as e:
+                print(f"Warning: Could not update audio file metadata: {e}")
+        
+        return jsonify({
+            'message': 'Track updated successfully',
+            'track_id': track_id
+        }), 200
+        
+    except Exception as e:
+        return jsonify({'error': f'Failed to update track: {str(e)}'}), 500
+
+
+@app.route('/track/<int:track_id>', methods=['DELETE'])
+def delete_track(track_id):
+    """Delete track from database and optionally from disk"""
+    try:
+        conn = sqlite3.connect(LIBRARY_DB)
+        cursor = conn.cursor()
+        
+        # Get track path before deletion
+        cursor.execute("SELECT path FROM items WHERE id = ?", (track_id,))
+        result = cursor.fetchone()
+        if not result:
+            conn.close()
+            return jsonify({'error': 'Track not found'}), 404
+        
+        track_path = result[0]
+        if isinstance(track_path, bytes):
+            track_path = track_path.decode('utf-8')
+        
+        # Delete from database
+        cursor.execute("DELETE FROM items WHERE id = ?", (track_id,))
+        conn.commit()
+        conn.close()
+        
+        # Delete waveform cache
+        waveform_file = os.path.join(WAVEFORM_FOLDER, f'{track_id}.json')
+        if os.path.exists(waveform_file):
+            os.remove(waveform_file)
+        
+        # Optionally delete file from disk (comment out if you want to keep files)
+        # if os.path.exists(track_path):
+        #     os.remove(track_path)
+        
+        return jsonify({
+            'message': 'Track deleted successfully',
+            'track_id': track_id
+        }), 200
+        
+    except Exception as e:
+        return jsonify({'error': f'Failed to delete track: {str(e)}'}), 500
+
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8338)
+
 
