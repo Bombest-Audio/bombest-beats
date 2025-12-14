@@ -1,0 +1,85 @@
+package com.bombest.music.data.api
+
+import retrofit2.http.Body
+import retrofit2.http.GET
+import retrofit2.http.Header
+import retrofit2.http.POST
+
+interface AuthApi {
+    @POST("auth/login")
+    suspend fun login(@Body request: LoginRequest): AuthResponse
+
+    @POST("auth/register")
+    suspend fun register(@Body request: RegisterRequest): AuthResponse
+
+    @GET("auth/me")
+    suspend fun getMe(@Header("Authorization") token: String): UserResponse
+    
+    @POST("auth/passkey/login/options")
+    suspend fun getPasskeyLoginOptions(@Body request: PasskeyOptionsRequest = PasskeyOptionsRequest()): PasskeyLoginOptions
+    
+    @POST("auth/passkey/login/verify")
+    suspend fun verifyPasskeyLogin(@Body request: PasskeyVerifyRequest): AuthResponse
+    
+    @POST("auth/passkey/register/options")
+    suspend fun getPasskeyRegisterOptions(@Header("Authorization") token: String): PasskeyRegisterOptions
+    
+    @POST("auth/passkey/register/verify")
+    suspend fun verifyPasskeyRegister(
+        @Header("Authorization") token: String,
+        @Body credential: PasskeyCredentialRequest
+    ): PasskeyRegisterResponse
+}
+
+data class LoginRequest(val username: String, val password: String)
+data class RegisterRequest(val username: String, val password: String, val invite_code: String)
+data class AuthResponse(val access_token: String, val user: User)
+data class UserResponse(val id: Int, val username: String, val role: String)
+data class User(val id: Int, val username: String, val role: String)
+
+// Passkey data classes
+data class PasskeyOptionsRequest(val username: String? = null)
+data class PasskeyLoginOptions(
+    val challenge: String,
+    val rpId: String,
+    val timeout: Long,
+    val userVerification: String,
+    val allowCredentials: List<CredentialDescriptor>?,
+    val loginId: String
+)
+data class CredentialDescriptor(val id: String, val type: String, val transports: List<String>?)
+data class PasskeyVerifyRequest(
+    val loginId: String,
+    val id: String,
+    val rawId: String,
+    val type: String,
+    val response: PasskeyAssertionResponse
+)
+data class PasskeyAssertionResponse(
+    val authenticatorData: String,
+    val clientDataJSON: String,
+    val signature: String,
+    val userHandle: String?
+)
+
+data class PasskeyRegisterOptions(
+    val challenge: String,
+    val rp: RelyingParty,
+    val user: PasskeyUser,
+    val pubKeyCredParams: List<PubKeyCredParam>,
+    val timeout: Long,
+    val authenticatorSelection: AuthenticatorSelection?,
+    val attestation: String?
+)
+data class RelyingParty(val id: String, val name: String)
+data class PasskeyUser(val id: String, val name: String, val displayName: String)
+data class PubKeyCredParam(val type: String, val alg: Int)
+data class AuthenticatorSelection(val residentKey: String?, val userVerification: String?)
+data class PasskeyCredentialRequest(
+    val id: String,
+    val rawId: String,
+    val type: String,
+    val response: PasskeyAttestationResponse
+)
+data class PasskeyAttestationResponse(val attestationObject: String, val clientDataJSON: String)
+data class PasskeyRegisterResponse(val success: Boolean, val message: String?)

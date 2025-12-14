@@ -1,4 +1,5 @@
 import os
+import mimetypes
 import re
 import json
 import subprocess
@@ -11,15 +12,42 @@ from werkzeug.utils import secure_filename
 
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
 import bcrypt
+import smtplib
+import yaml
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+
+from functools import wraps
 
 app = Flask(__name__)
-CORS(app)
+# Load config for JWT
+with open('config.yaml', 'r') as f:
+    config = yaml.safe_load(f)
 
 # JWT Configuration
-app.config['JWT_SECRET_KEY'] = 'bombest-beats-super-secret-key-change-this-in-prod'  # Change this!
-app.config['JWT_ACCESS_TOKEN_EXPIRES'] = 86400 * 7  # 7 days
+app.config['JWT_SECRET_KEY'] = config.get('jwt_secret', 'dev-secret-key')
+app.config['JWT_ACCESS_TOKEN_EXPIRES'] = False # Non-expiring for simplicty in MVP
 jwt = JWTManager(app)
+CORS(app)
 
+# --- Helpers ---
+def admin_required():
+    def wrapper(fn):
+        @wraps(fn)
+        @jwt_required()
+        def decorator(*args, **kwargs):
+            current_user_id = get_jwt_identity()
+            conn = sqlite3.connect('music/users.db')
+            cursor = conn.cursor()
+            cursor.execute("SELECT role FROM users WHERE id = ?", (current_user_id,))
+            result = cursor.fetchone()
+            conn.close()
+            
+            if not result or result[0] != 'admin':
+                 return jsonify({'error': 'Admins only!'}), 403
+            return fn(*args, **kwargs)
+        return decorator
+    return wrapper
 UPLOAD_FOLDER = os.path.join(os.getcwd(), 'uploads')
 MUSIC_FOLDER = os.path.join(os.getcwd(), 'music')
 WAVEFORM_FOLDER = os.path.join(os.getcwd(), 'waveforms')
@@ -64,10 +92,10 @@ def set_audio_title(filepath, title):
         from mutagen import File
         audio = File(filepath, easy=True)
         if audio is not None:
-            # Format title: remove underscores, capitalize words
-            formatted_title = title.replace('_', ' ').title()
+            # Format title: remove underscores, all lowercase
+            formatted_title = title.replace('_', ' ').lower()
             audio['title'] = formatted_title
-            audio['artist'] = 'Thomas Phillips'
+            audio['artist'] = 'thomas phillips'
             audio.save()
             return True
     except Exception as e:
@@ -180,6 +208,7 @@ def get_waveform(track_id):
     return jsonify(waveform_data)
 
 @app.route('/upload', methods=['POST'])
+@admin_required()
 def upload_file():
     if 'file' not in request.files:
         return jsonify({'error': 'No file part'}), 400
@@ -224,7 +253,9 @@ def upload_file():
                 result = cursor.fetchone()
                 if result:
                     new_id = result[0]
-                    cursor.execute("UPDATE items SET title = ? WHERE id = ?", (track_name, new_id))
+                    # Format title: lowercase, underscores to spaces
+                    formatted_title = track_name.replace('_', ' ').lower()
+                    cursor.execute("UPDATE items SET title = ?, artist = ? WHERE id = ?", (formatted_title, 'thomas phillips', new_id))
                     conn.commit()
                 conn.close()
             except Exception as db_err:
@@ -361,6 +392,7 @@ def update_track(track_id):
 
 
 @app.route('/track/<int:track_id>', methods=['DELETE'])
+@admin_required()
 def delete_track(track_id):
     """Delete track from database and optionally from disk"""
     try:
@@ -629,6 +661,61 @@ def create_loop(track_id):
         conn.close()
         return jsonify({'error': str(e)}), 500
 
+@app.route('/items/<int:item_id>', methods=['PUT'])
+@admin_required()
+def update_item(item_id):
+    data = request.get_json()
+    
+    conn = sqlite3.connect(LIBRARY_DB)
+    cursor = conn.cursor()
+    
+    # Get current path
+    cursor.execute("SELECT path FROM items WHERE id = ?", (item_id,))
+    result = cursor.fetchone()
+    
+    if not result:
+        conn.close()
+        return jsonify({'error': 'Item not found'}), 404
+        
+    path = result[0]
+    if isinstance(path, bytes):
+        path = path.decode('utf-8', errors='ignore')
+        
+    # Update beets database
+    fields = []
+    values = []
+    if 'title' in data:
+        fields.append("title = ?")
+        values.append(data['title'])
+    if 'artist' in data:
+        fields.append("artist = ?")
+        values.append(data['artist'])
+    if 'album' in data:
+        fields.append("album = ?")
+        values.append(data['album'])
+        
+    if not fields:
+        conn.close()
+        return jsonify({'message': 'No changes'}), 200
+        
+    values.append(item_id)
+    cursor.execute(f"UPDATE items SET {', '.join(fields)} WHERE id = ?", values)
+    conn.commit()
+    conn.close()
+    
+    # Update file metadata using mediafile
+    try:
+        f = mediafile.MediaFile(path)
+        if 'title' in data: f.title = data['title']
+        if 'artist' in data: f.artist = data['artist']
+        if 'album' in data: f.album = data['album']
+        f.save()
+    except Exception as e:
+        print(f"Metadata write error: {e}")
+        # Non-fatal, DB is updated
+        
+    return jsonify({'message': 'Item updated'}), 200
+
 @app.route('/loops/<int:loop_id>', methods=['DELETE'])
 @jwt_required()
 def delete_loop(loop_id):
@@ -796,6 +883,8 @@ def register():
     username = data.get('username')
     password = data.get('password')
     invite_code = data.get('invite_code')
+    
+
 
     if not username or not password or not invite_code:
         return jsonify({'error': 'Missing required fields'}), 400
@@ -813,12 +902,18 @@ def register():
     
     # For Phase 1 MVP, let's assume we create a table for invites now.
     # Dynamic table creation if not exists
-    cursor.execute('CREATE TABLE IF NOT EXISTS invites (code TEXT PRIMARY KEY, created_by INTEGER, used_by INTEGER, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)')
+    cursor.execute('CREATE TABLE IF NOT EXISTS invites (code TEXT PRIMARY KEY, created_by INTEGER, used_by INTEGER, used_at TIMESTAMP, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)')
     
-    cursor.execute('SELECT * FROM invites WHERE code = ? AND used_by IS NULL', (invite_code,))
+    # Simple migration: Add used_at column if it doesn't exist (for existing tables)
+    try:
+        cursor.execute("ALTER TABLE invites ADD COLUMN used_at TIMESTAMP")
+    except sqlite3.OperationalError:
+        pass # Column likely exists
+    
+    cursor.execute('SELECT * FROM invites WHERE LOWER(code) = LOWER(?) AND used_by IS NULL', (invite_code,))
     invite = cursor.fetchone()
     
-    if not invite and invite_code != 'admin-override-secret-key-123': # Backdoor for testing/admin
+    if not invite and invite_code.lower() != 'whatupdoe' and invite_code.lower() != 'bombest-admin-2025': # Community or Admin
         conn.close()
         return jsonify({'error': 'Invalid or used invite code'}), 400
 
@@ -832,10 +927,15 @@ def register():
     salt = bcrypt.gensalt()
     hashed = bcrypt.hashpw(password.encode('utf-8'), salt)
 
+    # Determine role
+    role = 'user'
+    if invite_code.lower() == 'bombest-admin-2025':
+        role = 'admin'
+
     try:
         cursor.execute(
-            'INSERT INTO users (username, password_hash, invite_code) VALUES (?, ?, ?)',
-            (username, hashed.decode('utf-8'), invite_code)
+            'INSERT INTO users (username, password_hash, invite_code, role) VALUES (?, ?, ?, ?)',
+            (username, hashed.decode('utf-8'), invite_code, role)
         )
         new_user_id = cursor.lastrowid
         
@@ -845,12 +945,12 @@ def register():
         conn.commit()
         
         # Create token
-        access_token = create_access_token(identity=str(new_user_id), additional_claims={'role': 'user', 'username': username})
+        access_token = create_access_token(identity=str(new_user_id), additional_claims={'role': role, 'username': username})
         
         return jsonify({
             'message': 'Registration successful',
             'access_token': access_token,
-            'user': {'id': new_user_id, 'username': username, 'role': 'user'}
+            'user': {'id': new_user_id, 'username': username, 'role': role}
         }), 201
         
     except Exception as e:
@@ -904,6 +1004,289 @@ def me():
     if user:
         return jsonify(dict(user)), 200
     return jsonify({'error': 'User not found'}), 404
+
+# ==================== PASSKEY / WEBAUTHN ====================
+import base64
+from webauthn import (
+    generate_registration_options,
+    verify_registration_response,
+    generate_authentication_options,
+    verify_authentication_response,
+    options_to_json,
+)
+from webauthn.helpers.structs import (
+    AuthenticatorSelectionCriteria,
+    UserVerificationRequirement,
+    ResidentKeyRequirement,
+    PublicKeyCredentialDescriptor,
+)
+from webauthn.helpers import bytes_to_base64url, base64url_to_bytes
+
+RP_ID = "bom.best"
+RP_NAME = "bombest beats"
+RP_ORIGIN = "https://bom.best"
+
+# Store challenges temporarily (in production, use Redis or similar)
+passkey_challenges = {}
+
+def init_passkey_table():
+    """Create passkey_credentials table if not exists"""
+    conn = sqlite3.connect('music/users.db')
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS passkey_credentials (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            credential_id TEXT NOT NULL UNIQUE,
+            public_key TEXT NOT NULL,
+            sign_count INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+init_passkey_table()
+
+@app.route('/auth/passkey/register/options', methods=['POST'])
+@jwt_required()
+def passkey_register_options():
+    """Generate options for registering a new passkey"""
+    current_user_id = get_jwt_identity()
+    
+    conn = sqlite3.connect('music/users.db')
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, username FROM users WHERE id = ?", (current_user_id,))
+    user = cursor.fetchone()
+    
+    if not user:
+        conn.close()
+        return jsonify({'error': 'User not found'}), 404
+    
+    # Get existing credentials to exclude
+    cursor.execute("SELECT credential_id FROM passkey_credentials WHERE user_id = ?", (current_user_id,))
+    existing_creds = cursor.fetchall()
+    conn.close()
+    
+    exclude_credentials = [
+        PublicKeyCredentialDescriptor(id=base64url_to_bytes(row['credential_id']))
+        for row in existing_creds
+    ]
+    
+    options = generate_registration_options(
+        rp_id=RP_ID,
+        rp_name=RP_NAME,
+        user_id=str(user['id']).encode(),
+        user_name=user['username'],
+        user_display_name=user['username'],
+        exclude_credentials=exclude_credentials,
+        authenticator_selection=AuthenticatorSelectionCriteria(
+            resident_key=ResidentKeyRequirement.PREFERRED,
+            user_verification=UserVerificationRequirement.PREFERRED,
+        ),
+    )
+    
+    # Store challenge for verification
+    passkey_challenges[str(user['id'])] = options.challenge
+    
+    return options_to_json(options)
+
+@app.route('/auth/passkey/register/verify', methods=['POST'])
+@jwt_required()
+def passkey_register_verify():
+    """Verify and store the new passkey credential"""
+    current_user_id = get_jwt_identity()
+    data = request.get_json()
+    
+    challenge = passkey_challenges.get(current_user_id)
+    if not challenge:
+        return jsonify({'error': 'No pending registration'}), 400
+    
+    try:
+        verification = verify_registration_response(
+            credential=data,
+            expected_challenge=challenge,
+            expected_rp_id=RP_ID,
+            expected_origin=RP_ORIGIN,
+        )
+        
+        # Store the credential
+        conn = sqlite3.connect('music/users.db')
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO passkey_credentials (user_id, credential_id, public_key, sign_count)
+            VALUES (?, ?, ?, ?)
+        ''', (
+            current_user_id,
+            bytes_to_base64url(verification.credential_id),
+            bytes_to_base64url(verification.credential_public_key),
+            verification.sign_count,
+        ))
+        conn.commit()
+        conn.close()
+        
+        # Clean up challenge
+        del passkey_challenges[current_user_id]
+        
+        return jsonify({'success': True, 'message': 'Passkey registered successfully'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+
+@app.route('/auth/passkey/login/options', methods=['POST'])
+def passkey_login_options():
+    """Generate options for passkey login"""
+    data = request.get_json() or {}
+    username = data.get('username')
+    
+    conn = sqlite3.connect('music/users.db')
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    if username:
+        # User specified - get their credentials
+        cursor.execute("SELECT id FROM users WHERE username = ?", (username,))
+        user = cursor.fetchone()
+        if not user:
+            conn.close()
+            return jsonify({'error': 'User not found'}), 404
+        cursor.execute("SELECT credential_id FROM passkey_credentials WHERE user_id = ?", (user['id'],))
+    else:
+        # Discoverable credential flow - allow any stored credential
+        cursor.execute("SELECT credential_id FROM passkey_credentials")
+    
+    creds = cursor.fetchall()
+    conn.close()
+    
+    if not creds:
+        return jsonify({'error': 'No passkeys registered'}), 404
+    
+    allow_credentials = [
+        PublicKeyCredentialDescriptor(id=base64url_to_bytes(row['credential_id']))
+        for row in creds
+    ]
+    
+    options = generate_authentication_options(
+        rp_id=RP_ID,
+        allow_credentials=allow_credentials if username else None,  # None = discoverable
+        user_verification=UserVerificationRequirement.PREFERRED,
+    )
+    
+    # Store challenge (keyed by a random ID for login)
+    import secrets
+    login_id = secrets.token_urlsafe(16)
+    passkey_challenges[login_id] = options.challenge
+    
+    response = json.loads(options_to_json(options))
+    response['loginId'] = login_id
+    return jsonify(response)
+
+@app.route('/auth/passkey/login/verify', methods=['POST'])
+def passkey_login_verify():
+    """Verify passkey and issue JWT"""
+    data = request.get_json()
+    login_id = data.get('loginId')
+    
+    challenge = passkey_challenges.get(login_id)
+    if not challenge:
+        return jsonify({'error': 'No pending login'}), 400
+    
+    # Find the credential
+    credential_id = data.get('id')
+    if not credential_id:
+        return jsonify({'error': 'Missing credential ID'}), 400
+    
+    conn = sqlite3.connect('music/users.db')
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT pc.*, u.username, u.role 
+        FROM passkey_credentials pc 
+        JOIN users u ON pc.user_id = u.id 
+        WHERE pc.credential_id = ?
+    ''', (credential_id,))
+    cred = cursor.fetchone()
+    
+    if not cred:
+        conn.close()
+        return jsonify({'error': 'Unknown credential'}), 401
+    
+    try:
+        verification = verify_authentication_response(
+            credential=data,
+            expected_challenge=challenge,
+            expected_rp_id=RP_ID,
+            expected_origin=RP_ORIGIN,
+            credential_public_key=base64url_to_bytes(cred['public_key']),
+            credential_current_sign_count=cred['sign_count'],
+        )
+        
+        # Update sign count
+        cursor.execute(
+            "UPDATE passkey_credentials SET sign_count = ? WHERE credential_id = ?",
+            (verification.new_sign_count, credential_id)
+        )
+        conn.commit()
+        conn.close()
+        
+        # Clean up challenge
+        del passkey_challenges[login_id]
+        
+        # Issue JWT
+        access_token = create_access_token(
+            identity=str(cred['user_id']),
+            additional_claims={'role': cred['role'], 'username': cred['username']}
+        )
+        
+        return jsonify({
+            'access_token': access_token,
+            'user': {'id': cred['user_id'], 'username': cred['username'], 'role': cred['role']}
+        })
+    except Exception as e:
+        conn.close()
+        return jsonify({'error': str(e)}), 401
+
+@app.route('/auth/passkey/list', methods=['GET'])
+@jwt_required()
+def passkey_list():
+    """List user's registered passkeys"""
+    current_user_id = get_jwt_identity()
+    
+    conn = sqlite3.connect('music/users.db')
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT id, credential_id, created_at FROM passkey_credentials WHERE user_id = ?",
+        (current_user_id,)
+    )
+    creds = cursor.fetchall()
+    conn.close()
+    
+    return jsonify([dict(c) for c in creds])
+
+@app.route('/auth/passkey/delete/<int:passkey_id>', methods=['DELETE'])
+@jwt_required()
+def passkey_delete(passkey_id):
+    """Delete a passkey"""
+    current_user_id = get_jwt_identity()
+    
+    conn = sqlite3.connect('music/users.db')
+    cursor = conn.cursor()
+    cursor.execute(
+        "DELETE FROM passkey_credentials WHERE id = ? AND user_id = ?",
+        (passkey_id, current_user_id)
+    )
+    conn.commit()
+    deleted = cursor.rowcount > 0
+    conn.close()
+    
+    if deleted:
+        return jsonify({'success': True})
+    return jsonify({'error': 'Passkey not found'}), 404
+
+# ==================== END PASSKEY ====================
+
 
 @app.route('/auth/invite', methods=['POST'])
 @jwt_required()
@@ -1093,10 +1476,359 @@ def remove_tracks_from_playlist(playlist_id):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/stream/<int:track_id>', methods=['GET'])
+def stream_track(track_id):
+    """Stream audio file directly from upload server to bypass beets CORS issues"""
+    try:
+        conn = sqlite3.connect(LIBRARY_DB)
+        cursor = conn.cursor()
+        cursor.execute("SELECT path FROM items WHERE id = ?", (track_id,))
+        result = cursor.fetchone()
+        conn.close()
+
+        if not result:
+            return jsonify({'error': 'Track not found'}), 404
+
+        # Beets stores absolute path, or relative to library directory
+        # In our container/setup, it's usually absolute
+        file_path = result[0]
+        
+        # Security check: Ensure file is within music directory?
+        # For now, trust the DB as it's internal.
+        
+        # Decode bytes if needed (sqlite sometimes returns bytes for text fields if messed up)
+        if isinstance(file_path, bytes):
+            file_path = file_path.decode('utf-8', errors='ignore')
+            
+        if not os.path.exists(file_path):
+             return jsonify({'error': 'File not found on disk'}), 404
+
+        mime_type, _ = mimetypes.guess_type(file_path)
+        if not mime_type:
+            mime_type = 'application/octet-stream' # Default fallback to force probing
+            
+        return send_file(file_path, mimetype=mime_type)
+    except Exception as e:
+        print(f"Stream error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/album/<int:album_id>/art', methods=['GET'])
+def get_album_art(album_id):
+    """Serve album art directly to bypass beets server"""
+    try:
+        conn = sqlite3.connect(LIBRARY_DB)
+        cursor = conn.cursor()
+        cursor.execute("SELECT artpath FROM albums WHERE id = ?", (album_id,))
+        result = cursor.fetchone()
+        conn.close()
+
+        if not result or not result[0]:
+            return jsonify({'error': 'No artwork found'}), 404
+
+        art_path = result[0]
+        if isinstance(art_path, bytes):
+            art_path = art_path.decode('utf-8', errors='ignore')
+
+        if not os.path.exists(art_path):
+             return jsonify({'error': 'Artwork file not found'}), 404
+
+        return send_file(art_path)
+    except Exception as e:
+        print(f"Art error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/track/<int:track_id>/art', methods=['GET'])
+def get_track_art(track_id):
+    """Serve track artwork - extracts from file or returns default"""
+    try:
+        conn = sqlite3.connect(LIBRARY_DB)
+        cursor = conn.cursor()
+        cursor.execute("SELECT path, album_id FROM items WHERE id = ?", (track_id,))
+        result = cursor.fetchone()
+        conn.close()
+
+        if not result:
+            return jsonify({'error': 'Track not found'}), 404
+
+        file_path, album_id = result
+        if isinstance(file_path, bytes):
+            file_path = file_path.decode('utf-8', errors='ignore')
+
+        # Try album art first if album_id exists
+        if album_id:
+            conn = sqlite3.connect(LIBRARY_DB)
+            cursor = conn.cursor()
+            cursor.execute("SELECT artpath FROM albums WHERE id = ?", (album_id,))
+            art_result = cursor.fetchone()
+            conn.close()
+            if art_result and art_result[0]:
+                art_path = art_result[0]
+                if isinstance(art_path, bytes):
+                    art_path = art_path.decode('utf-8', errors='ignore')
+                if os.path.exists(art_path):
+                    return send_file(art_path)
+
+        # Try to extract embedded artwork from audio file
+        if os.path.exists(file_path):
+            try:
+                from mutagen import File as MutagenFile
+                from mutagen.mp3 import MP3
+                from mutagen.id3 import ID3
+                from io import BytesIO
+                
+                audio = MutagenFile(file_path)
+                artwork_data = None
+                
+                # Check for ID3 tags (MP3)
+                if hasattr(audio, 'tags') and audio.tags:
+                    for key in audio.tags.keys():
+                        if key.startswith('APIC'):
+                            artwork_data = audio.tags[key].data
+                            break
+                
+                # Check for FLAC/OGG pictures
+                if not artwork_data and hasattr(audio, 'pictures') and audio.pictures:
+                    artwork_data = audio.pictures[0].data
+                
+                # Check for MP4/M4A cover
+                if not artwork_data and hasattr(audio, 'tags') and audio.tags:
+                    if 'covr' in audio.tags:
+                        artwork_data = bytes(audio.tags['covr'][0])
+                
+                if artwork_data:
+                    return send_file(BytesIO(artwork_data), mimetype='image/jpeg')
+            except Exception as extract_error:
+                print(f"Artwork extraction error: {extract_error}")
+
+        # Return default artwork
+        default_art = os.path.join(os.path.dirname(__file__), 'static', 'no-image.png')
+        if os.path.exists(default_art):
+            return send_file(default_art)
+        
+        return jsonify({'error': 'No artwork found'}), 404
+    except Exception as e:
+        print(f"Track art error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/notify-interest', methods=['POST'])
+@jwt_required()
+def notify_interest():
+    try:
+        current_user_id = get_jwt_identity()
+        data = request.get_json()
+        track_id = data.get('track_id')
+        
+        if not track_id:
+            return jsonify({'error': 'Missing track ID'}), 400
+
+        # Get user details
+        conn = sqlite3.connect('music/users.db')
+        cursor = conn.cursor()
+        cursor.execute("SELECT username FROM users WHERE id = ?", (current_user_id,))
+        user_result = cursor.fetchone()
+        conn.close()
+        
+        username = user_result[0] if user_result else "Unknown User"
+        
+        # Get track details
+        conn = sqlite3.connect(LIBRARY_DB)
+        cursor = conn.cursor()
+        cursor.execute("SELECT title, artist FROM items WHERE id = ?", (track_id,))
+        track_result = cursor.fetchone()
+        conn.close()
+        
+        if not track_result:
+            return jsonify({'error': 'Track not found'}), 404
+            
+        track_title = track_result[0]
+        track_artist = track_result[1]
+
+        # Load config
+        with open('config.yaml', 'r') as f:
+            config = yaml.safe_load(f)
+            
+        email_config = config.get('email', {})
+        if not email_config:
+             return jsonify({'error': 'Email configuration missing'}), 500
+        # Send Email Logic (Optimized for SMS/MMS gateways if needed, or just standard SMTP)
+        # For now, this endpoint handles the Email notification side if used.
+        # Front-end uses direct SMS link now, so this might be redundant but keeping for fallback.
+        subject = f"Interest: {track_title}"
+        body = f"User {username} is interested in {track_title} by {track_artist}.\nTrack ID: {track_id}"
+        
+        msg = MIMEMultipart()
+        msg['From'] = config['email']['sender_email']
+        msg['To'] = config['email']['recipient_email']
+        msg['Subject'] = subject
+        msg.attach(MIMEText(body, 'plain'))
+        
+        server = smtplib.SMTP(config['email']['smtp_server'], config['email']['smtp_port'])
+        server.starttls()
+        server.login(config['email']['sender_email'], config['email']['password'])
+        server.send_message(msg)
+        server.quit()
+        
+        return jsonify({'message': 'Notification sent'}), 200
+        
+    except Exception as e:
+        print(f"Notify error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+# --- Favorites & Roles ---
+
+@app.route('/favorites', methods=['GET', 'POST', 'DELETE'])
+@jwt_required()
+def favorites():
+    user_id = get_jwt_identity()
+    conn = sqlite3.connect('music/users.db')
+    cursor = conn.cursor()
+    
+    # Ensure tables exist (Lazy migration)
+    cursor.execute('CREATE TABLE IF NOT EXISTS favorites (user_id INTEGER, track_id INTEGER, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(user_id, track_id))')
+    try:
+        cursor.execute("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'user'")
+    except sqlite3.OperationalError:
+        pass
+
+    if request.method == 'GET':
+        cursor.execute("SELECT track_id FROM favorites WHERE user_id = ?", (user_id,))
+        rows = cursor.fetchall()
+        favs = [r[0] for r in rows]
+        conn.close()
+        return jsonify(favs)
+
+    if request.method == 'POST':
+        data = request.get_json()
+        track_id = data.get('track_id')
+        if not track_id:
+             conn.close()
+             return jsonify({'error': 'No track_id'}), 400
+        try:
+            cursor.execute("INSERT INTO favorites (user_id, track_id) VALUES (?, ?)", (user_id, track_id))
+            conn.commit()
+        except sqlite3.IntegrityError:
+            pass # Already exists
+        conn.close()
+        return jsonify({'message': 'Added to favorites'})
+
+    if request.method == 'DELETE':
+        track_id = request.args.get('track_id')
+        if not track_id:
+            conn.close()
+            return jsonify({'error': 'No track_id'}), 400
+        cursor.execute("DELETE FROM favorites WHERE user_id = ? AND track_id = ?", (user_id, track_id))
+        conn.commit()
+        conn.close()
+        return jsonify({'message': 'Removed from favorites'})
+
+
+# --- Metrics ---
+
+@app.route('/metrics/play', methods=['POST'])
+@jwt_required(optional=True)
+def record_play():
+    data = request.get_json()
+    track_id = data.get('track_id')
+    if not track_id:
+        return jsonify({'error': 'No track_id'}), 400
+        
+    user_id = get_jwt_identity() # Might be None if not logged in (optional=True)
+    
+    conn = sqlite3.connect('music/users.db')
+    cursor = conn.cursor()
+    
+    # Lazy migration for plays table
+    cursor.execute('CREATE TABLE IF NOT EXISTS plays (id INTEGER PRIMARY KEY, track_id INTEGER, user_id INTEGER, played_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)')
+    
+    cursor.execute('INSERT INTO plays (track_id, user_id) VALUES (?, ?)', (track_id, user_id))
+    conn.commit()
+    conn.close()
+    
+    return jsonify({'message': 'Play recorded'}), 200
+
+@app.route('/metrics/dashboard', methods=['GET'])
+@admin_required()
+def get_dashboard_metrics():
+    user_id_filter = request.args.get('user_id')  # Optional filter
+    
+    conn = sqlite3.connect('music/users.db')
+    cursor = conn.cursor()
+    
+    # Ensure tables exist
+    cursor.execute('CREATE TABLE IF NOT EXISTS plays (id INTEGER PRIMARY KEY, track_id INTEGER, user_id INTEGER, played_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)')
+
+    # Build WHERE clause for user filter
+    where_clause = ""
+    params = []
+    if user_id_filter:
+        where_clause = "WHERE user_id = ?"
+        params = [int(user_id_filter)]
+
+    # 1. Top Tracks (All Time) - with optional user filter
+    cursor.execute(f'''
+        SELECT track_id, COUNT(*) as count 
+        FROM plays 
+        {where_clause}
+        GROUP BY track_id 
+        ORDER BY count DESC 
+        LIMIT 10
+    ''', params)
+    top_rows = cursor.fetchall()
+    
+    # Get metadata for these tracks from library.db
+    lib_conn = sqlite3.connect(LIBRARY_DB)
+    lib_cursor = lib_conn.cursor()
+    
+    top_tracks = []
+    for row in top_rows:
+        tid, count = row
+        lib_cursor.execute("SELECT title, artist FROM items WHERE id = ?", (tid,))
+        meta = lib_cursor.fetchone()
+        title = meta[0] if meta else f"Unknown ({tid})"
+        artist = meta[1] if meta else "Unknown"
+        top_tracks.append({'id': tid, 'title': title, 'artist': artist, 'plays': count})
+        
+    lib_conn.close()
+    
+    # 2. Total Plays (Last 7 Days) - with optional user filter
+    date_where = "WHERE played_at >= date('now', '-7 days')"
+    if user_id_filter:
+        date_where += " AND user_id = ?"
+        
+    cursor.execute(f'''
+        SELECT DATE(played_at) as day, COUNT(*) 
+        FROM plays 
+        {date_where}
+        GROUP BY day
+        ORDER BY day
+    ''', [int(user_id_filter)] if user_id_filter else [])
+    daily_plays = [{'date': row[0], 'count': row[1]} for row in cursor.fetchall()]
+
+    # 3. Total Plays (All Time) - with optional user filter
+    if user_id_filter:
+        cursor.execute("SELECT COUNT(*) FROM plays WHERE user_id = ?", [int(user_id_filter)])
+    else:
+        cursor.execute("SELECT COUNT(*) FROM plays")
+    total_plays = cursor.fetchone()[0]
+    
+    # 4. Get list of users who have plays (for filter dropdown)
+    cursor.execute('''
+        SELECT DISTINCT p.user_id, u.username 
+        FROM plays p 
+        LEFT JOIN users u ON p.user_id = u.id
+        ORDER BY u.username
+    ''')
+    users = [{'id': row[0], 'username': row[1] or f"User {row[0]}"} for row in cursor.fetchall()]
+    
+    conn.close()
+    
+    return jsonify({
+        'top_tracks': top_tracks,
+        'daily_plays': daily_plays,
+        'total_plays': total_plays,
+        'users': users
+    })
+
 if __name__ == '__main__':
     # Initialize DB on start if needed (optional since we have init_db script)
-    pass
     app.run(host='0.0.0.0', port=8338)
-
-
-

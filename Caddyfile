@@ -1,0 +1,44 @@
+# Caddyfile - Bombest Beats only
+
+# Bombest Beats - Internal server for Cloudflare Tunnel
+http://:8085 {
+	encode gzip
+
+	# Serve the React frontend at /beats (files are at root, PUBLIC_URL handles /beats prefix)
+	handle_path /beats/* {
+		root * /home/thomas/bombest-beats/frontend-build
+		try_files {path} /index.html
+		file_server
+		
+		# Prevent caching of index.html to ensure fresh JS bundles load
+		@html path *.html /
+		header @html Cache-Control "no-cache, no-store, must-revalidate"
+	}
+
+	# Redirect /beats (without trailing slash) to /beats/
+	redir /beats /beats/ permanent
+
+	# Proxy API requests to the Python backend
+	handle_path /beats/api/* {
+		reverse_proxy localhost:8338 {
+			header_up Host {host}
+			header_up X-Real-IP {remote_host}
+			header_up X-Forwarded-For {remote_host}
+			header_up X-Forwarded-Proto {scheme}
+		}
+	}
+
+	# Proxy Beets library API (if needed)
+	handle_path /beats/beets/* {
+		reverse_proxy localhost:8337
+	}
+
+	# Default: redirect root to /beats
+	handle / {
+		redir /beats/ permanent
+	}
+
+	log {
+		output file /var/log/caddy/bombest-beats-access.log
+	}
+}

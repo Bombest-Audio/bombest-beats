@@ -6,14 +6,14 @@ REMOTE_DIR="~/bombest-beats"
 
 echo "Building frontend..."
 cd music-frontend
-GENERATE_SOURCEMAP=false NODE_OPTIONS=--openssl-legacy-provider npm run build
+PUBLIC_URL=/beats GENERATE_SOURCEMAP=false NODE_OPTIONS=--openssl-legacy-provider npm run build
 cd ..
 
 echo "Creating remote directory..."
 ssh $SERVER "mkdir -p $REMOTE_DIR"
 
 echo "Copying backend..."
-rsync -av --exclude='venv' --exclude='__pycache__' beets-backend/ $SERVER:$REMOTE_DIR/beets-backend/
+rsync -av --exclude='venv' --exclude='__pycache__' --exclude='music/users.db' --exclude='music/library.db' beets-backend/ $SERVER:$REMOTE_DIR/beets-backend/
 
 echo "Copying frontend build..."
 rsync -av music-frontend/build/ $SERVER:$REMOTE_DIR/frontend-build/
@@ -54,6 +54,7 @@ ssh $SERVER "bash -s" <<EOF
     
     # Start Upload Server
     nohup ./venv/bin/python upload_server.py > upload.log 2>&1 &
+    
     
     cd ~/bombest-beats/frontend-build
     # Start Frontend
