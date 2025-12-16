@@ -14,4 +14,12 @@
     <style name="NotificationStyle" parent="android:TextAppearance.Material.Notification">
         <item name="android:textColor">@color/graffiti_chalk</item>
     </style>
+    
+    <!-- Splash Screen Theme - shows immediately on cold start with animation -->
+    <style name="Theme.BombestBeats.Splash" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/graffiti_background</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_launcher_foreground</item>
+        <item name="windowSplashScreenAnimationDuration">800</item>
+        <item name="postSplashScreenTheme">@style/Theme.BombestBeats</item>
+    </style>
 </resources>

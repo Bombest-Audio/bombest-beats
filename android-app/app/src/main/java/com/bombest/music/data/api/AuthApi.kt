@@ -1,9 +1,11 @@
 package com.bombest.music.data.api
 
 import retrofit2.http.Body
+import retrofit2.http.DELETE
 import retrofit2.http.GET
 import retrofit2.http.Header
 import retrofit2.http.POST
+import retrofit2.http.Path
 
 interface AuthApi {
     @POST("auth/login")
@@ -29,7 +31,27 @@ interface AuthApi {
         @Header("Authorization") token: String,
         @Body credential: PasskeyCredentialRequest
     ): PasskeyRegisterResponse
+    
+    @GET("auth/passkeys")
+    suspend fun listPasskeys(@Header("Authorization") token: String): PasskeysListResponse
+    
+    @DELETE("auth/passkey/delete/{passkeyId}")
+    suspend fun deletePasskey(
+        @Header("Authorization") token: String,
+        @Path("passkeyId") passkeyId: Int
+    ): GenericResponse
+    
+    @POST("auth/change-password")
+    suspend fun changePassword(
+        @Header("Authorization") token: String,
+        @Body request: ChangePasswordRequest
+    ): GenericResponse
 }
+
+data class ChangePasswordRequest(val current_password: String, val new_password: String)
+data class PasskeysListResponse(val passkeys: List<PasskeyInfo>)
+data class PasskeyInfo(val id: Int, val credential_id: String, val created_at: String?)
+data class GenericResponse(val success: Boolean, val message: String? = null, val error: String? = null)
 
 data class LoginRequest(val username: String, val password: String)
 data class RegisterRequest(val username: String, val password: String, val invite_code: String)

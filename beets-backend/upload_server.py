@@ -1024,7 +1024,15 @@ from webauthn.helpers import bytes_to_base64url, base64url_to_bytes
 
 RP_ID = "bom.best"
 RP_NAME = "bombest beats"
-RP_ORIGIN = "https://bom.best"
+RP_ORIGIN_WEB = "https://bom.best"
+# Android origin: android:apk-key-hash:<base64url of SHA256 fingerprint>
+# SHA256: 2C:A4:5B:A8:27:2C:C9:57:F9:AC:0D:DA:85:D5:F1:CF:D9:DF:F8:49:34:C8:58:52:4B:C4:34:5B:30:99:36:E8
+# Convert hex to bytes then base64url
+import base64
+_android_sha256_hex = "2CA45BA8272CC957F9AC0DDA85D5F1CFD9DFF84934C858524BC4345B309936E8"
+_android_sha256_bytes = bytes.fromhex(_android_sha256_hex)
+RP_ORIGIN_ANDROID = "android:apk-key-hash:" + base64.urlsafe_b64encode(_android_sha256_bytes).decode().rstrip('=')
+RP_ORIGINS = [RP_ORIGIN_WEB, RP_ORIGIN_ANDROID]
 
 # Store challenges temporarily (in production, use Redis or similar)
 passkey_challenges = {}
@@ -1109,7 +1117,7 @@ def passkey_register_verify():
             credential=data,
             expected_challenge=challenge,
             expected_rp_id=RP_ID,
-            expected_origin=RP_ORIGIN,
+            expected_origin=RP_ORIGINS,
         )
         
         # Store the credential
@@ -1217,7 +1225,7 @@ def passkey_login_verify():
             credential=data,
             expected_challenge=challenge,
             expected_rp_id=RP_ID,
-            expected_origin=RP_ORIGIN,
+            expected_origin=RP_ORIGINS,
             credential_public_key=base64url_to_bytes(cred['public_key']),
             credential_current_sign_count=cred['sign_count'],
         )
@@ -1284,6 +1292,62 @@ def passkey_delete(passkey_id):
     if deleted:
         return jsonify({'success': True})
     return jsonify({'error': 'Passkey not found'}), 404
+
+@app.route('/auth/passkeys', methods=['GET'])
+@jwt_required()
+def list_passkeys():
+    """List all passkeys for the current user"""
+    current_user_id = get_jwt_identity()
+    
+    conn = sqlite3.connect('music/users.db')
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT id, credential_id, created_at FROM passkey_credentials WHERE user_id = ?",
+        (current_user_id,)
+    )
+    passkeys = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+    
+    return jsonify({'passkeys': passkeys})
+
+@app.route('/auth/change-password', methods=['POST'])
+@jwt_required()
+def change_password():
+    """Change the current user's password"""
+    current_user_id = get_jwt_identity()
+    data = request.get_json()
+    
+    current_password = data.get('current_password')
+    new_password = data.get('new_password')
+    
+    if not current_password or not new_password:
+        return jsonify({'error': 'Current and new password required'}), 400
+    
+    if len(new_password) < 6:
+        return jsonify({'error': 'Password must be at least 6 characters'}), 400
+    
+    conn = sqlite3.connect('music/users.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT password_hash FROM users WHERE id = ?", (current_user_id,))
+    row = cursor.fetchone()
+    
+    if not row:
+        conn.close()
+        return jsonify({'error': 'User not found'}), 404
+    
+    # Verify current password
+    if not check_password_hash(row[0], current_password):
+        conn.close()
+        return jsonify({'error': 'Current password is incorrect'}), 400
+    
+    # Update password
+    new_hash = generate_password_hash(new_password)
+    cursor.execute("UPDATE users SET password_hash = ? WHERE id = ?", (new_hash, current_user_id))
+    conn.commit()
+    conn.close()
+    
+    return jsonify({'success': True, 'message': 'Password changed successfully'})
 
 # ==================== END PASSKEY ====================
 

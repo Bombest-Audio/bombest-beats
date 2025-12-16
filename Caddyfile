@@ -4,6 +4,13 @@
 http://:8085 {
 	encode gzip
 
+	# Android Asset Links for passkey verification (must be at root domain)
+	handle /.well-known/* {
+		root * /home/thomas/bombest-beats/beets-backend
+		file_server
+		header Content-Type application/json
+	}
+
 	# Serve the React frontend at /beats (files are at root, PUBLIC_URL handles /beats prefix)
 	handle_path /beats/* {
 		root * /home/thomas/bombest-beats/frontend-build

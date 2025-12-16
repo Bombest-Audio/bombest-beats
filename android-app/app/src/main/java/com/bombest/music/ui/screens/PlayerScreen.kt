@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -78,7 +79,9 @@ fun PlayerScreen(
     isDownloaded: Boolean = false,
     onFavorite: () -> Unit = {},
     onDownload: () -> Unit = {},
+    onRemoveDownload: () -> Unit = {},
     onShare: () -> Unit = {},
+    onRegisterPasskey: () -> Unit = {},
     onClose: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -106,7 +109,7 @@ fun PlayerScreen(
                 .windowInsetsPadding(WindowInsets.safeDrawing), // Ensure content doesn't overlap system bars
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            TopRow(onClose = onClose)
+            TopRow(onClose = onClose, onRegisterPasskey = onRegisterPasskey)
 
             Spacer(Modifier.height(16.dp))
 
@@ -129,6 +132,7 @@ fun PlayerScreen(
                 isDownloaded = isDownloaded,
                 onFavorite = onFavorite,
                 onDownload = onDownload,
+                onRemoveDownload = onRemoveDownload,
                 onShare = onShare
             )
 
@@ -174,7 +178,7 @@ fun PlayerScreen(
 
 
 @Composable
-fun TopRow(onClose: () -> Unit) {
+fun TopRow(onClose: () -> Unit, onRegisterPasskey: () -> Unit = {}) {
     var showMenu by remember { mutableStateOf(false) }
     
     Row(
@@ -229,9 +233,13 @@ fun TopRow(onClose: () -> Unit) {
 fun IconButtonCircle(onClick: () -> Unit = {}, content: @Composable BoxScope.() -> Unit) {
     Box(
         modifier = Modifier
-            .size(32.dp)
+            .size(44.dp) // Android minimum touch target
             .clip(CircleShape)
-            .clickable(onClick = onClick)
+            .clickable(
+                onClick = onClick,
+                indication = null,
+                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+            )
             .background(Color.Transparent),
         contentAlignment = Alignment.Center,
         content = content
@@ -418,6 +426,7 @@ fun MidControlsRow(
     isDownloaded: Boolean = false,
     onFavorite: () -> Unit,
     onDownload: () -> Unit,
+    onRemoveDownload: () -> Unit = {},
     onShare: () -> Unit
 ) {
     // Animation states
@@ -425,6 +434,67 @@ fun MidControlsRow(
     var downloadPressed by remember { mutableStateOf(false) }
     var sharePressed by remember { mutableStateOf(false) }
     var downloadSuccess by remember { mutableStateOf(false) }
+    
+    // Dialog states
+    var showDownloadConfirm by remember { mutableStateOf(false) }
+    var showRemoveWarning by remember { mutableStateOf(false) }
+    
+    // Download confirmation dialog
+    if (showDownloadConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDownloadConfirm = false },
+            title = { Text("Download Track?", color = Color.White) },
+            text = { 
+                Text(
+                    "Save this track for offline listening. You can remove it later from the player menu.",
+                    color = Color.White.copy(alpha = 0.8f)
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showDownloadConfirm = false
+                    downloadPressed = true
+                    onDownload()
+                }) {
+                    Text("Download", color = Color(0xFFE90060))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDownloadConfirm = false }) {
+                    Text("Cancel", color = Color.Gray)
+                }
+            },
+            containerColor = Color(0xFF1A1A2E)
+        )
+    }
+    
+    // Remove download warning dialog
+    if (showRemoveWarning) {
+        AlertDialog(
+            onDismissRequest = { showRemoveWarning = false },
+            title = { Text("Remove Download?", color = Color.White) },
+            text = { 
+                Text(
+                    "This track will be removed from your device. You'll need to download it again to listen offline.",
+                    color = Color.White.copy(alpha = 0.8f)
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showRemoveWarning = false
+                    onRemoveDownload()
+                }) {
+                    Text("Remove", color = Color(0xFFE90060))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRemoveWarning = false }) {
+                    Text("Keep", color = Color.Gray)
+                }
+            },
+            containerColor = Color(0xFF1A1A2E)
+        )
+    }
     
     // Scale animations
     val favoriteScale by animateFloatAsState(
@@ -444,7 +514,8 @@ fun MidControlsRow(
     )
     
     Row(
-        horizontalArrangement = Arrangement.spacedBy(36.dp),
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically
     ) {
         // Favorite button with bounce animation
@@ -460,16 +531,17 @@ fun MidControlsRow(
             )
         }
         
-        // Download button - shows check when downloaded
+        // Download button - shows check when downloaded, tapping again shows remove warning
         IconButtonCircle(onClick = {
             if (!isDownloaded) {
-                downloadPressed = true
-                onDownload()
+                showDownloadConfirm = true
+            } else {
+                showRemoveWarning = true
             }
         }) {
             Icon(
                 imageVector = if (isDownloaded) Icons.Default.Check else Icons.Default.Download,
-                contentDescription = if (isDownloaded) "Downloaded" else "Download",
+                contentDescription = if (isDownloaded) "Downloaded - tap to remove" else "Download",
                 tint = if (isDownloaded) Color(0xFF4CAF50) else Color(0xFFF48FFF),
                 modifier = Modifier.graphicsLayer { scaleX = downloadScale; scaleY = downloadScale }
             )
@@ -656,8 +728,6 @@ fun PlayButton(isPlaying: Boolean, onClick: () -> Unit) {
 
 enum class VisualizerType {
     Graffiti,
-    MultiWave,
-    Bar,
     SingleWave
 }
 
@@ -671,7 +741,7 @@ fun WaveformVisualizer(
     // Get current theme style
     val theme = LocalBombestTheme.current
     val defaultType = if (theme.visualizerStyle == VisualizerThemeStyle.GRAFFITI) 
-        VisualizerType.Graffiti else VisualizerType.MultiWave
+        VisualizerType.Graffiti else VisualizerType.SingleWave
     
     // State for toggling modes
     var visualizerType by remember { mutableStateOf(defaultType) }
@@ -679,9 +749,7 @@ fun WaveformVisualizer(
     // Cycle modes on click
     val nextMode = {
         visualizerType = when (visualizerType) {
-            VisualizerType.Graffiti -> VisualizerType.MultiWave
-            VisualizerType.MultiWave -> VisualizerType.Bar
-            VisualizerType.Bar -> VisualizerType.SingleWave
+            VisualizerType.Graffiti -> VisualizerType.SingleWave
             VisualizerType.SingleWave -> VisualizerType.Graffiti
         }
     }
@@ -708,88 +776,8 @@ fun WaveformVisualizer(
                 val count = amplitudes.size
 
             when (visualizerType) {
-                VisualizerType.MultiWave -> {
-                    // 1. Multi-Wave (Kickass Style)
-                     val paths = listOf(
-                         Triple(1.0f, Color(0xFFC34CFF), 0.8f), // Primary
-                         Triple(0.7f, Color(0xFF4F7BFF), 0.5f), // Secondary (Blue-ish)
-                         Triple(1.2f, Color(0xFFFF6B81), 0.3f)  // Tertiary (Pink-ish, wider)
-                    )
-                    
-                    paths.forEachIndexed { index, (scaleY, color, alpha) ->
-                        val path = Path()
-                        path.moveTo(0f, centerY)
-                        val stepX = width / (count + 1)
-                        val points = mutableListOf<Offset>()
-                        points.add(Offset(0f, centerY))
-                        
-                        for (i in 0 until count) {
-                            val x = (i + 1) * stepX
-                            val rawAmp = amplitudes[i]
-                            val boost = if (index == 0) 2.5f else 2.0f
-                            val effectiveAmp = (rawAmp * boost).coerceAtMost(1f) * scaleY
-                            val yOffset = effectiveAmp * (height / 2f) * 0.9f
-                            points.add(Offset(x, centerY - yOffset))
-                        }
-                        points.add(Offset(width, centerY))
-                        
-                        // Smooth cubic to top
-                        path.moveTo(points[0].x, points[0].y)
-                        for (i in 1 until points.size) {
-                             val p0 = points[i-1]
-                             val p1 = points[i]
-                             val cx = (p0.x + p1.x) / 2
-                             path.cubicTo(cx, p0.y, cx, p1.y, p1.x, p1.y)
-                        }
-                        // Mirror bottom
-                        for (i in points.size - 2 downTo 0) {
-                             val p = points[i]
-                             val yBottom = centerY + (centerY - p.y)
-                             val prevP = points[i+1]
-                             val prevYBottom = centerY + (centerY - prevP.y)
-                             val cx = (p.x + prevP.x) / 2
-                             path.cubicTo(cx, prevYBottom, cx, yBottom, p.x, yBottom)
-                        }
-                        path.close()
-                        
-                        val brush = Brush.verticalGradient(
-                            colors = listOf(
-                                color.copy(alpha = 0f),
-                                color.copy(alpha = alpha),
-                                color.copy(alpha = alpha),
-                                color.copy(alpha = 0f)
-                            ),
-                            startY = 0f, endY = height
-                        )
-                        drawPath(path, brush = brush)
-                    }
-                }
-                VisualizerType.Bar -> {
-                    // 2. Bar Style (Classic)
-                    val stepX = width / count
-                    val barWidth = stepX * 0.6f // Gap
-                    
-                    for (i in 0 until count) {
-                        val x = i * stepX + (stepX - barWidth) / 2
-                        val amp = amplitudes[i] * 3.0f // Boost
-                        val barHeight = (amp * height).coerceAtMost(height)
-                        
-                        val brush = Brush.verticalGradient(
-                            colors = listOf(Color(0xFFC34CFF), Color(0xFF4F7BFF)),
-                            startY = centerY - barHeight/2,
-                            endY = centerY + barHeight/2
-                        )
-                        
-                        drawRoundRect(
-                            brush = brush,
-                            topLeft = Offset(x, centerY - barHeight / 2),
-                            size = Size(barWidth, barHeight),
-                            cornerRadius = CornerRadius(4.dp.toPx(), 4.dp.toPx())
-                        )
-                    }
-                }
                 VisualizerType.SingleWave -> {
-                    // 3. Single Line (Clean Oscilloscope)
+                    // Single Line (Clean Oscilloscope)
                     val path = Path()
                     path.moveTo(0f, centerY)
                     val stepX = width / (count + 1)

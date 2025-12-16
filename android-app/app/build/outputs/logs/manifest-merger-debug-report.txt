@@ -5,9 +5,10 @@ INJECTED from /Users/thomasphillips/bombest-audio/bombest-beats/android-app/app/
 INJECTED from /Users/thomasphillips/bombest-audio/bombest-beats/android-app/app/src/main/AndroidManifest.xml:2:1-55:12
 INJECTED from /Users/thomasphillips/bombest-audio/bombest-beats/android-app/app/src/main/AndroidManifest.xml:2:1-55:12
 MERGED from [androidx.media3:media3-session:1.2.1] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/a7af8a4b15f48cb6799c7ae214038116/transformed/jetified-media3-session-1.2.1/AndroidManifest.xml:17:1-22:12
+MERGED from [androidx.media3:media3-datasource-okhttp:1.2.1] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/b45916c2202952f07b68d1638724c9e3/transformed/jetified-media3-datasource-okhttp-1.2.1/AndroidManifest.xml:17:1-22:12
+MERGED from [androidx.media3:media3-datasource:1.2.1] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/1fc1a9cbf39fc6f4da0a797e22cc3ba4/transformed/jetified-media3-datasource-1.2.1/AndroidManifest.xml:17:1-22:12
 MERGED from [androidx.media3:media3-extractor:1.2.1] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/675e1fc37ae98e7ca8b1c59afa153c41/transformed/jetified-media3-extractor-1.2.1/AndroidManifest.xml:17:1-22:12
 MERGED from [androidx.media3:media3-container:1.2.1] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/198eec71ac298c687e0f342254a8c978/transformed/jetified-media3-container-1.2.1/AndroidManifest.xml:17:1-22:12
-MERGED from [androidx.media3:media3-datasource:1.2.1] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/1fc1a9cbf39fc6f4da0a797e22cc3ba4/transformed/jetified-media3-datasource-1.2.1/AndroidManifest.xml:17:1-22:12
 MERGED from [androidx.media3:media3-decoder:1.2.1] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/87bd50363100e01eae12d7f5566cc5b5/transformed/jetified-media3-decoder-1.2.1/AndroidManifest.xml:17:1-22:12
 MERGED from [androidx.media3:media3-database:1.2.1] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/89597c6d93df515046a3a09366f8a2c5/transformed/jetified-media3-database-1.2.1/AndroidManifest.xml:17:1-22:12
 MERGED from [androidx.media3:media3-common:1.2.1] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/b2a7289169abd256dee92b8f173ea925/transformed/jetified-media3-common-1.2.1/AndroidManifest.xml:17:1-24:12
@@ -51,20 +52,19 @@ MERGED from [androidx.compose.ui:ui-geometry-android:1.5.4] /Users/thomasphillip
 MERGED from [androidx.compose.ui:ui-util-android:1.5.4] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/4d510adf04852bcb287b077b13d391ec/transformed/jetified-ui-util-release/AndroidManifest.xml:2:1-7:12
 MERGED from [androidx.compose.ui:ui-text-android:1.5.4] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/b83755ce2a7c6d19f8efba93d7dcd87c/transformed/jetified-ui-text-release/AndroidManifest.xml:2:1-7:12
 MERGED from [androidx.emoji2:emoji2:1.4.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/56600b35b5d9ccc340b34cf66d03550a/transformed/jetified-emoji2-1.4.0/AndroidManifest.xml:17:1-35:12
-MERGED from [androidx.lifecycle:lifecycle-process:2.7.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/a02338d63c6587bbb2ad94b2fa9e2ee9/transformed/jetified-lifecycle-process-2.7.0/AndroidManifest.xml:17:1-35:12
-MERGED from [androidx.lifecycle:lifecycle-livedata-core-ktx:2.7.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/3bd27979b3a590a371cc1cafc1c78c59/transformed/jetified-lifecycle-livedata-core-ktx-2.7.0/AndroidManifest.xml:2:1-7:12
-MERGED from [androidx.lifecycle:lifecycle-livedata:2.7.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/a6ad6e3119a8ada3c0af30955c5948f8/transformed/lifecycle-livedata-2.7.0/AndroidManifest.xml:17:1-22:12
-MERGED from [androidx.lifecycle:lifecycle-livedata-core:2.7.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/d77f7ada2634709c45d135b42b599684/transformed/lifecycle-livedata-core-2.7.0/AndroidManifest.xml:17:1-22:12
-MERGED from [androidx.lifecycle:lifecycle-viewmodel-savedstate:2.7.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/351d5e044f4bbe28332cf5f22ec1be46/transformed/jetified-lifecycle-viewmodel-savedstate-2.7.0/AndroidManifest.xml:17:1-22:12
-MERGED from [androidx.lifecycle:lifecycle-viewmodel-ktx:2.7.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/73bf9f051d20c3270ed0860a54d61013/transformed/jetified-lifecycle-viewmodel-ktx-2.7.0/AndroidManifest.xml:2:1-7:12
+MERGED from [androidx.lifecycle:lifecycle-process:2.6.2] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/d06646dd4384cfa5f933c458198a6c66/transformed/jetified-lifecycle-process-2.6.2/AndroidManifest.xml:17:1-35:12
+MERGED from [androidx.lifecycle:lifecycle-livedata:2.6.2] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/31f23fa78300123cc0119c76f5330ffc/transformed/lifecycle-livedata-2.6.2/AndroidManifest.xml:17:1-22:12
+MERGED from [androidx.lifecycle:lifecycle-livedata-core:2.6.2] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/a5136c85fe584e2a8ca605bf6c305ec1/transformed/lifecycle-livedata-core-2.6.2/AndroidManifest.xml:17:1-22:12
+MERGED from [androidx.lifecycle:lifecycle-viewmodel-savedstate:2.6.2] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/f064b5fcd7b0e6482bcbe46e434208e8/transformed/jetified-lifecycle-viewmodel-savedstate-2.6.2/AndroidManifest.xml:17:1-22:12
+MERGED from [androidx.lifecycle:lifecycle-viewmodel-ktx:2.6.2] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/994f591d3a1dc3e6b0c9efa1094ccbde/transformed/jetified-lifecycle-viewmodel-ktx-2.6.2/AndroidManifest.xml:17:1-22:12
 MERGED from [androidx.savedstate:savedstate-ktx:1.2.1] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/a58386d00961ac5ad2da44bfe101cebf/transformed/jetified-savedstate-ktx-1.2.1/AndroidManifest.xml:17:1-22:12
 MERGED from [androidx.savedstate:savedstate:1.2.1] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/b14ecac0926e5f1bd9c8a378ac55813a/transformed/jetified-savedstate-1.2.1/AndroidManifest.xml:17:1-22:12
-MERGED from [androidx.lifecycle:lifecycle-viewmodel:2.7.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/ba1491909b27c0fc37271415adc5e508/transformed/lifecycle-viewmodel-2.7.0/AndroidManifest.xml:17:1-22:12
+MERGED from [androidx.lifecycle:lifecycle-viewmodel:2.6.2] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/3dde92a97dd83a9b95f52c48597c6240/transformed/lifecycle-viewmodel-2.6.2/AndroidManifest.xml:17:1-22:12
 MERGED from [io.coil-kt:coil:2.5.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/253710bdbf633c0c15b63b037b24eef3/transformed/jetified-coil-2.5.0/AndroidManifest.xml:2:1-7:12
 MERGED from [io.coil-kt:coil-base:2.5.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/bcba8a2cb70fcbfd1359c6acc64b7acb/transformed/jetified-coil-base-2.5.0/AndroidManifest.xml:2:1-7:12
-MERGED from [androidx.lifecycle:lifecycle-runtime:2.7.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/a0d3b15bfdc1524dbba972e416d1b1ba/transformed/lifecycle-runtime-2.7.0/AndroidManifest.xml:2:1-7:12
-MERGED from [androidx.lifecycle:lifecycle-runtime-ktx:2.7.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/973981b8008b9cc337fac09592518b40/transformed/jetified-lifecycle-runtime-ktx-2.7.0/AndroidManifest.xml:17:1-22:12
-MERGED from [androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/3cccbe67205d135b1035d2cb3217f86d/transformed/jetified-lifecycle-viewmodel-compose-2.7.0/AndroidManifest.xml:2:1-7:12
+MERGED from [androidx.lifecycle:lifecycle-runtime:2.6.2] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/10bf0f2184a6032f29e5c52332997b22/transformed/lifecycle-runtime-2.6.2/AndroidManifest.xml:2:1-7:12
+MERGED from [androidx.lifecycle:lifecycle-runtime-ktx:2.6.2] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/358d2e695a328c43f7cca6c81f1dc180/transformed/jetified-lifecycle-runtime-ktx-2.6.2/AndroidManifest.xml:17:1-22:12
+MERGED from [androidx.lifecycle:lifecycle-viewmodel-compose:2.6.2] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/759c7a5f7d9e416f108e79080e55a698/transformed/jetified-lifecycle-viewmodel-compose-2.6.2/AndroidManifest.xml:17:1-22:12
 MERGED from [com.google.accompanist:accompanist-drawablepainter:0.32.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/d0ef220c38903de8745bcb9399e53317/transformed/jetified-accompanist-drawablepainter-0.32.0/AndroidManifest.xml:17:1-23:12
 MERGED from [androidx.compose.ui:ui-android:1.5.4] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/2cd6752a05e484bac1e6f3300b4df2ea/transformed/jetified-ui-release/AndroidManifest.xml:2:1-7:12
 MERGED from [androidx.activity:activity-ktx:1.8.2] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/a1ef989d23497444b7a494a4ee23952b/transformed/jetified-activity-ktx-1.8.2/AndroidManifest.xml:2:1-7:12
@@ -76,6 +76,7 @@ MERGED from [androidx.autofill:autofill:1.0.0] /Users/thomasphillips/.gradle/cac
 MERGED from [androidx.core:core:1.12.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/69e8964f3a5c80a3facf5cbbfe47ff96/transformed/core-1.12.0/AndroidManifest.xml:17:1-30:12
 MERGED from [androidx.customview:customview-poolingcontainer:1.0.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/fde1bd53290b89e65195c3cc2fe64524/transformed/jetified-customview-poolingcontainer-1.0.0/AndroidManifest.xml:17:1-23:12
 MERGED from [androidx.core:core-ktx:1.12.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/2c9d87cc25dd05d743c4174982008071/transformed/jetified-core-ktx-1.12.0/AndroidManifest.xml:2:1-7:12
+MERGED from [androidx.core:core-splashscreen:1.0.1] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/6b2c1c35a7184b26ecaacc83cccc47d5/transformed/jetified-core-splashscreen-1.0.1/AndroidManifest.xml:17:1-24:12
 MERGED from [androidx.datastore:datastore-preferences:1.0.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/e7a6d555f3ca679a57058344b5351051/transformed/jetified-datastore-preferences-1.0.0/AndroidManifest.xml:17:1-24:12
 MERGED from [androidx.annotation:annotation-experimental:1.3.1] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/d233bc0c80ec17db4a4e63c9b4799746/transformed/jetified-annotation-experimental-1.3.1/AndroidManifest.xml:17:1-22:12
 MERGED from [androidx.compose.runtime:runtime-saveable-android:1.5.4] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/97c0dab19ad6880f3bf789424de9c7d4/transformed/jetified-runtime-saveable-release/AndroidManifest.xml:2:1-7:12
@@ -143,8 +144,8 @@ MERGED from [com.google.android.gms:play-services-basement:18.2.0] /Users/thomas
 MERGED from [com.google.android.gms:play-services-basement:18.2.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/b9696b33c30596a881a47ea3701d399c/transformed/jetified-play-services-basement-18.2.0/AndroidManifest.xml:20:5-24:19
 MERGED from [androidx.emoji2:emoji2:1.4.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/56600b35b5d9ccc340b34cf66d03550a/transformed/jetified-emoji2-1.4.0/AndroidManifest.xml:23:5-33:19
 MERGED from [androidx.emoji2:emoji2:1.4.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/56600b35b5d9ccc340b34cf66d03550a/transformed/jetified-emoji2-1.4.0/AndroidManifest.xml:23:5-33:19
-MERGED from [androidx.lifecycle:lifecycle-process:2.7.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/a02338d63c6587bbb2ad94b2fa9e2ee9/transformed/jetified-lifecycle-process-2.7.0/AndroidManifest.xml:23:5-33:19
-MERGED from [androidx.lifecycle:lifecycle-process:2.7.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/a02338d63c6587bbb2ad94b2fa9e2ee9/transformed/jetified-lifecycle-process-2.7.0/AndroidManifest.xml:23:5-33:19
+MERGED from [androidx.lifecycle:lifecycle-process:2.6.2] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/d06646dd4384cfa5f933c458198a6c66/transformed/jetified-lifecycle-process-2.6.2/AndroidManifest.xml:23:5-33:19
+MERGED from [androidx.lifecycle:lifecycle-process:2.6.2] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/d06646dd4384cfa5f933c458198a6c66/transformed/jetified-lifecycle-process-2.6.2/AndroidManifest.xml:23:5-33:19
 MERGED from [androidx.core:core:1.12.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/69e8964f3a5c80a3facf5cbbfe47ff96/transformed/core-1.12.0/AndroidManifest.xml:28:5-89
 MERGED from [androidx.core:core:1.12.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/69e8964f3a5c80a3facf5cbbfe47ff96/transformed/core-1.12.0/AndroidManifest.xml:28:5-89
 MERGED from [androidx.versionedparcelable:versionedparcelable:1.1.1] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/374486c1cbf82a589cb84f6d53f0229c/transformed/versionedparcelable-1.1.1/AndroidManifest.xml:24:5-25:19
@@ -182,7 +183,7 @@ ADDED from /Users/thomasphillips/bombest-audio/bombest-beats/android-app/app/src
 	android:exported
 		ADDED from /Users/thomasphillips/bombest-audio/bombest-beats/android-app/app/src/main/AndroidManifest.xml:24:13-36
 	android:theme
-		ADDED from /Users/thomasphillips/bombest-audio/bombest-beats/android-app/app/src/main/AndroidManifest.xml:25:13-54
+		ADDED from /Users/thomasphillips/bombest-audio/bombest-beats/android-app/app/src/main/AndroidManifest.xml:25:13-61
 	android:name
 		ADDED from /Users/thomasphillips/bombest-audio/bombest-beats/android-app/app/src/main/AndroidManifest.xml:23:13-42
 intent-filter#action:name:android.intent.action.MAIN+category:name:android.intent.category.LAUNCHER
@@ -233,12 +234,14 @@ INJECTED from /Users/thomasphillips/bombest-audio/bombest-beats/android-app/app/
 INJECTED from /Users/thomasphillips/bombest-audio/bombest-beats/android-app/app/src/main/AndroidManifest.xml
 MERGED from [androidx.media3:media3-session:1.2.1] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/a7af8a4b15f48cb6799c7ae214038116/transformed/jetified-media3-session-1.2.1/AndroidManifest.xml:20:5-44
 MERGED from [androidx.media3:media3-session:1.2.1] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/a7af8a4b15f48cb6799c7ae214038116/transformed/jetified-media3-session-1.2.1/AndroidManifest.xml:20:5-44
+MERGED from [androidx.media3:media3-datasource-okhttp:1.2.1] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/b45916c2202952f07b68d1638724c9e3/transformed/jetified-media3-datasource-okhttp-1.2.1/AndroidManifest.xml:20:5-44
+MERGED from [androidx.media3:media3-datasource-okhttp:1.2.1] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/b45916c2202952f07b68d1638724c9e3/transformed/jetified-media3-datasource-okhttp-1.2.1/AndroidManifest.xml:20:5-44
+MERGED from [androidx.media3:media3-datasource:1.2.1] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/1fc1a9cbf39fc6f4da0a797e22cc3ba4/transformed/jetified-media3-datasource-1.2.1/AndroidManifest.xml:20:5-44
+MERGED from [androidx.media3:media3-datasource:1.2.1] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/1fc1a9cbf39fc6f4da0a797e22cc3ba4/transformed/jetified-media3-datasource-1.2.1/AndroidManifest.xml:20:5-44
 MERGED from [androidx.media3:media3-extractor:1.2.1] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/675e1fc37ae98e7ca8b1c59afa153c41/transformed/jetified-media3-extractor-1.2.1/AndroidManifest.xml:20:5-44
 MERGED from [androidx.media3:media3-extractor:1.2.1] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/675e1fc37ae98e7ca8b1c59afa153c41/transformed/jetified-media3-extractor-1.2.1/AndroidManifest.xml:20:5-44
 MERGED from [androidx.media3:media3-container:1.2.1] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/198eec71ac298c687e0f342254a8c978/transformed/jetified-media3-container-1.2.1/AndroidManifest.xml:20:5-44
 MERGED from [androidx.media3:media3-container:1.2.1] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/198eec71ac298c687e0f342254a8c978/transformed/jetified-media3-container-1.2.1/AndroidManifest.xml:20:5-44
-MERGED from [androidx.media3:media3-datasource:1.2.1] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/1fc1a9cbf39fc6f4da0a797e22cc3ba4/transformed/jetified-media3-datasource-1.2.1/AndroidManifest.xml:20:5-44
-MERGED from [androidx.media3:media3-datasource:1.2.1] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/1fc1a9cbf39fc6f4da0a797e22cc3ba4/transformed/jetified-media3-datasource-1.2.1/AndroidManifest.xml:20:5-44
 MERGED from [androidx.media3:media3-decoder:1.2.1] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/87bd50363100e01eae12d7f5566cc5b5/transformed/jetified-media3-decoder-1.2.1/AndroidManifest.xml:20:5-44
 MERGED from [androidx.media3:media3-decoder:1.2.1] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/87bd50363100e01eae12d7f5566cc5b5/transformed/jetified-media3-decoder-1.2.1/AndroidManifest.xml:20:5-44
 MERGED from [androidx.media3:media3-database:1.2.1] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/89597c6d93df515046a3a09366f8a2c5/transformed/jetified-media3-database-1.2.1/AndroidManifest.xml:20:5-44
@@ -325,34 +328,32 @@ MERGED from [androidx.compose.ui:ui-text-android:1.5.4] /Users/thomasphillips/.g
 MERGED from [androidx.compose.ui:ui-text-android:1.5.4] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/b83755ce2a7c6d19f8efba93d7dcd87c/transformed/jetified-ui-text-release/AndroidManifest.xml:5:5-44
 MERGED from [androidx.emoji2:emoji2:1.4.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/56600b35b5d9ccc340b34cf66d03550a/transformed/jetified-emoji2-1.4.0/AndroidManifest.xml:21:5-44
 MERGED from [androidx.emoji2:emoji2:1.4.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/56600b35b5d9ccc340b34cf66d03550a/transformed/jetified-emoji2-1.4.0/AndroidManifest.xml:21:5-44
-MERGED from [androidx.lifecycle:lifecycle-process:2.7.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/a02338d63c6587bbb2ad94b2fa9e2ee9/transformed/jetified-lifecycle-process-2.7.0/AndroidManifest.xml:21:5-44
-MERGED from [androidx.lifecycle:lifecycle-process:2.7.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/a02338d63c6587bbb2ad94b2fa9e2ee9/transformed/jetified-lifecycle-process-2.7.0/AndroidManifest.xml:21:5-44
-MERGED from [androidx.lifecycle:lifecycle-livedata-core-ktx:2.7.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/3bd27979b3a590a371cc1cafc1c78c59/transformed/jetified-lifecycle-livedata-core-ktx-2.7.0/AndroidManifest.xml:5:5-44
-MERGED from [androidx.lifecycle:lifecycle-livedata-core-ktx:2.7.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/3bd27979b3a590a371cc1cafc1c78c59/transformed/jetified-lifecycle-livedata-core-ktx-2.7.0/AndroidManifest.xml:5:5-44
-MERGED from [androidx.lifecycle:lifecycle-livedata:2.7.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/a6ad6e3119a8ada3c0af30955c5948f8/transformed/lifecycle-livedata-2.7.0/AndroidManifest.xml:20:5-44
-MERGED from [androidx.lifecycle:lifecycle-livedata:2.7.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/a6ad6e3119a8ada3c0af30955c5948f8/transformed/lifecycle-livedata-2.7.0/AndroidManifest.xml:20:5-44
-MERGED from [androidx.lifecycle:lifecycle-livedata-core:2.7.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/d77f7ada2634709c45d135b42b599684/transformed/lifecycle-livedata-core-2.7.0/AndroidManifest.xml:20:5-44
-MERGED from [androidx.lifecycle:lifecycle-livedata-core:2.7.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/d77f7ada2634709c45d135b42b599684/transformed/lifecycle-livedata-core-2.7.0/AndroidManifest.xml:20:5-44
-MERGED from [androidx.lifecycle:lifecycle-viewmodel-savedstate:2.7.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/351d5e044f4bbe28332cf5f22ec1be46/transformed/jetified-lifecycle-viewmodel-savedstate-2.7.0/AndroidManifest.xml:20:5-44
-MERGED from [androidx.lifecycle:lifecycle-viewmodel-savedstate:2.7.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/351d5e044f4bbe28332cf5f22ec1be46/transformed/jetified-lifecycle-viewmodel-savedstate-2.7.0/AndroidManifest.xml:20:5-44
-MERGED from [androidx.lifecycle:lifecycle-viewmodel-ktx:2.7.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/73bf9f051d20c3270ed0860a54d61013/transformed/jetified-lifecycle-viewmodel-ktx-2.7.0/AndroidManifest.xml:5:5-44
-MERGED from [androidx.lifecycle:lifecycle-viewmodel-ktx:2.7.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/73bf9f051d20c3270ed0860a54d61013/transformed/jetified-lifecycle-viewmodel-ktx-2.7.0/AndroidManifest.xml:5:5-44
+MERGED from [androidx.lifecycle:lifecycle-process:2.6.2] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/d06646dd4384cfa5f933c458198a6c66/transformed/jetified-lifecycle-process-2.6.2/AndroidManifest.xml:21:5-44
+MERGED from [androidx.lifecycle:lifecycle-process:2.6.2] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/d06646dd4384cfa5f933c458198a6c66/transformed/jetified-lifecycle-process-2.6.2/AndroidManifest.xml:21:5-44
+MERGED from [androidx.lifecycle:lifecycle-livedata:2.6.2] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/31f23fa78300123cc0119c76f5330ffc/transformed/lifecycle-livedata-2.6.2/AndroidManifest.xml:20:5-44
+MERGED from [androidx.lifecycle:lifecycle-livedata:2.6.2] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/31f23fa78300123cc0119c76f5330ffc/transformed/lifecycle-livedata-2.6.2/AndroidManifest.xml:20:5-44
+MERGED from [androidx.lifecycle:lifecycle-livedata-core:2.6.2] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/a5136c85fe584e2a8ca605bf6c305ec1/transformed/lifecycle-livedata-core-2.6.2/AndroidManifest.xml:20:5-44
+MERGED from [androidx.lifecycle:lifecycle-livedata-core:2.6.2] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/a5136c85fe584e2a8ca605bf6c305ec1/transformed/lifecycle-livedata-core-2.6.2/AndroidManifest.xml:20:5-44
+MERGED from [androidx.lifecycle:lifecycle-viewmodel-savedstate:2.6.2] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/f064b5fcd7b0e6482bcbe46e434208e8/transformed/jetified-lifecycle-viewmodel-savedstate-2.6.2/AndroidManifest.xml:20:5-44
+MERGED from [androidx.lifecycle:lifecycle-viewmodel-savedstate:2.6.2] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/f064b5fcd7b0e6482bcbe46e434208e8/transformed/jetified-lifecycle-viewmodel-savedstate-2.6.2/AndroidManifest.xml:20:5-44
+MERGED from [androidx.lifecycle:lifecycle-viewmodel-ktx:2.6.2] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/994f591d3a1dc3e6b0c9efa1094ccbde/transformed/jetified-lifecycle-viewmodel-ktx-2.6.2/AndroidManifest.xml:20:5-44
+MERGED from [androidx.lifecycle:lifecycle-viewmodel-ktx:2.6.2] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/994f591d3a1dc3e6b0c9efa1094ccbde/transformed/jetified-lifecycle-viewmodel-ktx-2.6.2/AndroidManifest.xml:20:5-44
 MERGED from [androidx.savedstate:savedstate-ktx:1.2.1] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/a58386d00961ac5ad2da44bfe101cebf/transformed/jetified-savedstate-ktx-1.2.1/AndroidManifest.xml:20:5-44
 MERGED from [androidx.savedstate:savedstate-ktx:1.2.1] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/a58386d00961ac5ad2da44bfe101cebf/transformed/jetified-savedstate-ktx-1.2.1/AndroidManifest.xml:20:5-44
 MERGED from [androidx.savedstate:savedstate:1.2.1] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/b14ecac0926e5f1bd9c8a378ac55813a/transformed/jetified-savedstate-1.2.1/AndroidManifest.xml:20:5-44
 MERGED from [androidx.savedstate:savedstate:1.2.1] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/b14ecac0926e5f1bd9c8a378ac55813a/transformed/jetified-savedstate-1.2.1/AndroidManifest.xml:20:5-44
-MERGED from [androidx.lifecycle:lifecycle-viewmodel:2.7.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/ba1491909b27c0fc37271415adc5e508/transformed/lifecycle-viewmodel-2.7.0/AndroidManifest.xml:20:5-44
-MERGED from [androidx.lifecycle:lifecycle-viewmodel:2.7.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/ba1491909b27c0fc37271415adc5e508/transformed/lifecycle-viewmodel-2.7.0/AndroidManifest.xml:20:5-44
+MERGED from [androidx.lifecycle:lifecycle-viewmodel:2.6.2] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/3dde92a97dd83a9b95f52c48597c6240/transformed/lifecycle-viewmodel-2.6.2/AndroidManifest.xml:20:5-44
+MERGED from [androidx.lifecycle:lifecycle-viewmodel:2.6.2] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/3dde92a97dd83a9b95f52c48597c6240/transformed/lifecycle-viewmodel-2.6.2/AndroidManifest.xml:20:5-44
 MERGED from [io.coil-kt:coil:2.5.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/253710bdbf633c0c15b63b037b24eef3/transformed/jetified-coil-2.5.0/AndroidManifest.xml:5:5-44
 MERGED from [io.coil-kt:coil:2.5.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/253710bdbf633c0c15b63b037b24eef3/transformed/jetified-coil-2.5.0/AndroidManifest.xml:5:5-44
 MERGED from [io.coil-kt:coil-base:2.5.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/bcba8a2cb70fcbfd1359c6acc64b7acb/transformed/jetified-coil-base-2.5.0/AndroidManifest.xml:5:5-44
 MERGED from [io.coil-kt:coil-base:2.5.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/bcba8a2cb70fcbfd1359c6acc64b7acb/transformed/jetified-coil-base-2.5.0/AndroidManifest.xml:5:5-44
-MERGED from [androidx.lifecycle:lifecycle-runtime:2.7.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/a0d3b15bfdc1524dbba972e416d1b1ba/transformed/lifecycle-runtime-2.7.0/AndroidManifest.xml:5:5-44
-MERGED from [androidx.lifecycle:lifecycle-runtime:2.7.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/a0d3b15bfdc1524dbba972e416d1b1ba/transformed/lifecycle-runtime-2.7.0/AndroidManifest.xml:5:5-44
-MERGED from [androidx.lifecycle:lifecycle-runtime-ktx:2.7.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/973981b8008b9cc337fac09592518b40/transformed/jetified-lifecycle-runtime-ktx-2.7.0/AndroidManifest.xml:20:5-44
-MERGED from [androidx.lifecycle:lifecycle-runtime-ktx:2.7.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/973981b8008b9cc337fac09592518b40/transformed/jetified-lifecycle-runtime-ktx-2.7.0/AndroidManifest.xml:20:5-44
-MERGED from [androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/3cccbe67205d135b1035d2cb3217f86d/transformed/jetified-lifecycle-viewmodel-compose-2.7.0/AndroidManifest.xml:5:5-44
-MERGED from [androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/3cccbe67205d135b1035d2cb3217f86d/transformed/jetified-lifecycle-viewmodel-compose-2.7.0/AndroidManifest.xml:5:5-44
+MERGED from [androidx.lifecycle:lifecycle-runtime:2.6.2] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/10bf0f2184a6032f29e5c52332997b22/transformed/lifecycle-runtime-2.6.2/AndroidManifest.xml:5:5-44
+MERGED from [androidx.lifecycle:lifecycle-runtime:2.6.2] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/10bf0f2184a6032f29e5c52332997b22/transformed/lifecycle-runtime-2.6.2/AndroidManifest.xml:5:5-44
+MERGED from [androidx.lifecycle:lifecycle-runtime-ktx:2.6.2] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/358d2e695a328c43f7cca6c81f1dc180/transformed/jetified-lifecycle-runtime-ktx-2.6.2/AndroidManifest.xml:20:5-44
+MERGED from [androidx.lifecycle:lifecycle-runtime-ktx:2.6.2] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/358d2e695a328c43f7cca6c81f1dc180/transformed/jetified-lifecycle-runtime-ktx-2.6.2/AndroidManifest.xml:20:5-44
+MERGED from [androidx.lifecycle:lifecycle-viewmodel-compose:2.6.2] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/759c7a5f7d9e416f108e79080e55a698/transformed/jetified-lifecycle-viewmodel-compose-2.6.2/AndroidManifest.xml:20:5-44
+MERGED from [androidx.lifecycle:lifecycle-viewmodel-compose:2.6.2] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/759c7a5f7d9e416f108e79080e55a698/transformed/jetified-lifecycle-viewmodel-compose-2.6.2/AndroidManifest.xml:20:5-44
 MERGED from [com.google.accompanist:accompanist-drawablepainter:0.32.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/d0ef220c38903de8745bcb9399e53317/transformed/jetified-accompanist-drawablepainter-0.32.0/AndroidManifest.xml:21:5-44
 MERGED from [com.google.accompanist:accompanist-drawablepainter:0.32.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/d0ef220c38903de8745bcb9399e53317/transformed/jetified-accompanist-drawablepainter-0.32.0/AndroidManifest.xml:21:5-44
 MERGED from [androidx.compose.ui:ui-android:1.5.4] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/2cd6752a05e484bac1e6f3300b4df2ea/transformed/jetified-ui-release/AndroidManifest.xml:5:5-44
@@ -375,6 +376,8 @@ MERGED from [androidx.customview:customview-poolingcontainer:1.0.0] /Users/thoma
 MERGED from [androidx.customview:customview-poolingcontainer:1.0.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/fde1bd53290b89e65195c3cc2fe64524/transformed/jetified-customview-poolingcontainer-1.0.0/AndroidManifest.xml:20:5-21:38
 MERGED from [androidx.core:core-ktx:1.12.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/2c9d87cc25dd05d743c4174982008071/transformed/jetified-core-ktx-1.12.0/AndroidManifest.xml:5:5-44
 MERGED from [androidx.core:core-ktx:1.12.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/2c9d87cc25dd05d743c4174982008071/transformed/jetified-core-ktx-1.12.0/AndroidManifest.xml:5:5-44
+MERGED from [androidx.core:core-splashscreen:1.0.1] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/6b2c1c35a7184b26ecaacc83cccc47d5/transformed/jetified-core-splashscreen-1.0.1/AndroidManifest.xml:20:5-22:41
+MERGED from [androidx.core:core-splashscreen:1.0.1] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/6b2c1c35a7184b26ecaacc83cccc47d5/transformed/jetified-core-splashscreen-1.0.1/AndroidManifest.xml:20:5-22:41
 MERGED from [androidx.datastore:datastore-preferences:1.0.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/e7a6d555f3ca679a57058344b5351051/transformed/jetified-datastore-preferences-1.0.0/AndroidManifest.xml:20:5-22:41
 MERGED from [androidx.datastore:datastore-preferences:1.0.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/e7a6d555f3ca679a57058344b5351051/transformed/jetified-datastore-preferences-1.0.0/AndroidManifest.xml:20:5-22:41
 MERGED from [androidx.annotation:annotation-experimental:1.3.1] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/d233bc0c80ec17db4a4e63c9b4799746/transformed/jetified-annotation-experimental-1.3.1/AndroidManifest.xml:20:5-44
@@ -499,8 +502,8 @@ ADDED from [com.google.android.gms:play-services-basement:18.2.0] /Users/thomasp
 		ADDED from [com.google.android.gms:play-services-basement:18.2.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/b9696b33c30596a881a47ea3701d399c/transformed/jetified-play-services-basement-18.2.0/AndroidManifest.xml:22:13-58
 provider#androidx.startup.InitializationProvider
 ADDED from [androidx.emoji2:emoji2:1.4.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/56600b35b5d9ccc340b34cf66d03550a/transformed/jetified-emoji2-1.4.0/AndroidManifest.xml:24:9-32:20
-MERGED from [androidx.lifecycle:lifecycle-process:2.7.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/a02338d63c6587bbb2ad94b2fa9e2ee9/transformed/jetified-lifecycle-process-2.7.0/AndroidManifest.xml:24:9-32:20
-MERGED from [androidx.lifecycle:lifecycle-process:2.7.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/a02338d63c6587bbb2ad94b2fa9e2ee9/transformed/jetified-lifecycle-process-2.7.0/AndroidManifest.xml:24:9-32:20
+MERGED from [androidx.lifecycle:lifecycle-process:2.6.2] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/d06646dd4384cfa5f933c458198a6c66/transformed/jetified-lifecycle-process-2.6.2/AndroidManifest.xml:24:9-32:20
+MERGED from [androidx.lifecycle:lifecycle-process:2.6.2] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/d06646dd4384cfa5f933c458198a6c66/transformed/jetified-lifecycle-process-2.6.2/AndroidManifest.xml:24:9-32:20
 MERGED from [androidx.profileinstaller:profileinstaller:1.3.1] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/84e6ba6bda4223a5cde051d052678b94/transformed/jetified-profileinstaller-1.3.1/AndroidManifest.xml:24:9-32:20
 MERGED from [androidx.profileinstaller:profileinstaller:1.3.1] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/84e6ba6bda4223a5cde051d052678b94/transformed/jetified-profileinstaller-1.3.1/AndroidManifest.xml:24:9-32:20
 MERGED from [androidx.startup:startup-runtime:1.1.1] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/b09f3952517536966c24087bdd0390e9/transformed/jetified-startup-runtime-1.1.1/AndroidManifest.xml:26:9-30:34
@@ -520,11 +523,11 @@ ADDED from [androidx.emoji2:emoji2:1.4.0] /Users/thomasphillips/.gradle/caches/8
 	android:name
 		ADDED from [androidx.emoji2:emoji2:1.4.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/56600b35b5d9ccc340b34cf66d03550a/transformed/jetified-emoji2-1.4.0/AndroidManifest.xml:30:17-75
 meta-data#androidx.lifecycle.ProcessLifecycleInitializer
-ADDED from [androidx.lifecycle:lifecycle-process:2.7.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/a02338d63c6587bbb2ad94b2fa9e2ee9/transformed/jetified-lifecycle-process-2.7.0/AndroidManifest.xml:29:13-31:52
+ADDED from [androidx.lifecycle:lifecycle-process:2.6.2] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/d06646dd4384cfa5f933c458198a6c66/transformed/jetified-lifecycle-process-2.6.2/AndroidManifest.xml:29:13-31:52
 	android:value
-		ADDED from [androidx.lifecycle:lifecycle-process:2.7.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/a02338d63c6587bbb2ad94b2fa9e2ee9/transformed/jetified-lifecycle-process-2.7.0/AndroidManifest.xml:31:17-49
+		ADDED from [androidx.lifecycle:lifecycle-process:2.6.2] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/d06646dd4384cfa5f933c458198a6c66/transformed/jetified-lifecycle-process-2.6.2/AndroidManifest.xml:31:17-49
 	android:name
-		ADDED from [androidx.lifecycle:lifecycle-process:2.7.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/a02338d63c6587bbb2ad94b2fa9e2ee9/transformed/jetified-lifecycle-process-2.7.0/AndroidManifest.xml:30:17-78
+		ADDED from [androidx.lifecycle:lifecycle-process:2.6.2] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/d06646dd4384cfa5f933c458198a6c66/transformed/jetified-lifecycle-process-2.6.2/AndroidManifest.xml:30:17-78
 permission#${applicationId}.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION
 ADDED from [androidx.core:core:1.12.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/69e8964f3a5c80a3facf5cbbfe47ff96/transformed/core-1.12.0/AndroidManifest.xml:22:5-24:47
 	android:protectionLevel

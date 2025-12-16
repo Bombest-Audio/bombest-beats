@@ -1,17 +1,13 @@
 package com.bombest.music.data.repository
 
 import android.content.Context
-import androidx.datastore.core.DataStore
-import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
-import androidx.datastore.preferences.preferencesDataStore
 import com.bombest.music.data.api.*
+import com.bombest.music.data.authDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
-
-private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "auth")
 
 class AuthRepository(private val context: Context, private val authApi: AuthApi) {
     
@@ -22,15 +18,15 @@ class AuthRepository(private val context: Context, private val authApi: AuthApi)
         private val ROLE_KEY = stringPreferencesKey("role")
     }
     
-    val isLoggedIn: Flow<Boolean> = context.dataStore.data.map { prefs ->
+    val isLoggedIn: Flow<Boolean> = context.authDataStore.data.map { prefs ->
         prefs[TOKEN_KEY] != null
     }
     
-    val token: Flow<String?> = context.dataStore.data.map { prefs ->
+    val token: Flow<String?> = context.authDataStore.data.map { prefs ->
         prefs[TOKEN_KEY]
     }
     
-    val currentUser: Flow<User?> = context.dataStore.data.map { prefs ->
+    val currentUser: Flow<User?> = context.authDataStore.data.map { prefs ->
         val id = prefs[USER_ID_KEY]?.toIntOrNull()
         val username = prefs[USERNAME_KEY]
         val role = prefs[ROLE_KEY]
@@ -99,13 +95,13 @@ class AuthRepository(private val context: Context, private val authApi: AuthApi)
     }
     
     suspend fun logout() {
-        context.dataStore.edit { prefs ->
+        context.authDataStore.edit { prefs ->
             prefs.clear()
         }
     }
     
     private suspend fun saveAuth(token: String, user: User) {
-        context.dataStore.edit { prefs ->
+        context.authDataStore.edit { prefs ->
             prefs[TOKEN_KEY] = token
             prefs[USER_ID_KEY] = user.id.toString()
             prefs[USERNAME_KEY] = user.username
@@ -114,6 +110,6 @@ class AuthRepository(private val context: Context, private val authApi: AuthApi)
     }
     
     suspend fun getTokenSync(): String? {
-        return context.dataStore.data.first()[TOKEN_KEY]
+        return context.authDataStore.data.first()[TOKEN_KEY]
     }
 }

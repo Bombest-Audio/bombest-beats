@@ -36,7 +36,7 @@
         <activity
             android:name="com.bombest.music.LoginActivity"
             android:exported="true"
-            android:theme="@style/Theme.BombestBeats" >
+            android:theme="@style/Theme.BombestBeats.Splash" >
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
 

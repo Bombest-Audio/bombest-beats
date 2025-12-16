@@ -36,18 +36,30 @@ import com.bombest.music.ui.theme.BombestBeatsTheme
 import com.bombest.music.ui.viewmodel.MainViewModel
 import com.bombest.music.ui.viewmodel.PlaylistViewModel
 import kotlinx.coroutines.launch
+import com.bombest.music.data.PasskeyManager
+import com.bombest.music.data.repository.AuthRepository
+import com.bombest.music.data.NetworkModule
+import android.widget.Toast
 
 
 enum class Screen {
-    LIBRARY, PLAYLISTS, PLAYLIST_DETAIL, DASHBOARD, UPLOAD
+    LIBRARY, PLAYLISTS, PLAYLIST_DETAIL, DASHBOARD, UPLOAD, ACCOUNT
 }
 
 class MainActivity : ComponentActivity() {
     
     private val mainViewModel: MainViewModel by viewModels()
+    private lateinit var passkeyManager: PasskeyManager
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        
+        // Initialize PasskeyManager
+        val authRepository = AuthRepository(this, NetworkModule.authApi)
+        passkeyManager = PasskeyManager(this, authRepository)
+        
+        // Initialize DownloadManager
+        mainViewModel.initDownloadManager(this)
         
         WindowCompat.setDecorFitsSystemWindows(window, false)
         window.statusBarColor = android.graphics.Color.TRANSPARENT
@@ -59,13 +71,28 @@ class MainActivity : ComponentActivity() {
                     viewModel = mainViewModel,
                     onShare = { title, artist -> shareTrack(title, artist) },
                     onLogout = {
+                        // Stop playback first
+                        mainViewModel.stop()
                         lifecycleScope.launch {
                             authDataStore.edit { it.clear() }
-                            startActivity(Intent(this@MainActivity, LoginActivity::class.java))
+                            val intent = Intent(this@MainActivity, LoginActivity::class.java)
+                            intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+                            startActivity(intent)
                             finish()
                         }
                     },
-                    onSMS = { title -> sendSMS(title) }
+                    onSMS = { title -> sendSMS(title) },
+                    onRegisterPasskey = {
+                        lifecycleScope.launch {
+                            val result = passkeyManager.registerPasskey()
+                            if (result.isSuccess) {
+                                Toast.makeText(this@MainActivity, "Passkey registered!", Toast.LENGTH_SHORT).show()
+                            } else {
+                                val error = result.exceptionOrNull()?.message ?: "Registration failed"
+                                Toast.makeText(this@MainActivity, error, Toast.LENGTH_LONG).show()
+                            }
+                        }
+                    }
                 )
             }
         }
@@ -99,7 +126,8 @@ fun MainContent(
     viewModel: MainViewModel,
     onShare: (title: String, artist: String) -> Unit,
     onLogout: () -> Unit,
-    onSMS: (title: String) -> Unit
+    onSMS: (title: String) -> Unit,
+    onRegisterPasskey: () -> Unit = {}
 ) {
     var isPlayerOpen by rememberSaveable { mutableStateOf(false) }
     var isMenuOpen by remember { mutableStateOf(false) }
@@ -128,7 +156,7 @@ fun MainContent(
                     topBar = {
                         TopAppBar(
                             title = { Text("bombest beats", fontWeight = FontWeight.Bold) },
-                            actions = {
+                            navigationIcon = {
                                 IconButton(onClick = { isMenuOpen = true }) {
                                     Icon(Icons.Default.Menu, contentDescription = "Menu", tint = Color.White)
                                 }
@@ -206,6 +234,13 @@ fun MainContent(
                     onBack = { currentScreen = Screen.LIBRARY }
                 )
             }
+            
+            Screen.ACCOUNT -> {
+                AccountScreen(
+                    onBack = { currentScreen = Screen.LIBRARY },
+                    onRegisterPasskey = onRegisterPasskey
+                )
+            }
         }
         
         if (isMenuOpen) {
@@ -227,6 +262,10 @@ fun MainContent(
                 onUpload = {
                     isMenuOpen = false
                     currentScreen = Screen.UPLOAD
+                },
+                onAccount = {
+                    isMenuOpen = false
+                    currentScreen = Screen.ACCOUNT
                 },
                 onLogout = {
                     isMenuOpen = false
@@ -260,11 +299,13 @@ fun MainContent(
                     isDownloaded = viewModel.downloads.value.contains(mediaItem.mediaId),
                     onFavorite = viewModel::onFavorite,
                     onDownload = viewModel::onDownload,
+                    onRemoveDownload = viewModel::onRemoveDownload,
                     onShare = {
                         val title = mediaItem.mediaMetadata.title?.toString() ?: "Unknown"
                         val artist = mediaItem.mediaMetadata.artist?.toString() ?: "Unknown"
                         onShare(title, artist)
                     },
+                    onRegisterPasskey = onRegisterPasskey,
                     onClose = { isPlayerOpen = false }
                 )
             }
@@ -279,6 +320,7 @@ fun MenuOverlay(
     onPlaylists: () -> Unit,
     onDashboard: () -> Unit,
     onUpload: () -> Unit,
+    onAccount: () -> Unit,
     onLogout: () -> Unit
 ) {
     Box(
@@ -306,6 +348,7 @@ fun MenuOverlay(
             MenuItem("Playlists", onClick = onPlaylists)
             MenuItem("Dashboard", onClick = onDashboard)
             MenuItem("Upload", onClick = onUpload)
+            MenuItem("Account Settings", onClick = onAccount)
             
             Spacer(modifier = Modifier.weight(1f))
             

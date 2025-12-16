@@ -16,6 +16,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -25,35 +27,42 @@ import retrofit2.converter.moshi.MoshiConverterFactory
 import retrofit2.http.GET
 import retrofit2.http.Query
 import java.util.concurrent.TimeUnit
+import com.bombest.music.data.authDataStore
+import com.bombest.music.data.AuthPreferences
 
-data class DashboardStats(
-    val total_plays: Int,
-    val unique_tracks: Int,
-    val users: List<UserStats>? = null
-)
-
+// User in the dashboard user filter dropdown
 data class UserStats(
-    val user_id: Int,
-    val username: String,
-    val play_count: Int
+    val id: Int,
+    val username: String
 )
 
+// Track in top tracks list
 data class TrackStats(
-    val track_id: Int,
-    val title: String,
-    val play_count: Int
+    val id: Int,
+    val title: String?,
+    val artist: String?,
+    val plays: Int
+)
+
+// Daily play count for chart
+data class DailyPlay(
+    val date: String,
+    val count: Int
 )
 
 data class DashboardResponse(
     val total_plays: Int,
-    val unique_tracks: Int,
     val top_tracks: List<TrackStats>,
+    val daily_plays: List<DailyPlay>,
     val users: List<UserStats>?
 )
 
 interface DashboardApi {
-    @GET("dashboard")
-    suspend fun getDashboard(@Query("user_id") userId: Int? = null): DashboardResponse
+    @GET("metrics/dashboard")
+    suspend fun getDashboard(
+        @retrofit2.http.Header("Authorization") auth: String,
+        @Query("user_id") userId: Int? = null
+    ): DashboardResponse
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -64,6 +73,16 @@ fun DashboardScreen(onBack: () -> Unit) {
     var error by remember { mutableStateOf<String?>(null) }
     var selectedUserId by remember { mutableStateOf<Int?>(null) }
     val scope = rememberCoroutineScope()
+    
+    // Get stored auth token from DataStore
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var authToken by remember { mutableStateOf<String?>(null) }
+    
+    LaunchedEffect(Unit) {
+        authToken = context.authDataStore.data
+            .map { it[AuthPreferences.TOKEN_KEY] }
+            .first()
+    }
     
     val dashboardApi = remember {
         val logging = HttpLoggingInterceptor().apply {
@@ -84,11 +103,16 @@ fun DashboardScreen(onBack: () -> Unit) {
     }
     
     fun loadDashboard(userId: Int? = null) {
+        if (authToken == null) {
+            error = "Not authenticated"
+            isLoading = false
+            return
+        }
         scope.launch {
             isLoading = true
             try {
                 stats = withContext(Dispatchers.IO) {
-                    dashboardApi.getDashboard(userId)
+                    dashboardApi.getDashboard("Bearer $authToken", userId)
                 }
             } catch (e: Exception) {
                 error = e.message
@@ -168,8 +192,8 @@ fun DashboardScreen(onBack: () -> Unit) {
                                 modifier = Modifier.weight(1f)
                             )
                             StatCard(
-                                title = "Unique Tracks",
-                                value = stats?.unique_tracks?.toString() ?: "0",
+                                title = "Top Tracks",
+                                value = stats?.top_tracks?.size?.toString() ?: "0",
                                 modifier = Modifier.weight(1f)
                             )
                         }
@@ -202,7 +226,7 @@ fun UserFilter(
     onUserSelected: (Int?) -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
-    val selectedUser = users.find { it.user_id == selectedUserId }
+    val selectedUser = users.find { it.id == selectedUserId }
     
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -250,9 +274,9 @@ fun UserFilter(
                     )
                     users.forEach { user ->
                         DropdownMenuItem(
-                            text = { Text("${user.username} (${user.play_count} plays)") },
+                            text = { Text(user.username) },
                             onClick = {
-                                onUserSelected(user.user_id)
+                                onUserSelected(user.id)
                                 expanded = false
                             }
                         )
@@ -305,13 +329,13 @@ fun TrackStatItem(track: TrackStats) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = track.title,
+                text = track.title ?: "Unknown",
                 color = Color.White,
                 fontSize = 16.sp,
                 modifier = Modifier.weight(1f)
             )
             Text(
-                text = "${track.play_count} plays",
+                text = "${track.plays} plays",
                 color = Color(0xFFE90060),
                 fontWeight = FontWeight.Medium
             )

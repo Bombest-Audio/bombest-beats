@@ -1,0 +1,15 @@
+[
+    {
+        "relation": [
+            "delegate_permission/common.handle_all_urls",
+            "delegate_permission/common.get_login_creds"
+        ],
+        "target": {
+            "namespace": "android_app",
+            "package_name": "com.bombest.music",
+            "sha256_cert_fingerprints": [
+                "2C:A4:5B:A8:27:2C:C9:57:F9:AC:0D:DA:85:D5:F1:CF:D9:DF:F8:49:34:C8:58:52:4B:C4:34:5B:30:99:36:E8"
+            ]
+        }
+    }
+]

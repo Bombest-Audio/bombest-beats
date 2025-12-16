@@ -18,6 +18,8 @@ import com.google.common.util.concurrent.MoreExecutors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import com.bombest.music.data.DownloadManager
+import com.bombest.music.data.repository.MusicRepository
 
 class MainViewModel : ViewModel() {
 
@@ -44,6 +46,10 @@ class MainViewModel : ViewModel() {
     
     // Connection Future
     private var browserFuture: ListenableFuture<MediaBrowser>? = null
+    
+    // Download Manager
+    private var downloadManager: DownloadManager? = null
+    private val musicRepository = MusicRepository()
 
     // Visualizer State - now uses server-side pre-computed waveform data
     val visualizerAmplitudes = mutableStateListOf<Float>()
@@ -431,6 +437,11 @@ class MainViewModel : ViewModel() {
         mediaBrowser?.seekTo(positionMs)
         currentPosition.value = positionMs
     }
+    
+    fun stop() {
+        mediaBrowser?.stop()
+        stopProgressLoop()
+    }
 
     fun toggleShuffle() {
         mediaBrowser?.let {
@@ -624,13 +635,49 @@ class MainViewModel : ViewModel() {
 
     fun onDownload() {
         val trackId = currentMediaItem.value?.mediaId ?: return
-        val currentDownloads = downloads.value.toMutableSet()
-        if (!currentDownloads.contains(trackId)) {
-            currentDownloads.add(trackId)
-            downloads.value = currentDownloads
-            android.util.Log.d("MainViewModel", "Track downloaded: $trackId")
-        } else {
-            android.util.Log.d("MainViewModel", "Track already downloaded: $trackId")
+        val dm = downloadManager ?: return
+        
+        viewModelScope.launch {
+            val streamUrl = musicRepository.getStreamUrl(trackId.toIntOrNull() ?: return@launch)
+            val result = dm.downloadTrack(trackId, streamUrl)
+            
+            if (result.isSuccess) {
+                val currentDownloads = downloads.value.toMutableSet()
+                currentDownloads.add(trackId)
+                downloads.value = currentDownloads
+                android.util.Log.d("MainViewModel", "Track downloaded: $trackId")
+            } else {
+                android.util.Log.e("MainViewModel", "Download failed: ${result.exceptionOrNull()?.message}")
+            }
+        }
+    }
+    
+    fun onRemoveDownload() {
+        val trackId = currentMediaItem.value?.mediaId ?: return
+        val dm = downloadManager ?: return
+        
+        viewModelScope.launch {
+            val result = dm.removeDownload(trackId)
+            
+            if (result.isSuccess) {
+                val currentDownloads = downloads.value.toMutableSet()
+                currentDownloads.remove(trackId)
+                downloads.value = currentDownloads
+                android.util.Log.d("MainViewModel", "Download removed: $trackId")
+            } else {
+                android.util.Log.e("MainViewModel", "Remove failed: ${result.exceptionOrNull()?.message}")
+            }
+        }
+    }
+    
+    fun initDownloadManager(context: Context) {
+        if (downloadManager == null) {
+            downloadManager = DownloadManager.getInstance(context)
+            // Load persisted download state
+            viewModelScope.launch {
+                val downloadedTracks = downloadManager?.getDownloadedTracks() ?: emptySet()
+                downloads.value = downloadedTracks
+            }
         }
     }
 

@@ -6,11 +6,38 @@ import retrofit2.http.DELETE
 import retrofit2.http.GET
 import retrofit2.http.Header
 import retrofit2.http.Path
+import retrofit2.http.Query
+import com.squareup.moshi.Json
 
 // Response model for waveform data
 data class WaveformResponse(
     val peaks: List<Float>,
     val track_id: Int
+)
+
+// Dashboard models
+data class TopTrack(
+    val id: Int,
+    val title: String?,
+    val artist: String?,
+    val plays: Int
+)
+
+data class DailyPlay(
+    val date: String,
+    val count: Int
+)
+
+data class DashboardUser(
+    val id: Int,
+    val username: String
+)
+
+data class DashboardResponse(
+    val total_plays: Int,
+    val top_tracks: List<TopTrack>,
+    val daily_plays: List<DailyPlay>,
+    val users: List<DashboardUser>? = null
 )
 
 interface MusicApi {
@@ -27,4 +54,10 @@ interface MusicApi {
     suspend fun getWaveform(
         @Path("trackId") trackId: Int
     ): WaveformResponse
+    
+    @GET("metrics/dashboard")
+    suspend fun getDashboardStats(
+        @Header("Authorization") auth: String,
+        @Query("user_id") userId: Int? = null
+    ): DashboardResponse
 }
