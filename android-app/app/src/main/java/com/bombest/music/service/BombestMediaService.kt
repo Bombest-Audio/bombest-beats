@@ -14,6 +14,7 @@ import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
 import com.bombest.music.R
 import com.bombest.music.data.DownloadManager
+import com.bombest.music.data.MetricsManager
 import com.bombest.music.data.repository.MusicRepository
 import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
@@ -29,7 +30,7 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 class BombestMediaService : MediaLibraryService() {
 
     private var mediaSession: MediaLibrarySession? = null
-    private val repository = MusicRepository()
+    private val repository by lazy { MusicRepository(this) }
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     
     // Cache for MediaItems
@@ -56,6 +57,7 @@ class BombestMediaService : MediaLibraryService() {
 
     override fun onCreate() {
         super.onCreate()
+        android.util.Log.i("BombestMediaService", "onCreate called")
         
         // Audio Attributes
         val audioAttributes = androidx.media3.common.AudioAttributes.Builder()
@@ -76,6 +78,9 @@ class BombestMediaService : MediaLibraryService() {
         // Initialize DownloadManager for caching
         val downloadManager = DownloadManager.getInstance(this)
         
+        // Initialize MetricsManager
+        MetricsManager.init(this)
+
         // Create media source factory with caching
         val mediaSourceFactory = DefaultMediaSourceFactory(downloadManager.cacheDataSourceFactory)
         
@@ -84,7 +89,41 @@ class BombestMediaService : MediaLibraryService() {
             .setHandleAudioBecomingNoisy(true)
             .setLoadControl(loadControl)
             .setMediaSourceFactory(mediaSourceFactory)
+            .setWakeMode(androidx.media3.common.C.WAKE_MODE_NETWORK)
             .build()
+            
+        // Track playback for metrics
+        player.addListener(object : Player.Listener {
+            private var lastMediaId: String? = null
+            private var startTimeMs: Long = 0
+            
+            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                val now = System.currentTimeMillis()
+                
+                // Check if we should log the PREVIOUS track
+                if (lastMediaId != null && startTimeMs > 0) {
+                    val duration = now - startTimeMs
+                    // Log if played for more than 30 seconds
+                    if (duration > 30_000) {
+                         try {
+                             val trackId = lastMediaId!!.toInt()
+                             MetricsManager.logPlay(trackId)
+                         } catch (e: NumberFormatException) {
+                             // Ignore non-integer IDs (like "root")
+                         }
+                    }
+                }
+                
+                // Update for new track
+                lastMediaId = mediaItem?.mediaId
+                startTimeMs = now
+            }
+            
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                // Optional: handle pause/stop logic tracking if needed using rigorous state
+                // For MVP transition-based logging is usually sufficient for "plays"
+            }
+        })
         
         // Create a BitmapLoader for loading artwork
         val bitmapLoader = androidx.media3.session.CacheBitmapLoader(
@@ -105,6 +144,7 @@ class BombestMediaService : MediaLibraryService() {
                     session: MediaSession,
                     controller: MediaSession.ControllerInfo
                 ): MediaSession.ConnectionResult {
+                    android.util.Log.i("BombestMediaService", "onConnect: ${controller.packageName} connected")
                     // Add custom commands for Android Auto
                     val sessionCommands = MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon()
                         .add(shuffleCommand)
@@ -182,6 +222,7 @@ class BombestMediaService : MediaLibraryService() {
                     browser: MediaSession.ControllerInfo,
                     params: LibraryParams?
                 ): ListenableFuture<LibraryResult<MediaItem>> {
+                    android.util.Log.i("BombestMediaService", "onGetLibraryRoot: ${browser.packageName} requested root")
                     // Create root extras with content style hints
                     val rootExtras = Bundle().apply {
                         putBoolean(CONTENT_STYLE_SUPPORTED, true)
@@ -310,6 +351,10 @@ class BombestMediaService : MediaLibraryService() {
                 android.util.Log.d("BombestMediaService", "Fetched ${tracks.size} tracks")
                 
                 libraryItems.clear()
+                
+                // Create fallback artwork URI from drawable resource
+                val fallbackArtUri = Uri.parse("android.resource://${packageName}/${R.drawable.default_album_art}")
+                
                 val mediaItems = tracks.map { track ->
                     val artUrl = repository.getTrackArtUrl(track.id)
                     val artUri = Uri.parse(artUrl)
@@ -322,7 +367,7 @@ class BombestMediaService : MediaLibraryService() {
                                 .setTitle(track.displayTitle)
                                 .setArtist(track.displayArtist)
                                 .setAlbumTitle(track.album)
-                                .setArtworkUri(artUri)
+                                .setArtworkUri(fallbackArtUri) // Use local fallback that always works
                                 .setIsBrowsable(false)
                                 .setIsPlayable(true)
                                 .build()

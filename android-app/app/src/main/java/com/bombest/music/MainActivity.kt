@@ -12,11 +12,13 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -157,8 +159,18 @@ fun MainContent(
                         TopAppBar(
                             title = { Text("bombest beats", fontWeight = FontWeight.Bold) },
                             navigationIcon = {
-                                IconButton(onClick = { isMenuOpen = true }) {
-                                    Icon(Icons.Default.Menu, contentDescription = "Menu", tint = Color.White)
+                                IconButton(onClick = { 
+                                    if (viewModel.canNavigateUp.value) {
+                                        viewModel.navigateUp()
+                                    } else {
+                                        isMenuOpen = true 
+                                    }
+                                }) {
+                                    if (viewModel.canNavigateUp.value) {
+                                        Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
+                                    } else {
+                                        Icon(Icons.Default.Menu, contentDescription = "Menu", tint = Color.White)
+                                    }
                                 }
                             },
                             colors = TopAppBarDefaults.topAppBarColors(
@@ -183,11 +195,28 @@ fun MainContent(
                         LibraryScreen(
                             playlist = viewModel.playlist,
                             currentMediaItem = viewModel.currentMediaItem.value,
-                            onTrackClick = { item -> viewModel.playMedia(item) },
+                            onTrackClick = { item -> 
+                                if (item.mediaId == "playlists") {
+                                    // Switch to Playlists screen for rich UI
+                                    playlistViewModel.loadPlaylists()
+                                    currentScreen = Screen.PLAYLISTS
+                                } else if (item.mediaMetadata.isBrowsable == true) {
+                                    // Browse folder
+                                    viewModel.browseId(item.mediaId)
+                                } else {
+                                    // Play track
+                                    viewModel.playMedia(item) 
+                                }
+                            },
                             isRefreshing = viewModel.isRefreshing.value,
                             onRefresh = { viewModel.refreshLibrary() },
                             onDelete = { item -> viewModel.playlist.remove(item) }
                         )
+                        
+                        // Handle back button for library navigation
+                        BackHandler(enabled = viewModel.canNavigateUp.value) {
+                            viewModel.navigateUp()
+                        }
                     }
                 }
             }

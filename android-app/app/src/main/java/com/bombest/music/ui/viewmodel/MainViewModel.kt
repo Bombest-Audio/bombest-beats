@@ -21,7 +21,10 @@ import kotlinx.coroutines.launch
 import com.bombest.music.data.DownloadManager
 import com.bombest.music.data.repository.MusicRepository
 
-class MainViewModel : ViewModel() {
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
+
+class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     var mediaBrowser: MediaBrowser? = null
         private set
@@ -33,6 +36,8 @@ class MainViewModel : ViewModel() {
     val repeatMode = mutableStateOf(Player.REPEAT_MODE_OFF)
     val playlist = mutableStateListOf<MediaItem>()
     val isRefreshing = mutableStateOf(false)
+    val currentParentId = mutableStateOf("root")
+    val canNavigateUp = mutableStateOf(false)
     val favorites = mutableStateOf<Set<String>>(emptySet())
     val downloads = mutableStateOf<Set<String>>(emptySet()) // Track downloaded files
     
@@ -49,7 +54,7 @@ class MainViewModel : ViewModel() {
     
     // Download Manager
     private var downloadManager: DownloadManager? = null
-    private val musicRepository = MusicRepository()
+    private var musicRepository: MusicRepository? = null
 
     // Visualizer State - now uses server-side pre-computed waveform data
     val visualizerAmplitudes = mutableStateListOf<Float>()
@@ -470,41 +475,37 @@ class MainViewModel : ViewModel() {
     // ... existing playPause, skipNext ...
     
     private fun fetchChildren() {
-        android.util.Log.d("MainViewModel", "Fetching children...")
-        // We know the service has the "root" library
-        val future = mediaBrowser?.getLibraryRoot(null)
-        future?.addListener({
+        android.util.Log.d("MainViewModel", "Fetching children for ${currentParentId.value}...")
+        
+        // Use currentParentId
+        val parentId = currentParentId.value
+        
+        val childrenFuture = mediaBrowser?.getChildren(parentId, 0, Int.MAX_VALUE, null)
+        childrenFuture?.addListener({
              try {
-                 // Subscribe to updates for root
-                 val subFuture = mediaBrowser?.subscribe("root", null)
-                 subFuture?.addListener({
-                     try {
-                         val result = subFuture.get()
-                         android.util.Log.d("MainViewModel", "Subscribed to root: ${result.resultCode}")
-                     } catch (e: Exception) {
-                         android.util.Log.e("MainViewModel", "Subscription failed", e)
-                     }
-                 }, MoreExecutors.directExecutor())
-                 
-                 // Once root is ready, get children
-                 android.util.Log.d("MainViewModel", "Root ready, requesting children")
-                 val childrenFuture = mediaBrowser?.getChildren("root", 0, Int.MAX_VALUE, null)
-                 childrenFuture?.addListener({
-                     try {
-                         val result = childrenFuture.get()
-                         android.util.Log.d("MainViewModel", "Got children: ${result.value?.size}")
-                         playlist.clear()
-                         result.value?.let { playlist.addAll(it) }
-                     } catch(e: Exception) { 
-                        android.util.Log.e("MainViewModel", "Error getting children", e)
-                        e.printStackTrace() 
-                     }
-                 }, MoreExecutors.directExecutor())
+                 val result = childrenFuture.get()
+                 android.util.Log.d("MainViewModel", "Got children: ${result.value?.size}")
+                 playlist.clear()
+                 result.value?.let { playlist.addAll(it) }
              } catch(e: Exception) { 
-                android.util.Log.e("MainViewModel", "Error getting root", e)
-                e.printStackTrace()
+                android.util.Log.e("MainViewModel", "Error getting children", e)
+                e.printStackTrace() 
              }
         }, MoreExecutors.directExecutor())
+    }
+    
+    fun browseId(mediaId: String) {
+        currentParentId.value = mediaId
+        canNavigateUp.value = mediaId != "root"
+        fetchChildren()
+    }
+    
+    fun navigateUp(): Boolean {
+        if (currentParentId.value != "root") {
+            browseId("root")
+            return true
+        }
+        return false
     }
     
     // Public refresh function for pull-to-refresh
@@ -638,7 +639,8 @@ class MainViewModel : ViewModel() {
         val dm = downloadManager ?: return
         
         viewModelScope.launch {
-            val streamUrl = musicRepository.getStreamUrl(trackId.toIntOrNull() ?: return@launch)
+            val repo = musicRepository ?: MusicRepository(getApplication()) // Fallback
+            val streamUrl = repo.getStreamUrl(trackId.toIntOrNull() ?: return@launch)
             val result = dm.downloadTrack(trackId, streamUrl)
             
             if (result.isSuccess) {
@@ -673,6 +675,7 @@ class MainViewModel : ViewModel() {
     fun initDownloadManager(context: Context) {
         if (downloadManager == null) {
             downloadManager = DownloadManager.getInstance(context)
+            musicRepository = MusicRepository(context)
             // Load persisted download state
             viewModelScope.launch {
                 val downloadedTracks = downloadManager?.getDownloadedTracks() ?: emptySet()

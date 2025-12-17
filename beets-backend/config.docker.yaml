@@ -1,0 +1,15 @@
+directory: /app/music
+library: /app/music/library.db
+plugins: fetchart embedart scrub
+
+web:
+    host: 0.0.0.0
+    port: 8337
+    cors: '*'
+
+email:
+    smtp_server: "smtp.gmail.com"
+    smtp_port: 587
+    sender_email: "users_email@gmail.com"
+    password: "users_app_password"
+    recipient_email: "thomas@bombest.com"

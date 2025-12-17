@@ -14,6 +14,9 @@ from flask_jwt_extended import JWTManager, create_access_token, jwt_required, ge
 import bcrypt
 import smtplib
 import yaml
+import boto3
+from botocore.exceptions import ClientError
+from flask import redirect
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
@@ -29,6 +32,28 @@ app.config['JWT_SECRET_KEY'] = config.get('jwt_secret', 'dev-secret-key')
 app.config['JWT_ACCESS_TOKEN_EXPIRES'] = False # Non-expiring for simplicty in MVP
 jwt = JWTManager(app)
 CORS(app)
+
+# --- S3 Configuration ---
+S3_BUCKET = os.environ.get('S3_BUCKET')
+S3_REGION = os.environ.get('S3_REGION', 'auto')
+S3_ENDPOINT = os.environ.get('S3_ENDPOINT') # For Cloudflare R2 / MinIO
+AWS_ACCESS_KEY = os.environ.get('AWS_ACCESS_KEY_ID')
+AWS_SECRET_KEY = os.environ.get('AWS_SECRET_ACCESS_KEY')
+
+s3_client = None
+if S3_BUCKET and AWS_ACCESS_KEY and AWS_SECRET_KEY:
+    try:
+        s3_client = boto3.client(
+            's3',
+            region_name=S3_REGION,
+            endpoint_url=S3_ENDPOINT,
+            aws_access_key_id=AWS_ACCESS_KEY,
+            aws_secret_access_key=AWS_SECRET_KEY
+        )
+        print(f"✅ S3 Client initialized for bucket: {S3_BUCKET}")
+    except Exception as e:
+        print(f"❌ Failed to init S3: {e}")
+
 
 # --- Helpers ---
 def admin_required():
@@ -260,6 +285,31 @@ def upload_file():
                 conn.close()
             except Exception as db_err:
                 print(f"Warning: Could not update title in database: {db_err}")
+            
+            # --- S3 Upload ---
+            if s3_client:
+                try:
+                    conn = sqlite3.connect(LIBRARY_DB)
+                    cursor = conn.cursor()
+                    # Get the most recently added item again to be sure of path
+                    cursor.execute("SELECT path FROM items ORDER BY id DESC LIMIT 1")
+                    res = cursor.fetchone()
+                    conn.close()
+                    
+                    if res:
+                        final_path = res[0]
+                        if isinstance(final_path, bytes):
+                            final_path = final_path.decode('utf-8', errors='ignore')
+                            
+                        # Calculate Key
+                        rel_path = os.path.relpath(final_path, start=os.getcwd())
+                        if not rel_path.startswith('..'):
+                            print(f"Uploading to S3: {rel_path}")
+                            s3_client.upload_file(final_path, S3_BUCKET, rel_path)
+                except Exception as s3_err:
+                    print(f"❌ S3 Upload Failed: {s3_err}")
+                    # Non-blocking, we still return success for local import
+
             
             # Clean up uploaded file
             if os.path.exists(filepath):
@@ -1022,9 +1072,9 @@ from webauthn.helpers.structs import (
 )
 from webauthn.helpers import bytes_to_base64url, base64url_to_bytes
 
-RP_ID = "bom.best"
+RP_ID = "beats.bom.best"
 RP_NAME = "bombest beats"
-RP_ORIGIN_WEB = "https://bom.best"
+RP_ORIGIN_WEB = "https://beats.bom.best"
 # Android origin: android:apk-key-hash:<base64url of SHA256 fingerprint>
 # SHA256: 2C:A4:5B:A8:27:2C:C9:57:F9:AC:0D:DA:85:D5:F1:CF:D9:DF:F8:49:34:C8:58:52:4B:C4:34:5B:30:99:36:E8
 # Convert hex to bytes then base64url
@@ -1309,7 +1359,7 @@ def list_passkeys():
     passkeys = [dict(row) for row in cursor.fetchall()]
     conn.close()
     
-    return jsonify({'passkeys': passkeys})
+    return jsonify(passkeys)
 
 @app.route('/auth/change-password', methods=['POST'])
 @jwt_required()
@@ -1376,6 +1426,32 @@ def create_invite():
         return jsonify({'code': code}), 201
     finally:
         conn.close()
+
+@app.route('/.well-known/assetlinks.json')
+def assetlinks():
+    """Serve Android Asset Links for Passkey verification"""
+    # Use the calculated hash from above
+    fingerprint = _android_sha256_hex # "2CA45BA8..."
+    # Format as colon-separated octets for assetlinks
+    formatted_fingerprint = ":".join(fingerprint[i:i+2] for i in range(0, len(fingerprint), 2))
+    
+    return jsonify([{
+        "relation": ["delegate_permission/common.handle_all_urls"],
+        "target": {
+            "namespace": "android_app",
+            "package_name": "com.bombest.music",
+            "sha256_cert_fingerprints": [formatted_fingerprint]
+        }
+    }])
+
+@app.route('/.well-known/apple-app-site-association')
+def apple_association():
+    """Serve iOS Apple App Site Association for Passkey/WebCredentials"""
+    return jsonify({
+        "webcredentials": {
+            "apps": ["8C4A8V568P.best.bom.beats"]
+        }
+    })
 
 
 
@@ -1563,18 +1639,51 @@ def stream_track(track_id):
         # Decode bytes if needed (sqlite sometimes returns bytes for text fields if messed up)
         if isinstance(file_path, bytes):
             file_path = file_path.decode('utf-8', errors='ignore')
-            
+
+        # --- S3 Strategy ---
+        if s3_client:
+            # Assumes file structure in S3 mirrors local 'music/' folder
+            # Key: music/Artist/Album/File.mp3
+            # We try to determine the relative path from the current working directory to form the key
+            try:
+                # If path is absolute, make it relative to CWD (app root)
+                rel_path = os.path.relpath(file_path, start=os.getcwd())
+                if rel_path.startswith('..'):
+                    # Fallback if outside root, maybe just use basename?
+                    # For now, let's assume standard structure: ./music/...
+                    # If outside, we can't easily guess key without DB storing S3 key.
+                    # Fallback to local serve.
+                    pass 
+                else:
+                    # Generate Presigned URL
+                    try:
+                        url = s3_client.generate_presigned_url(
+                            'get_object',
+                            Params={'Bucket': S3_BUCKET, 'Key': rel_path},
+                            ExpiresIn=3600 # 1 hour link
+                        )
+                        return redirect(url)
+                    except ClientError as e:
+                        print(f"S3 Gen URL Error: {e}")
+                        # Fallback to local
+            except ValueError:
+                pass
+
+        # --- Local Strategy ---
         if not os.path.exists(file_path):
              return jsonify({'error': 'File not found on disk'}), 404
 
         mime_type, _ = mimetypes.guess_type(file_path)
-        if not mime_type:
-            mime_type = 'application/octet-stream' # Default fallback to force probing
+        # Force WAV if mime guess fails or is generic
+        if file_path.lower().endswith('.wav') and (not mime_type or mime_type == 'application/octet-stream'):
+            mime_type = 'audio/x-wav'
             
-        return send_file(file_path, mimetype=mime_type)
+        return send_file(file_path, mimetype=mime_type, conditional=True)
+
     except Exception as e:
-        print(f"Stream error: {e}")
         return jsonify({'error': str(e)}), 500
+
+# --- Artwork Routes ---
 
 @app.route('/album/<int:album_id>/art', methods=['GET'])
 def get_album_art(album_id):
@@ -1809,6 +1918,45 @@ def record_play():
     conn.close()
     
     return jsonify({'message': 'Play recorded'}), 200
+
+@app.route('/metrics/batch', methods=['POST'])
+@jwt_required()
+def batch_record_plays():
+    """Batch record play events to reduce server round-trips"""
+    try:
+        current_user_id = get_jwt_identity()
+        data = request.get_json()
+        events = data.get('events', [])
+        
+        if not events:
+            return jsonify({'message': 'No events processed'}), 200
+            
+        conn = sqlite3.connect('music/users.db')
+        cursor = conn.cursor()
+        
+        # Ensure table exists
+        cursor.execute('CREATE TABLE IF NOT EXISTS plays (id INTEGER PRIMARY KEY, track_id INTEGER, user_id INTEGER, played_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)')
+        
+        count = 0
+        for event in events:
+            track_id = event.get('track_id')
+            timestamp = event.get('timestamp') # Optional, default to now if None
+            
+            if track_id:
+                if timestamp:
+                    cursor.execute('INSERT INTO plays (track_id, user_id, played_at) VALUES (?, ?, ?)', (track_id, current_user_id, timestamp))
+                else:
+                    cursor.execute('INSERT INTO plays (track_id, user_id) VALUES (?, ?)', (track_id, current_user_id))
+                count += 1
+                
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'message': f'Successfully recorded {count} events'}), 201
+        
+    except Exception as e:
+        print(f"Batch metrics error: {e}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/metrics/dashboard', methods=['GET'])
 @admin_required()

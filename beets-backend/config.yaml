@@ -1,6 +1,6 @@
-directory: ~/bombest-beats/beets-backend/music
-library: ~/bombest-beats/beets-backend/music/library.db
-plugins: web fetchart embedart scrub chroma lyrics lastgenre
+directory: /Users/thomasphillips/bombest-audio/bombest-beats/beets-backend/music
+library: /Users/thomasphillips/bombest-audio/bombest-beats/beets-backend/music/library.db
+plugins: fetchart embedart scrub
 
 web:
     host: 0.0.0.0

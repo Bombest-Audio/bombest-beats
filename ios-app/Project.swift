@@ -7,7 +7,8 @@ let project = Project(
             name: "BombestBeats",
             destinations: .iOS,
             product: .app,
-            bundleId: "com.bombest.BombestBeats",
+            bundleId: "best.bom.beats",
+            deploymentTargets: .iOS("17.0"),
             infoPlist: .extendingDefault(
                 with: [
                     "UILaunchScreen": [
@@ -21,12 +22,21 @@ let project = Project(
                         "audio",
                         "fetch",
                         "processing"
-                    ]
+                    ],
+                    "NSFaceIDUsageDescription": "Use FaceID to sign in with your Passkey.",
+                    "NSLocalNetworkUsageDescription": "Bombest Beats needs to access your local server to play music."
                 ]
             ),
             sources: ["Targets/BombestBeats/Sources/**"],
             resources: ["Targets/BombestBeats/Resources/**"],
-            dependencies: []
+            entitlements: "BombestBeats.entitlements",
+            dependencies: [],
+            settings: .settings(
+                base: [
+                    "DEVELOPMENT_TEAM": "8C4A8V568P",
+                    "CODE_SIGN_STYLE": "Automatic"
+                ]
+            )
         )
     ]
 )

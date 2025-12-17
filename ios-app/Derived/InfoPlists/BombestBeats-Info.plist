@@ -25,6 +25,10 @@
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 	</dict>
+	<key>NSFaceIDUsageDescription</key>
+	<string>Use FaceID to sign in with your Passkey.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Bombest Beats needs to access your local server to play music.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

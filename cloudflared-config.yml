@@ -1,0 +1,7 @@
+tunnel: 4a638fa7-cbe1-453c-b360-95c56d17eaca
+credentials-file: /Users/thomasphillips/.cloudflared/4a638fa7-cbe1-453c-b360-95c56d17eaca.json
+
+ingress:
+  - hostname: beats.bom.best
+    service: http://localhost:8338
+  - service: http_status:404

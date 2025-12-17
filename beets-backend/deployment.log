@@ -1,0 +1,81 @@
+ * Serving Flask app 'upload_server'
+ * Debug mode: off
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8338
+ * Running on http://10.28.64.211:8338
+[33mPress CTRL+C to quit[0m
+127.0.0.1 - - [17/Dec/2025 12:11:57] "[33mGET /track/20/art HTTP/1.1[0m" 404 -
+127.0.0.1 - - [17/Dec/2025 12:11:57] "[33mGET /track/19/art HTTP/1.1[0m" 404 -
+127.0.0.1 - - [17/Dec/2025 12:11:57] "[33mGET /track/16/art HTTP/1.1[0m" 404 -
+127.0.0.1 - - [17/Dec/2025 12:11:57] "[33mGET /track/18/art HTTP/1.1[0m" 404 -
+127.0.0.1 - - [17/Dec/2025 12:11:57] "[33mGET /track/17/art HTTP/1.1[0m" 404 -
+127.0.0.1 - - [17/Dec/2025 12:11:57] "[33mGET /track/13/art HTTP/1.1[0m" 404 -
+127.0.0.1 - - [17/Dec/2025 12:11:57] "[33mGET /track/12/art HTTP/1.1[0m" 404 -
+127.0.0.1 - - [17/Dec/2025 12:11:57] "[33mGET /track/21/art HTTP/1.1[0m" 404 -
+127.0.0.1 - - [17/Dec/2025 12:11:57] "[33mGET /track/15/art HTTP/1.1[0m" 404 -
+127.0.0.1 - - [17/Dec/2025 12:11:57] "[33mGET /track/15/art HTTP/1.1[0m" 404 -
+127.0.0.1 - - [17/Dec/2025 12:11:57] "GET /waveform/16 HTTP/1.1" 200 -
+127.0.0.1 - - [17/Dec/2025 12:11:58] "GET /stream/15 HTTP/1.1" 200 -
+127.0.0.1 - - [17/Dec/2025 12:11:58] "[33mGET /track/16/art HTTP/1.1[0m" 404 -
+127.0.0.1 - - [17/Dec/2025 12:11:58] "GET /waveform/15 HTTP/1.1" 200 -
+127.0.0.1 - - [17/Dec/2025 12:11:58] "GET /waveform/15 HTTP/1.1" 200 -
+127.0.0.1 - - [17/Dec/2025 12:11:58] "[33mGET /track/15/art HTTP/1.1[0m" 404 -
+127.0.0.1 - - [17/Dec/2025 12:11:59] "[33mGET /track/14/art HTTP/1.1[0m" 404 -
+127.0.0.1 - - [17/Dec/2025 12:11:59] "[33mGET /track/15/art HTTP/1.1[0m" 404 -
+127.0.0.1 - - [17/Dec/2025 12:12:27] "GET /stream/13 HTTP/1.1" 200 -
+127.0.0.1 - - [17/Dec/2025 12:12:40] "[33mGET /track/15/art HTTP/1.1[0m" 404 -
+127.0.0.1 - - [17/Dec/2025 12:12:41] "GET /library HTTP/1.1" 200 -
+127.0.0.1 - - [17/Dec/2025 12:12:42] "GET /waveform/16 HTTP/1.1" 200 -
+127.0.0.1 - - [17/Dec/2025 12:12:42] "[33mGET /track/16/art HTTP/1.1[0m" 404 -
+127.0.0.1 - - [17/Dec/2025 12:12:42] "[33mGET /track/16/art HTTP/1.1[0m" 404 -
+127.0.0.1 - - [17/Dec/2025 12:12:44] "[35m[1mGET /stream/16 HTTP/1.1[0m" 206 -
+127.0.0.1 - - [17/Dec/2025 12:12:47] "GET /stream/21 HTTP/1.1" 200 -
+127.0.0.1 - - [17/Dec/2025 12:12:47] "[33mGET /track/21/art HTTP/1.1[0m" 404 -
+127.0.0.1 - - [17/Dec/2025 12:12:47] "[33mGET /track/21/art HTTP/1.1[0m" 404 -
+127.0.0.1 - - [17/Dec/2025 12:12:48] "[35m[1mGET /waveform/21 HTTP/1.1[0m" 500 -
+127.0.0.1 - - [17/Dec/2025 12:12:48] "GET /waveform/21 HTTP/1.1" 200 -
+127.0.0.1 - - [17/Dec/2025 12:14:23] "GET /waveform/15 HTTP/1.1" 200 -
+127.0.0.1 - - [17/Dec/2025 12:14:23] "[33mGET /track/15/art HTTP/1.1[0m" 404 -
+127.0.0.1 - - [17/Dec/2025 12:14:23] "[33mGET /track/15/art HTTP/1.1[0m" 404 -
+127.0.0.1 - - [17/Dec/2025 12:15:09] "[33mGET /track/15/art HTTP/1.1[0m" 404 -
+127.0.0.1 - - [17/Dec/2025 12:15:33] "[33mGET /track/15/art HTTP/1.1[0m" 404 -
+127.0.0.1 - - [17/Dec/2025 12:15:34] "[33mGET /track/15/art HTTP/1.1[0m" 404 -
+127.0.0.1 - - [17/Dec/2025 12:15:35] "[33mGET /track/13/art HTTP/1.1[0m" 404 -
+127.0.0.1 - - [17/Dec/2025 12:15:36] "[33mGET /track/13/art HTTP/1.1[0m" 404 -
+127.0.0.1 - - [17/Dec/2025 12:15:36] "[35m[1mGET /stream/13 HTTP/1.1[0m" 206 -
+127.0.0.1 - - [17/Dec/2025 12:15:36] "GET /waveform/13 HTTP/1.1" 200 -
+127.0.0.1 - - [17/Dec/2025 12:15:39] "[33mGET /track/12/art HTTP/1.1[0m" 404 -
+127.0.0.1 - - [17/Dec/2025 12:15:39] "[33mGET /track/12/art HTTP/1.1[0m" 404 -
+127.0.0.1 - - [17/Dec/2025 12:15:39] "GET /stream/12 HTTP/1.1" 200 -
+127.0.0.1 - - [17/Dec/2025 12:15:40] "GET /waveform/12 HTTP/1.1" 200 -
+127.0.0.1 - - [17/Dec/2025 13:28:27] "HEAD /library HTTP/1.1" 200 -
+127.0.0.1 - - [17/Dec/2025 13:32:29] "HEAD /library HTTP/1.1" 200 -
+127.0.0.1 - - [17/Dec/2025 13:39:18] "GET /.well-known/apple-app-site-association HTTP/1.1" 200 -
+127.0.0.1 - - [17/Dec/2025 13:39:26] "[31m[1mPOST /auth/login HTTP/1.1[0m" 400 -
+127.0.0.1 - - [17/Dec/2025 13:39:38] "POST /auth/login HTTP/1.1" 200 -
+127.0.0.1 - - [17/Dec/2025 13:39:38] "GET /library HTTP/1.1" 200 -
+127.0.0.1 - - [17/Dec/2025 13:39:38] "GET /playlists HTTP/1.1" 200 -
+127.0.0.1 - - [17/Dec/2025 13:39:41] "[33mGET /track/17/art HTTP/1.1[0m" 404 -
+127.0.0.1 - - [17/Dec/2025 13:39:41] "[35m[1mGET /stream/17 HTTP/1.1[0m" 206 -
+127.0.0.1 - - [17/Dec/2025 13:39:41] "[35m[1mGET /stream/17 HTTP/1.1[0m" 206 -
+127.0.0.1 - - [17/Dec/2025 13:39:41] "[35m[1mGET /stream/17 HTTP/1.1[0m" 206 -
+127.0.0.1 - - [17/Dec/2025 13:39:41] "[35m[1mGET /stream/17 HTTP/1.1[0m" 206 -
+127.0.0.1 - - [17/Dec/2025 13:39:41] "[35m[1mGET /stream/17 HTTP/1.1[0m" 206 -
+127.0.0.1 - - [17/Dec/2025 13:39:41] "[35m[1mGET /stream/17 HTTP/1.1[0m" 206 -
+127.0.0.1 - - [17/Dec/2025 13:39:42] "[33mGET /track/17/art HTTP/1.1[0m" 404 -
+127.0.0.1 - - [17/Dec/2025 13:39:42] "[33mGET /track/17/art HTTP/1.1[0m" 404 -
+127.0.0.1 - - [17/Dec/2025 13:39:43] "[33mGET /track/17/art HTTP/1.1[0m" 404 -
+127.0.0.1 - - [17/Dec/2025 13:39:43] "[33mGET /track/17/art HTTP/1.1[0m" 404 -
+127.0.0.1 - - [17/Dec/2025 13:39:44] "[33mGET /track/17/art HTTP/1.1[0m" 404 -
+127.0.0.1 - - [17/Dec/2025 13:39:44] "[33mGET /track/17/art HTTP/1.1[0m" 404 -
+127.0.0.1 - - [17/Dec/2025 13:39:44] "[33mGET /track/17/art HTTP/1.1[0m" 404 -
+127.0.0.1 - - [17/Dec/2025 13:39:48] "GET /auth/passkeys HTTP/1.1" 200 -
+127.0.0.1 - - [17/Dec/2025 13:39:50] "POST /auth/passkey/register/options HTTP/1.1" 200 -
+127.0.0.1 - - [17/Dec/2025 13:39:52] "POST /auth/passkey/register/options HTTP/1.1" 200 -
+127.0.0.1 - - [17/Dec/2025 13:40:29] "GET /auth/passkeys HTTP/1.1" 200 -
+127.0.0.1 - - [17/Dec/2025 13:40:33] "POST /auth/passkey/register/options HTTP/1.1" 200 -
+127.0.0.1 - - [17/Dec/2025 13:55:14] "GET /library HTTP/1.1" 200 -
+127.0.0.1 - - [17/Dec/2025 13:55:15] "GET /playlists HTTP/1.1" 200 -
+127.0.0.1 - - [17/Dec/2025 13:55:25] "GET /auth/passkeys HTTP/1.1" 200 -
+127.0.0.1 - - [17/Dec/2025 13:55:29] "POST /auth/passkey/register/options HTTP/1.1" 200 -

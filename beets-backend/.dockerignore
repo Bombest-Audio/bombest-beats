@@ -1,0 +1,13 @@
+venv/
+__pycache__/
+*.pyc
+.git/
+.DS_Store
+music/*.mp3
+music/*.flac
+music/*.m4a
+music/*.wav
+music/*.ogg
+uploads/
+waveforms/
+*.db

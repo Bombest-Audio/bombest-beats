@@ -8,6 +8,10 @@
         "source": "/Users/thomasphillips/.gradle/daemon/8.14.1/com.bombest.music.app-main-64:/mipmap-mdpi/ic_launcher_round.png"
     },
     {
+        "merged": "/Users/thomasphillips/.gradle/daemon/8.14.1/com.bombest.music.app-merged_res-62:/drawable_ic_music_note.xml.flat",
+        "source": "/Users/thomasphillips/.gradle/daemon/8.14.1/com.bombest.music.app-main-64:/drawable/ic_music_note.xml"
+    },
+    {
         "merged": "/Users/thomasphillips/.gradle/daemon/8.14.1/com.bombest.music.app-merged_res-62:/mipmap-hdpi_ic_launcher_round.png.flat",
         "source": "/Users/thomasphillips/.gradle/daemon/8.14.1/com.bombest.music.app-main-64:/mipmap-hdpi/ic_launcher_round.png"
     },
@@ -24,24 +28,32 @@
         "source": "/Users/thomasphillips/.gradle/daemon/8.14.1/com.bombest.music.app-main-64:/mipmap-hdpi/ic_launcher.png"
     },
     {
+        "merged": "/Users/thomasphillips/.gradle/daemon/8.14.1/com.bombest.music.app-merged_res-62:/drawable_ic_repeat.xml.flat",
+        "source": "/Users/thomasphillips/.gradle/daemon/8.14.1/com.bombest.music.app-main-64:/drawable/ic_repeat.xml"
+    },
+    {
+        "merged": "/Users/thomasphillips/.gradle/daemon/8.14.1/com.bombest.music.app-merged_res-62:/drawable_ic_shuffle.xml.flat",
+        "source": "/Users/thomasphillips/.gradle/daemon/8.14.1/com.bombest.music.app-main-64:/drawable/ic_shuffle.xml"
+    },
+    {
+        "merged": "/Users/thomasphillips/.gradle/daemon/8.14.1/com.bombest.music.app-merged_res-62:/drawable_ic_playlist.xml.flat",
+        "source": "/Users/thomasphillips/.gradle/daemon/8.14.1/com.bombest.music.app-main-64:/drawable/ic_playlist.xml"
+    },
+    {
         "merged": "/Users/thomasphillips/.gradle/daemon/8.14.1/com.bombest.music.app-merged_res-62:/mipmap-xhdpi_ic_launcher_round.png.flat",
         "source": "/Users/thomasphillips/.gradle/daemon/8.14.1/com.bombest.music.app-main-64:/mipmap-xhdpi/ic_launcher_round.png"
+    },
+    {
+        "merged": "/Users/thomasphillips/.gradle/daemon/8.14.1/com.bombest.music.app-merged_res-62:/drawable_ic_recent.xml.flat",
+        "source": "/Users/thomasphillips/.gradle/daemon/8.14.1/com.bombest.music.app-main-64:/drawable/ic_recent.xml"
     },
     {
         "merged": "/Users/thomasphillips/.gradle/daemon/8.14.1/com.bombest.music.app-merged_res-62:/xml_data_extraction_rules.xml.flat",
         "source": "/Users/thomasphillips/.gradle/daemon/8.14.1/com.bombest.music.app-main-64:/xml/data_extraction_rules.xml"
     },
     {
-        "merged": "com.bombest.music.app-merged_res-62:/drawable_ic_playlist.xml.flat",
-        "source": "com.bombest.music.app-main-64:/drawable/ic_playlist.xml"
-    },
-    {
         "merged": "/Users/thomasphillips/.gradle/daemon/8.14.1/com.bombest.music.app-merged_res-62:/mipmap-xhdpi_ic_launcher.png.flat",
         "source": "/Users/thomasphillips/.gradle/daemon/8.14.1/com.bombest.music.app-main-64:/mipmap-xhdpi/ic_launcher.png"
-    },
-    {
-        "merged": "com.bombest.music.app-merged_res-62:/drawable_ic_shuffle.xml.flat",
-        "source": "com.bombest.music.app-main-64:/drawable/ic_shuffle.xml"
     },
     {
         "merged": "/Users/thomasphillips/.gradle/daemon/8.14.1/com.bombest.music.app-merged_res-62:/mipmap-xxxhdpi_ic_launcher.png.flat",
@@ -56,14 +68,6 @@
         "source": "/Users/thomasphillips/.gradle/daemon/8.14.1/com.bombest.music.app-main-64:/drawable/default_album_art.png"
     },
     {
-        "merged": "com.bombest.music.app-merged_res-62:/drawable_ic_music_note.xml.flat",
-        "source": "com.bombest.music.app-main-64:/drawable/ic_music_note.xml"
-    },
-    {
-        "merged": "com.bombest.music.app-merged_res-62:/drawable_ic_repeat.xml.flat",
-        "source": "com.bombest.music.app-main-64:/drawable/ic_repeat.xml"
-    },
-    {
         "merged": "/Users/thomasphillips/.gradle/daemon/8.14.1/com.bombest.music.app-merged_res-62:/mipmap-mdpi_ic_launcher.png.flat",
         "source": "/Users/thomasphillips/.gradle/daemon/8.14.1/com.bombest.music.app-main-64:/mipmap-mdpi/ic_launcher.png"
     },
@@ -72,16 +76,16 @@
         "source": "/Users/thomasphillips/.gradle/daemon/8.14.1/com.bombest.music.app-main-64:/xml/automotive_app_desc.xml"
     },
     {
+        "merged": "com.bombest.music.app-merged_res-62:/drawable_studio_dust_placeholder.png.flat",
+        "source": "com.bombest.music.app-main-64:/drawable/studio_dust_placeholder.png"
+    },
+    {
         "merged": "/Users/thomasphillips/.gradle/daemon/8.14.1/com.bombest.music.app-merged_res-62:/mipmap-anydpi-v26_ic_launcher.xml.flat",
         "source": "/Users/thomasphillips/.gradle/daemon/8.14.1/com.bombest.music.app-main-64:/mipmap-anydpi-v26/ic_launcher.xml"
     },
     {
         "merged": "/Users/thomasphillips/.gradle/daemon/8.14.1/com.bombest.music.app-merged_res-62:/mipmap-xxxhdpi_ic_launcher_round.png.flat",
         "source": "/Users/thomasphillips/.gradle/daemon/8.14.1/com.bombest.music.app-main-64:/mipmap-xxxhdpi/ic_launcher_round.png"
-    },
-    {
-        "merged": "com.bombest.music.app-merged_res-62:/drawable_ic_recent.xml.flat",
-        "source": "com.bombest.music.app-main-64:/drawable/ic_recent.xml"
     },
     {
         "merged": "/Users/thomasphillips/.gradle/daemon/8.14.1/com.bombest.music.app-merged_res-62:/drawable_ic_launcher_foreground.png.flat",

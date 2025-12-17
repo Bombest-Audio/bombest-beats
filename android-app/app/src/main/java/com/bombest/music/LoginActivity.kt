@@ -56,21 +56,11 @@ import androidx.compose.material.icons.filled.Fingerprint
 
 
 // API
-data class LoginRequest(val username: String, val password: String)
-data class RegisterRequest(val username: String, val password: String, val invite_code: String)
-data class AuthResponse(val access_token: String, val user_id: Int, val username: String, val role: String)
-
-interface AuthApiSimple {
-    @POST("auth/login")
-    suspend fun login(@Body request: LoginRequest): AuthResponse
-    
-    @POST("auth/register")
-    suspend fun register(@Body request: RegisterRequest): AuthResponse
-}
+// API classes imported from com.bombest.music.data.api
 
 class LoginActivity : ComponentActivity() {
     
-    private lateinit var authApi: AuthApiSimple
+    private lateinit var authApi: com.bombest.music.data.api.AuthApi
     
     override fun onCreate(savedInstanceState: Bundle?) {
         // Install splash screen with exit animation - must be called before super.onCreate()
@@ -108,23 +98,11 @@ class LoginActivity : ComponentActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
         window.statusBarColor = android.graphics.Color.TRANSPARENT
         
-        // Setup API
-        val logging = HttpLoggingInterceptor().apply {
-            level = HttpLoggingInterceptor.Level.BODY
-        }
-        val client = OkHttpClient.Builder()
-            .addInterceptor(logging)
-            .connectTimeout(10, TimeUnit.SECONDS)
-            .readTimeout(10, TimeUnit.SECONDS)
-            .build()
+        // Setup API (Removed duplicate local setup)
+        // NetworkModule is already initialized and holds the correct configuration
         
-        val retrofit = Retrofit.Builder()
-            .baseUrl("https://bom.best/beats/api/")
-            .client(client)
-            .addConverterFactory(MoshiConverterFactory.create())
-            .build()
+        authApi = NetworkModule.authApi
         
-        authApi = retrofit.create(AuthApiSimple::class.java)
         
         // Setup PasskeyManager
         val authRepository = AuthRepository(this, NetworkModule.authApi)
@@ -153,10 +131,10 @@ class LoginActivity : ComponentActivity() {
                         onLogin = { username, password, onResult ->
                             lifecycleScope.launch {
                                 try {
-                                    val response = authApi.login(LoginRequest(username, password))
+                                    val response = authApi.login(com.bombest.music.data.api.LoginRequest(username, password))
                                     authDataStore.edit { prefs ->
                                         prefs[AuthPreferences.TOKEN_KEY] = response.access_token
-                                        prefs[AuthPreferences.USER_KEY] = response.username
+                                        prefs[AuthPreferences.USER_KEY] = response.user.username
                                     }
                                     onResult(true, null)
                                     goToMain()
@@ -168,10 +146,10 @@ class LoginActivity : ComponentActivity() {
                         onRegister = { username, password, inviteCode, onResult ->
                             lifecycleScope.launch {
                                 try {
-                                    val response = authApi.register(RegisterRequest(username, password, inviteCode))
+                                    val response = authApi.register(com.bombest.music.data.api.RegisterRequest(username, password, inviteCode))
                                     authDataStore.edit { prefs ->
                                         prefs[AuthPreferences.TOKEN_KEY] = response.access_token
-                                        prefs[AuthPreferences.USER_KEY] = response.username
+                                        prefs[AuthPreferences.USER_KEY] = response.user.username
                                     }
                                     onResult(true, null)
                                     goToMain()

@@ -60,4 +60,19 @@ interface MusicApi {
         @Header("Authorization") auth: String,
         @Query("user_id") userId: Int? = null
     ): DashboardResponse
+    
+    @retrofit2.http.POST("metrics/batch")
+    suspend fun batchRecordPlays(
+        @retrofit2.http.Body request: BatchPlayRequest,
+        @Header("Authorization") auth: String
+    ): Response<Unit>
 }
+
+data class BatchPlayRequest(
+    val events: List<PlayEvent>
+)
+
+data class PlayEvent(
+    val track_id: Int,
+    val timestamp: String // ISO 8601 or similar
+)

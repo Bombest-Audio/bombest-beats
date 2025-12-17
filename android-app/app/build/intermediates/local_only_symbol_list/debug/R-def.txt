@@ -22,6 +22,7 @@ drawable ic_recent
 drawable ic_repeat
 drawable ic_shuffle
 drawable splash_background
+drawable studio_dust_placeholder
 mipmap ic_launcher
 mipmap ic_launcher_round
 string app_name
