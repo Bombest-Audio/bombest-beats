@@ -134,7 +134,7 @@ struct SettingsView: View {
             .navigationTitle("Settings")
             .listStyle(.insetGrouped)
             .onAppear {
-                libraryViewModel.fetchLibrary()
+                libraryViewModel.refreshData()
             }
         }
     }
@@ -142,6 +142,6 @@ struct SettingsView: View {
     // MARK: - Helpers
     
     private func triggerDownloadAll() {
-        FileCacheService.shared.downloadAllTracks(libraryViewModel.tracks)
+        FileCacheService.shared.downloadAllTracks(libraryViewModel.songs)
     }
 }
