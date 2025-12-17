@@ -23,12 +23,14 @@ data class BombestThemeColors(
 
 enum class ProgressStyle {
     STANDARD,      // Clean circular progress
-    SPRAY_PAINT    // Graffiti spray effect
+    SPRAY_PAINT,   // Graffiti spray effect
+    VU_METER       // Analog dial/VU meter style
 }
 
 enum class VisualizerThemeStyle {
     STANDARD,      // Bar/wave visualizer
-    GRAFFITI       // Spray paint visualizer
+    GRAFFITI,      // Spray paint visualizer
+    OSCILLOSCOPE   // Analog oscilloscope waveform
 }
 
 @Immutable
@@ -88,3 +90,32 @@ val GraffitiTheme = BombestThemeSpec(
     visualizerStyle = VisualizerThemeStyle.GRAFFITI,
     useTextures = true
 )
+
+/**
+ * Studio Dust Theme - Analog recording studio aesthetic
+ * Charcoal background, warm amber/teal accents, tactile feel
+ */
+val StudioDustTheme = BombestThemeSpec(
+    name = "Studio Dust",
+    colors = BombestThemeColors(
+        background = Color(0xFF1A1A1A),           // Charcoal
+        surface = Color(0xFF232323),              // Dark steel
+        surfaceActive = Color(0xFF2E2E2E),        // Warm gray
+        primary = Color(0xFFD4A574),              // Warm amber
+        primaryGradient = Brush.linearGradient(
+            colors = listOf(
+                Color(0xFFD4A574),  // Warm amber
+                Color(0xFF5A7D7E),  // Muted teal
+                Color(0xFFC45C5C)   // Soft red
+            )
+        ),
+        accent = Color(0xFF5A7D7E),               // Muted teal
+        textPrimary = Color(0xFFE8E4E0),          // Soft white
+        textSecondary = Color(0xFF8A8680),        // Dusty gray
+        border = Color(0xFF3A3A3A)
+    ),
+    progressStyle = ProgressStyle.VU_METER,
+    visualizerStyle = VisualizerThemeStyle.OSCILLOSCOPE,
+    useTextures = true
+)
+

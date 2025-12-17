@@ -9,8 +9,8 @@ import okhttp3.logging.HttpLoggingInterceptor
 import java.util.concurrent.TimeUnit
 
 object NetworkModule {
-    // Production URL
-    private const val BASE_URL = "https://bom.best/beats/api/" 
+    // Production URL (Public Tunnel)
+    private const val BASE_URL = "https://beats.bom.best/" 
 
     private val loggingInterceptor = HttpLoggingInterceptor().apply {
         level = HttpLoggingInterceptor.Level.BODY
@@ -22,10 +22,14 @@ object NetworkModule {
         .readTimeout(30, TimeUnit.SECONDS)
         .build()
 
+    private val moshi = com.squareup.moshi.Moshi.Builder()
+        .add(com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory())
+        .build()
+
     private val retrofit = Retrofit.Builder()
         .baseUrl(BASE_URL)
         .client(okHttpClient)
-        .addConverterFactory(MoshiConverterFactory.create())
+        .addConverterFactory(MoshiConverterFactory.create(moshi))
         .build()
 
     val api: MusicApi = retrofit.create(MusicApi::class.java)

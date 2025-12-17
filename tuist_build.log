@@ -1,0 +1,108 @@
+Command line invocation:
+    /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild -workspace ios-app/BombestBeats.xcworkspace -scheme BombestBeats -sdk iphonesimulator -destination "platform=iOS Simulator,name=iPhone 17 Pro" build
+
+Build settings from command line:
+    SDKROOT = iphonesimulator26.2
+
+ComputePackagePrebuildTargetDependencyGraph
+
+Prepare packages
+
+CreateBuildRequest
+
+SendProjectDescription
+
+CreateBuildOperation
+
+ComputeTargetDependencyGraph
+note: Building targets in dependency order
+note: Target dependency graph (1 target)
+    Target 'BombestBeats' in project 'BombestBeats' (no dependencies)
+
+GatherProvisioningInputs
+
+CreateBuildDescription
+
+ProcessProductPackaging /Users/thomasphillips/bombest-audio/bombest-beats/ios-app/BombestBeats.entitlements /Users/thomasphillips/Library/Developer/Xcode/DerivedData/BombestBeats-gautzdolnjyxbkawcxhwivfwmxyo/Build/Intermediates.noindex/BombestBeats.build/Debug-iphonesimulator/BombestBeats.build/BombestBeats.app-Simulated.xcent (in target 'BombestBeats' from project 'BombestBeats')
+    cd /Users/thomasphillips/bombest-audio/bombest-beats/ios-app
+    
+    Entitlements:
+    
+    {
+    "application-identifier" = "8C4A8V568P.com.bombest.BombestBeats";
+    "com.apple.developer.associated-domains" =     (
+        "webcredentials:bom.best"
+    );
+}
+    
+    builtin-productPackagingUtility /Users/thomasphillips/bombest-audio/bombest-beats/ios-app/BombestBeats.entitlements -entitlements -format xml -o /Users/thomasphillips/Library/Developer/Xcode/DerivedData/BombestBeats-gautzdolnjyxbkawcxhwivfwmxyo/Build/Intermediates.noindex/BombestBeats.build/Debug-iphonesimulator/BombestBeats.build/BombestBeats.app-Simulated.xcent
+
+ProcessProductPackaging /Users/thomasphillips/bombest-audio/bombest-beats/ios-app/BombestBeats.entitlements /Users/thomasphillips/Library/Developer/Xcode/DerivedData/BombestBeats-gautzdolnjyxbkawcxhwivfwmxyo/Build/Intermediates.noindex/BombestBeats.build/Debug-iphonesimulator/BombestBeats.build/BombestBeats.app.xcent (in target 'BombestBeats' from project 'BombestBeats')
+    cd /Users/thomasphillips/bombest-audio/bombest-beats/ios-app
+    
+    Entitlements:
+    
+    {
+}
+    
+    builtin-productPackagingUtility /Users/thomasphillips/bombest-audio/bombest-beats/ios-app/BombestBeats.entitlements -entitlements -format xml -o /Users/thomasphillips/Library/Developer/Xcode/DerivedData/BombestBeats-gautzdolnjyxbkawcxhwivfwmxyo/Build/Intermediates.noindex/BombestBeats.build/Debug-iphonesimulator/BombestBeats.build/BombestBeats.app.xcent
+
+ProcessProductPackagingDER /Users/thomasphillips/Library/Developer/Xcode/DerivedData/BombestBeats-gautzdolnjyxbkawcxhwivfwmxyo/Build/Intermediates.noindex/BombestBeats.build/Debug-iphonesimulator/BombestBeats.build/BombestBeats.app-Simulated.xcent /Users/thomasphillips/Library/Developer/Xcode/DerivedData/BombestBeats-gautzdolnjyxbkawcxhwivfwmxyo/Build/Intermediates.noindex/BombestBeats.build/Debug-iphonesimulator/BombestBeats.build/BombestBeats.app-Simulated.xcent.der (in target 'BombestBeats' from project 'BombestBeats')
+    cd /Users/thomasphillips/bombest-audio/bombest-beats/ios-app
+    /usr/bin/derq query -f xml -i /Users/thomasphillips/Library/Developer/Xcode/DerivedData/BombestBeats-gautzdolnjyxbkawcxhwivfwmxyo/Build/Intermediates.noindex/BombestBeats.build/Debug-iphonesimulator/BombestBeats.build/BombestBeats.app-Simulated.xcent -o /Users/thomasphillips/Library/Developer/Xcode/DerivedData/BombestBeats-gautzdolnjyxbkawcxhwivfwmxyo/Build/Intermediates.noindex/BombestBeats.build/Debug-iphonesimulator/BombestBeats.build/BombestBeats.app-Simulated.xcent.der --raw
+
+ProcessProductPackagingDER /Users/thomasphillips/Library/Developer/Xcode/DerivedData/BombestBeats-gautzdolnjyxbkawcxhwivfwmxyo/Build/Intermediates.noindex/BombestBeats.build/Debug-iphonesimulator/BombestBeats.build/BombestBeats.app.xcent /Users/thomasphillips/Library/Developer/Xcode/DerivedData/BombestBeats-gautzdolnjyxbkawcxhwivfwmxyo/Build/Intermediates.noindex/BombestBeats.build/Debug-iphonesimulator/BombestBeats.build/BombestBeats.app.xcent.der (in target 'BombestBeats' from project 'BombestBeats')
+    cd /Users/thomasphillips/bombest-audio/bombest-beats/ios-app
+    /usr/bin/derq query -f xml -i /Users/thomasphillips/Library/Developer/Xcode/DerivedData/BombestBeats-gautzdolnjyxbkawcxhwivfwmxyo/Build/Intermediates.noindex/BombestBeats.build/Debug-iphonesimulator/BombestBeats.build/BombestBeats.app.xcent -o /Users/thomasphillips/Library/Developer/Xcode/DerivedData/BombestBeats-gautzdolnjyxbkawcxhwivfwmxyo/Build/Intermediates.noindex/BombestBeats.build/Debug-iphonesimulator/BombestBeats.build/BombestBeats.app.xcent.der --raw
+
+ClangStatCache /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang-stat-cache /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.2.sdk /Users/thomasphillips/Library/Developer/Xcode/DerivedData/SDKStatCaches.noindex/iphonesimulator26.2-23C53-7d00a8b37fbd7999ea79df8ebc024bf0.sdkstatcache
+    cd /Users/thomasphillips/bombest-audio/bombest-beats/ios-app
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang-stat-cache /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.2.sdk -o /Users/thomasphillips/Library/Developer/Xcode/DerivedData/SDKStatCaches.noindex/iphonesimulator26.2-23C53-7d00a8b37fbd7999ea79df8ebc024bf0.sdkstatcache
+
+Ld /Users/thomasphillips/Library/Developer/Xcode/DerivedData/BombestBeats-gautzdolnjyxbkawcxhwivfwmxyo/Build/Products/Debug-iphonesimulator/BombestBeats.app/BombestBeats.debug.dylib normal (in target 'BombestBeats' from project 'BombestBeats')
+    cd /Users/thomasphillips/bombest-audio/bombest-beats/ios-app
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -Xlinker -reproducible -target arm64-apple-ios17.0-simulator -dynamiclib -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.2.sdk -O0 -L/Users/thomasphillips/Library/Developer/Xcode/DerivedData/BombestBeats-gautzdolnjyxbkawcxhwivfwmxyo/Build/Intermediates.noindex/EagerLinkingTBDs/Debug-iphonesimulator -L/Users/thomasphillips/Library/Developer/Xcode/DerivedData/BombestBeats-gautzdolnjyxbkawcxhwivfwmxyo/Build/Products/Debug-iphonesimulator -F/Users/thomasphillips/Library/Developer/Xcode/DerivedData/BombestBeats-gautzdolnjyxbkawcxhwivfwmxyo/Build/Intermediates.noindex/EagerLinkingTBDs/Debug-iphonesimulator -F/Users/thomasphillips/Library/Developer/Xcode/DerivedData/BombestBeats-gautzdolnjyxbkawcxhwivfwmxyo/Build/Products/Debug-iphonesimulator -filelist /Users/thomasphillips/Library/Developer/Xcode/DerivedData/BombestBeats-gautzdolnjyxbkawcxhwivfwmxyo/Build/Intermediates.noindex/BombestBeats.build/Debug-iphonesimulator/BombestBeats.build/Objects-normal/arm64/BombestBeats.LinkFileList -install_name @rpath/BombestBeats.debug.dylib -Xlinker -rpath -Xlinker /usr/lib/swift -Xlinker -rpath -Xlinker @executable_path/Frameworks -dead_strip -Xlinker -object_path_lto -Xlinker /Users/thomasphillips/Library/Developer/Xcode/DerivedData/BombestBeats-gautzdolnjyxbkawcxhwivfwmxyo/Build/Intermediates.noindex/BombestBeats.build/Debug-iphonesimulator/BombestBeats.build/Objects-normal/arm64/BombestBeats_lto.o -rdynamic -Xlinker -no_deduplicate -Xlinker -objc_abi_version -Xlinker 2 -Xlinker -dependency_info -Xlinker /Users/thomasphillips/Library/Developer/Xcode/DerivedData/BombestBeats-gautzdolnjyxbkawcxhwivfwmxyo/Build/Intermediates.noindex/BombestBeats.build/Debug-iphonesimulator/BombestBeats.build/Objects-normal/arm64/BombestBeats_dependency_info.dat -fobjc-link-runtime -L/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/iphonesimulator -L/usr/lib/swift -Xlinker -add_ast_path -Xlinker /Users/thomasphillips/Library/Developer/Xcode/DerivedData/BombestBeats-gautzdolnjyxbkawcxhwivfwmxyo/Build/Intermediates.noindex/BombestBeats.build/Debug-iphonesimulator/BombestBeats.build/Objects-normal/arm64/BombestBeats.swiftmodule @/Users/thomasphillips/Library/Developer/Xcode/DerivedData/BombestBeats-gautzdolnjyxbkawcxhwivfwmxyo/Build/Intermediates.noindex/BombestBeats.build/Debug-iphonesimulator/BombestBeats.build/Objects-normal/arm64/BombestBeats-linker-args.resp -Xlinker -alias -Xlinker _main -Xlinker ___debug_main_executable_dylib_entry_point -Xlinker -no_adhoc_codesign -o /Users/thomasphillips/Library/Developer/Xcode/DerivedData/BombestBeats-gautzdolnjyxbkawcxhwivfwmxyo/Build/Products/Debug-iphonesimulator/BombestBeats.app/BombestBeats.debug.dylib
+
+ConstructStubExecutorLinkFileList /Users/thomasphillips/Library/Developer/Xcode/DerivedData/BombestBeats-gautzdolnjyxbkawcxhwivfwmxyo/Build/Intermediates.noindex/BombestBeats.build/Debug-iphonesimulator/BombestBeats.build/BombestBeats-ExecutorLinkFileList-normal-arm64.txt (in target 'BombestBeats' from project 'BombestBeats')
+    cd /Users/thomasphillips/bombest-audio/bombest-beats/ios-app
+    construct-stub-executor-link-file-list /Users/thomasphillips/Library/Developer/Xcode/DerivedData/BombestBeats-gautzdolnjyxbkawcxhwivfwmxyo/Build/Products/Debug-iphonesimulator/BombestBeats.app/BombestBeats.debug.dylib /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib/libPreviewsJITStubExecutor_no_swift_entry_point.a /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib/libPreviewsJITStubExecutor.a --output /Users/thomasphillips/Library/Developer/Xcode/DerivedData/BombestBeats-gautzdolnjyxbkawcxhwivfwmxyo/Build/Intermediates.noindex/BombestBeats.build/Debug-iphonesimulator/BombestBeats.build/BombestBeats-ExecutorLinkFileList-normal-arm64.txt
+note: Using stub executor library with Swift entry point. (in target 'BombestBeats' from project 'BombestBeats')
+
+Ld /Users/thomasphillips/Library/Developer/Xcode/DerivedData/BombestBeats-gautzdolnjyxbkawcxhwivfwmxyo/Build/Products/Debug-iphonesimulator/BombestBeats.app/BombestBeats normal (in target 'BombestBeats' from project 'BombestBeats')
+    cd /Users/thomasphillips/bombest-audio/bombest-beats/ios-app
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -Xlinker -reproducible -target arm64-apple-ios17.0-simulator -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.2.sdk -O0 -L/Users/thomasphillips/Library/Developer/Xcode/DerivedData/BombestBeats-gautzdolnjyxbkawcxhwivfwmxyo/Build/Products/Debug-iphonesimulator -F/Users/thomasphillips/Library/Developer/Xcode/DerivedData/BombestBeats-gautzdolnjyxbkawcxhwivfwmxyo/Build/Products/Debug-iphonesimulator -Xlinker -rpath -Xlinker @executable_path -Xlinker -rpath -Xlinker @executable_path/Frameworks -rdynamic -Xlinker -no_deduplicate -Xlinker -objc_abi_version -Xlinker 2 -e ___debug_blank_executor_main -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __debug_dylib -Xlinker /Users/thomasphillips/Library/Developer/Xcode/DerivedData/BombestBeats-gautzdolnjyxbkawcxhwivfwmxyo/Build/Intermediates.noindex/BombestBeats.build/Debug-iphonesimulator/BombestBeats.build/BombestBeats-DebugDylibPath-normal-arm64.txt -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __debug_instlnm -Xlinker /Users/thomasphillips/Library/Developer/Xcode/DerivedData/BombestBeats-gautzdolnjyxbkawcxhwivfwmxyo/Build/Intermediates.noindex/BombestBeats.build/Debug-iphonesimulator/BombestBeats.build/BombestBeats-DebugDylibInstallName-normal-arm64.txt -Xlinker -filelist -Xlinker /Users/thomasphillips/Library/Developer/Xcode/DerivedData/BombestBeats-gautzdolnjyxbkawcxhwivfwmxyo/Build/Intermediates.noindex/BombestBeats.build/Debug-iphonesimulator/BombestBeats.build/BombestBeats-ExecutorLinkFileList-normal-arm64.txt -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __entitlements -Xlinker /Users/thomasphillips/Library/Developer/Xcode/DerivedData/BombestBeats-gautzdolnjyxbkawcxhwivfwmxyo/Build/Intermediates.noindex/BombestBeats.build/Debug-iphonesimulator/BombestBeats.build/BombestBeats.app-Simulated.xcent -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __ents_der -Xlinker /Users/thomasphillips/Library/Developer/Xcode/DerivedData/BombestBeats-gautzdolnjyxbkawcxhwivfwmxyo/Build/Intermediates.noindex/BombestBeats.build/Debug-iphonesimulator/BombestBeats.build/BombestBeats.app-Simulated.xcent.der /Users/thomasphillips/Library/Developer/Xcode/DerivedData/BombestBeats-gautzdolnjyxbkawcxhwivfwmxyo/Build/Products/Debug-iphonesimulator/BombestBeats.app/BombestBeats.debug.dylib -Xlinker -no_adhoc_codesign -o /Users/thomasphillips/Library/Developer/Xcode/DerivedData/BombestBeats-gautzdolnjyxbkawcxhwivfwmxyo/Build/Products/Debug-iphonesimulator/BombestBeats.app/BombestBeats
+
+ExtractAppIntentsMetadata (in target 'BombestBeats' from project 'BombestBeats')
+    cd /Users/thomasphillips/bombest-audio/bombest-beats/ios-app
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/appintentsmetadataprocessor --toolchain-dir /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain --module-name BombestBeats --sdk-root /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.2.sdk --xcode-version 17C52 --platform-family iOS --deployment-target 17.0 --bundle-identifier com.bombest.BombestBeats --output /Users/thomasphillips/Library/Developer/Xcode/DerivedData/BombestBeats-gautzdolnjyxbkawcxhwivfwmxyo/Build/Products/Debug-iphonesimulator/BombestBeats.app --target-triple arm64-apple-ios17.0-simulator --binary-file /Users/thomasphillips/Library/Developer/Xcode/DerivedData/BombestBeats-gautzdolnjyxbkawcxhwivfwmxyo/Build/Products/Debug-iphonesimulator/BombestBeats.app/BombestBeats --dependency-file /Users/thomasphillips/Library/Developer/Xcode/DerivedData/BombestBeats-gautzdolnjyxbkawcxhwivfwmxyo/Build/Intermediates.noindex/BombestBeats.build/Debug-iphonesimulator/BombestBeats.build/Objects-normal/arm64/BombestBeats_dependency_info.dat --stringsdata-file /Users/thomasphillips/Library/Developer/Xcode/DerivedData/BombestBeats-gautzdolnjyxbkawcxhwivfwmxyo/Build/Intermediates.noindex/BombestBeats.build/Debug-iphonesimulator/BombestBeats.build/Objects-normal/arm64/ExtractedAppShortcutsMetadata.stringsdata --source-file-list /Users/thomasphillips/Library/Developer/Xcode/DerivedData/BombestBeats-gautzdolnjyxbkawcxhwivfwmxyo/Build/Intermediates.noindex/BombestBeats.build/Debug-iphonesimulator/BombestBeats.build/Objects-normal/arm64/BombestBeats.SwiftFileList --metadata-file-list /Users/thomasphillips/Library/Developer/Xcode/DerivedData/BombestBeats-gautzdolnjyxbkawcxhwivfwmxyo/Build/Intermediates.noindex/BombestBeats.build/Debug-iphonesimulator/BombestBeats.build/BombestBeats.DependencyMetadataFileList --static-metadata-file-list /Users/thomasphillips/Library/Developer/Xcode/DerivedData/BombestBeats-gautzdolnjyxbkawcxhwivfwmxyo/Build/Intermediates.noindex/BombestBeats.build/Debug-iphonesimulator/BombestBeats.build/BombestBeats.DependencyStaticMetadataFileList --swift-const-vals-list /Users/thomasphillips/Library/Developer/Xcode/DerivedData/BombestBeats-gautzdolnjyxbkawcxhwivfwmxyo/Build/Intermediates.noindex/BombestBeats.build/Debug-iphonesimulator/BombestBeats.build/Objects-normal/arm64/BombestBeats.SwiftConstValuesFileList --compile-time-extraction --deployment-aware-processing --validate-assistant-intents --no-app-shortcuts-localization
+2025-12-15 17:51:42.629 appintentsmetadataprocessor[59065:826455] Starting appintentsmetadataprocessor export
+2025-12-15 17:51:42.630 appintentsmetadataprocessor[59065:826455] warning: Metadata extraction skipped. No AppIntents.framework dependency found.
+
+ProcessInfoPlistFile /Users/thomasphillips/Library/Developer/Xcode/DerivedData/BombestBeats-gautzdolnjyxbkawcxhwivfwmxyo/Build/Products/Debug-iphonesimulator/BombestBeats.app/Info.plist /Users/thomasphillips/bombest-audio/bombest-beats/ios-app/Derived/InfoPlists/BombestBeats-Info.plist (in target 'BombestBeats' from project 'BombestBeats')
+    cd /Users/thomasphillips/bombest-audio/bombest-beats/ios-app
+    builtin-infoPlistUtility /Users/thomasphillips/bombest-audio/bombest-beats/ios-app/Derived/InfoPlists/BombestBeats-Info.plist -producttype com.apple.product-type.application -genpkginfo /Users/thomasphillips/Library/Developer/Xcode/DerivedData/BombestBeats-gautzdolnjyxbkawcxhwivfwmxyo/Build/Products/Debug-iphonesimulator/BombestBeats.app/PkgInfo -expandbuildsettings -format binary -platform iphonesimulator -o /Users/thomasphillips/Library/Developer/Xcode/DerivedData/BombestBeats-gautzdolnjyxbkawcxhwivfwmxyo/Build/Products/Debug-iphonesimulator/BombestBeats.app/Info.plist
+
+CopySwiftLibs /Users/thomasphillips/Library/Developer/Xcode/DerivedData/BombestBeats-gautzdolnjyxbkawcxhwivfwmxyo/Build/Products/Debug-iphonesimulator/BombestBeats.app (in target 'BombestBeats' from project 'BombestBeats')
+    cd /Users/thomasphillips/bombest-audio/bombest-beats/ios-app
+    builtin-swiftStdLibTool --copy --verbose --sign - --scan-executable /Users/thomasphillips/Library/Developer/Xcode/DerivedData/BombestBeats-gautzdolnjyxbkawcxhwivfwmxyo/Build/Products/Debug-iphonesimulator/BombestBeats.app/BombestBeats.debug.dylib --scan-folder /Users/thomasphillips/Library/Developer/Xcode/DerivedData/BombestBeats-gautzdolnjyxbkawcxhwivfwmxyo/Build/Products/Debug-iphonesimulator/BombestBeats.app/Frameworks --scan-folder /Users/thomasphillips/Library/Developer/Xcode/DerivedData/BombestBeats-gautzdolnjyxbkawcxhwivfwmxyo/Build/Products/Debug-iphonesimulator/BombestBeats.app/PlugIns --scan-folder /Users/thomasphillips/Library/Developer/Xcode/DerivedData/BombestBeats-gautzdolnjyxbkawcxhwivfwmxyo/Build/Products/Debug-iphonesimulator/BombestBeats.app/SystemExtensions --scan-folder /Users/thomasphillips/Library/Developer/Xcode/DerivedData/BombestBeats-gautzdolnjyxbkawcxhwivfwmxyo/Build/Products/Debug-iphonesimulator/BombestBeats.app/Extensions --platform iphonesimulator --toolchain /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain --destination /Users/thomasphillips/Library/Developer/Xcode/DerivedData/BombestBeats-gautzdolnjyxbkawcxhwivfwmxyo/Build/Products/Debug-iphonesimulator/BombestBeats.app/Frameworks --strip-bitcode --strip-bitcode-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/bitcode_strip --emit-dependency-info /Users/thomasphillips/Library/Developer/Xcode/DerivedData/BombestBeats-gautzdolnjyxbkawcxhwivfwmxyo/Build/Intermediates.noindex/BombestBeats.build/Debug-iphonesimulator/BombestBeats.build/SwiftStdLibToolInputDependencies.dep --filter-for-swift-os
+
+CodeSign /Users/thomasphillips/Library/Developer/Xcode/DerivedData/BombestBeats-gautzdolnjyxbkawcxhwivfwmxyo/Build/Products/Debug-iphonesimulator/BombestBeats.app/BombestBeats.debug.dylib (in target 'BombestBeats' from project 'BombestBeats')
+    cd /Users/thomasphillips/bombest-audio/bombest-beats/ios-app
+    
+    Signing Identity:     "Sign to Run Locally"
+    
+    /usr/bin/codesign --force --sign - --timestamp\=none --generate-entitlement-der /Users/thomasphillips/Library/Developer/Xcode/DerivedData/BombestBeats-gautzdolnjyxbkawcxhwivfwmxyo/Build/Products/Debug-iphonesimulator/BombestBeats.app/BombestBeats.debug.dylib
+
+CodeSign /Users/thomasphillips/Library/Developer/Xcode/DerivedData/BombestBeats-gautzdolnjyxbkawcxhwivfwmxyo/Build/Products/Debug-iphonesimulator/BombestBeats.app (in target 'BombestBeats' from project 'BombestBeats')
+    cd /Users/thomasphillips/bombest-audio/bombest-beats/ios-app
+    
+    Signing Identity:     "Sign to Run Locally"
+    
+    /usr/bin/codesign --force --sign - --entitlements /Users/thomasphillips/Library/Developer/Xcode/DerivedData/BombestBeats-gautzdolnjyxbkawcxhwivfwmxyo/Build/Intermediates.noindex/BombestBeats.build/Debug-iphonesimulator/BombestBeats.build/BombestBeats.app.xcent --timestamp\=none --generate-entitlement-der /Users/thomasphillips/Library/Developer/Xcode/DerivedData/BombestBeats-gautzdolnjyxbkawcxhwivfwmxyo/Build/Products/Debug-iphonesimulator/BombestBeats.app
+
+Validate /Users/thomasphillips/Library/Developer/Xcode/DerivedData/BombestBeats-gautzdolnjyxbkawcxhwivfwmxyo/Build/Products/Debug-iphonesimulator/BombestBeats.app (in target 'BombestBeats' from project 'BombestBeats')
+    cd /Users/thomasphillips/bombest-audio/bombest-beats/ios-app
+    builtin-validationUtility /Users/thomasphillips/Library/Developer/Xcode/DerivedData/BombestBeats-gautzdolnjyxbkawcxhwivfwmxyo/Build/Products/Debug-iphonesimulator/BombestBeats.app -shallow-bundle -infoplist-subpath Info.plist
+
+** BUILD SUCCEEDED **
+

@@ -95,9 +95,13 @@ fun DashboardScreen(onBack: () -> Unit) {
             .build()
         
         Retrofit.Builder()
-            .baseUrl("https://bom.best/beats/api/")
+            .baseUrl("https://beats.bom.best/")
             .client(client)
-            .addConverterFactory(MoshiConverterFactory.create())
+            .addConverterFactory(MoshiConverterFactory.create(
+                com.squareup.moshi.Moshi.Builder()
+                    .add(com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory())
+                    .build()
+            ))
             .build()
             .create(DashboardApi::class.java)
     }

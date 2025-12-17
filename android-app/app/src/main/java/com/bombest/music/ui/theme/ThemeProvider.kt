@@ -43,3 +43,10 @@ fun isSprayPaintProgress(): Boolean = LocalBombestTheme.current.progressStyle ==
 
 @Composable
 fun isGraffitiVisualizer(): Boolean = LocalBombestTheme.current.visualizerStyle == VisualizerThemeStyle.GRAFFITI
+
+@Composable
+fun isVUMeterProgress(): Boolean = LocalBombestTheme.current.progressStyle == ProgressStyle.VU_METER
+
+@Composable
+fun isOscilloscopeVisualizer(): Boolean = LocalBombestTheme.current.visualizerStyle == VisualizerThemeStyle.OSCILLOSCOPE
+

@@ -33,7 +33,7 @@ class DownloadManager private constructor(private val context: Context) {
     
     companion object {
         private const val TAG = "DownloadManager"
-        private const val CACHE_SIZE_BYTES = 100L * 1024 * 1024 // 100 MB
+        private const val CACHE_SIZE_BYTES = 1024L * 1024 * 1024 // 1 GB
         private const val CACHE_DIR_NAME = "media_cache"
         private const val DOWNLOADS_DIR_NAME = "downloads"
         
