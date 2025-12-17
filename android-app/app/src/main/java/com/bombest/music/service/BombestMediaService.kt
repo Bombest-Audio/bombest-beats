@@ -65,14 +65,15 @@ class BombestMediaService : MediaLibraryService() {
             .setUsage(androidx.media3.common.C.USAGE_MEDIA)
             .build()
             
-        // Load Control (Buffering)
+        // Load Control (Optimized Buffering for faster track transitions)
         val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
             .setBufferDurationsMs(
-                40_000,  // Min Buffer
-                120_000, // Max Buffer
-                4_000,   // Buffer for playback
-                5_000    // Buffer for rebuffer
+                15_000,  // Min Buffer (reduced from 40s for faster start)
+                60_000,  // Max Buffer (reduced from 120s)
+                1_500,   // Buffer for playback (reduced from 4s - faster start)
+                3_000    // Buffer for rebuffer (reduced from 5s)
             )
+            .setPrioritizeTimeOverSizeThresholds(true) // Prioritize time for smoother playback
             .build()
         
         // Initialize DownloadManager for caching

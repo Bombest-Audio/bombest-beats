@@ -58,12 +58,31 @@ class DownloadManager private constructor(private val context: Context) {
         SimpleCache(cacheDir, cacheEvictor, databaseProvider)
     }
     
-    // OkHttp client for network requests
-    private val okHttpClient = OkHttpClient.Builder().build()
+    // OkHttp client with auth token and extended timeouts for mobile networks
+    private val okHttpClient: OkHttpClient by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+            .writeTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+            .addInterceptor { chain ->
+                val request = chain.request().newBuilder()
+                // Add auth token if available
+                val token = context.getSharedPreferences("auth_prefs", Context.MODE_PRIVATE)
+                    .getString("auth_token", null)
+                if (token != null) {
+                    request.addHeader("Authorization", "Bearer $token")
+                }
+                chain.proceed(request.build())
+            }
+            .build()
+    }
     
-    // Data source factory for cached streaming
+    // Data source factory for cached streaming with auth
     val cacheDataSourceFactory: CacheDataSource.Factory by lazy {
         val upstreamFactory = OkHttpDataSource.Factory(okHttpClient)
+            .setDefaultRequestProperties(mapOf(
+                "User-Agent" to "BombestBeats-Android"
+            ))
         CacheDataSource.Factory()
             .setCache(cache)
             .setUpstreamDataSourceFactory(upstreamFactory)
