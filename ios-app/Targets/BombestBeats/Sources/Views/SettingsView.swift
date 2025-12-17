@@ -3,12 +3,14 @@ import PhotosUI
 
 struct SettingsView: View {
     @EnvironmentObject var authViewModel: AuthViewModel
+    @StateObject private var libraryViewModel = LibraryViewModel()
     @State private var showDevOptions = false
     
     // Persistent Settings
     @AppStorage("isVisualizerEnabled") private var isVisualizerEnabled = true
     @AppStorage("selectedTheme") private var selectedTheme = 0
     @AppStorage("userAvatarData") private var userAvatarData: Data = Data()
+    @AppStorage("autoDownloadEnabled") private var autoDownloadEnabled = false
     
     // Photo Picker
     @State private var selectedItem: PhotosPickerItem?
@@ -73,6 +75,43 @@ struct SettingsView: View {
                     }
                 }
                 
+                Section("Downloads") {
+                    Toggle(isOn: $autoDownloadEnabled) {
+                        Label("Auto-Download All Tracks", systemImage: "arrow.down.circle.fill")
+                    }
+                    .onChange(of: autoDownloadEnabled) { _, enabled in
+                        if enabled {
+                            triggerDownloadAll()
+                        }
+                    }
+                    
+                    HStack {
+                        Label("Storage Used", systemImage: "internaldrive")
+                        Spacer()
+                        Text(FileCacheService.shared.formattedStorageSize())
+                            .foregroundColor(.secondary)
+                    }
+                    
+                    HStack {
+                        Label("Downloaded Tracks", systemImage: "music.note")
+                        Spacer()
+                        Text("\(FileCacheService.shared.getDownloadedCount())")
+                            .foregroundColor(.secondary)
+                    }
+                    
+                    Button(action: {
+                        triggerDownloadAll()
+                    }) {
+                        Label("Download All Now", systemImage: "arrow.down.to.line")
+                    }
+                    
+                    Button(role: .destructive, action: {
+                        FileCacheService.shared.clearAllDownloads()
+                    }) {
+                        Label("Clear All Downloads", systemImage: "trash")
+                    }
+                }
+                
                 Section("App") {
                     Toggle(isOn: $isVisualizerEnabled) {
                         Label("Visualizer Enabled", systemImage: "sparkles")
@@ -80,7 +119,7 @@ struct SettingsView: View {
                     
                     Picker("Theme", selection: $selectedTheme) {
                         Text("Graffiti").tag(0)
-                        Text("Minimal").tag(1)
+                        Text("Studio Dust").tag(1)
                     }
                 }
                 
@@ -94,6 +133,15 @@ struct SettingsView: View {
             }
             .navigationTitle("Settings")
             .listStyle(.insetGrouped)
+            .onAppear {
+                libraryViewModel.fetchLibrary()
+            }
         }
+    }
+    
+    // MARK: - Helpers
+    
+    private func triggerDownloadAll() {
+        FileCacheService.shared.downloadAllTracks(libraryViewModel.tracks)
     }
 }

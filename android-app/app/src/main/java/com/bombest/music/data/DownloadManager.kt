@@ -187,4 +187,50 @@ class DownloadManager private constructor(private val context: Context) {
     fun release() {
         cache.release()
     }
+    
+    /**
+     * Download all tracks from library for offline playback.
+     * Skips already downloaded tracks.
+     */
+    suspend fun downloadAllTracks(
+        tracks: List<com.bombest.music.data.model.Track>,
+        getStreamUrl: (Int) -> String,
+        onProgress: (downloaded: Int, total: Int) -> Unit = { _, _ -> }
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            Log.d(TAG, "Starting batch download of ${tracks.size} tracks")
+            var downloaded = 0
+            var failed = 0
+            
+            for (track in tracks) {
+                val trackId = track.id.toString()
+                
+                // Skip if already downloaded
+                if (isDownloaded(trackId)) {
+                    downloaded++
+                    onProgress(downloaded, tracks.size)
+                    continue
+                }
+                
+                // Download track
+                val streamUrl = getStreamUrl(track.id)
+                val result = downloadTrack(trackId, streamUrl)
+                
+                if (result.isSuccess) {
+                    downloaded++
+                } else {
+                    failed++
+                    Log.w(TAG, "Failed to download track ${track.id}: ${track.title}")
+                }
+                
+                onProgress(downloaded + failed, tracks.size)
+            }
+            
+            Log.d(TAG, "Batch download complete: $downloaded downloaded, $failed failed")
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Log.e(TAG, "Batch download failed", e)
+            Result.failure(e)
+        }
+    }
 }

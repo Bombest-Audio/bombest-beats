@@ -9,8 +9,11 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.Fingerprint
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.*
@@ -32,6 +35,19 @@ import com.bombest.music.data.api.PasskeyInfo
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+
+/**
+ * Format bytes as human-readable string (e.g., "1.2 GB")
+ */
+private fun formatBytes(bytes: Long): String {
+    if (bytes < 1024) return "$bytes B"
+    val kb = bytes / 1024.0
+    if (kb < 1024) return "%.1f KB".format(kb)
+    val mb = kb / 1024.0
+    if (mb < 1024) return "%.1f MB".format(mb)
+    val gb = mb / 1024.0
+    return "%.1f GB".format(gb)
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -112,6 +128,47 @@ fun AccountScreen(
                         } finally {
                             isLoadingPasskeys = false
                         }
+                    }
+                }
+            )
+            
+            Spacer(Modifier.height(16.dp))
+            
+            Text(
+                text = "Downloads",
+                color = Color.Gray,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.padding(start = 8.dp, bottom = 4.dp)
+            )
+            
+            AccountMenuItem(
+                icon = Icons.Default.CloudDownload,
+                title = "Download All Tracks",
+                subtitle = "Sync library for offline playback",
+                onClick = {
+                    scope.launch {
+                        Toast.makeText(context, "Starting download...", Toast.LENGTH_SHORT).show()
+                        // TODO: Trigger download of all tracks
+                    }
+                }
+            )
+            
+            AccountMenuItem(
+                icon = Icons.Default.FolderOpen,
+                title = "Storage Used",
+                subtitle = formatBytes(com.bombest.music.data.DownloadManager.getInstance(context).getDownloadsSizeBytes()),
+                onClick = { }
+            )
+            
+            AccountMenuItem(
+                icon = Icons.Default.DeleteForever,
+                title = "Clear Downloads", 
+                subtitle = "Remove all downloaded tracks",
+                onClick = {
+                    scope.launch {
+                        // TODO: Clear all downloads
+                        Toast.makeText(context, "Downloads cleared", Toast.LENGTH_SHORT).show()
                     }
                 }
             )

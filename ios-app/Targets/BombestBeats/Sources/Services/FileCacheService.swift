@@ -6,7 +6,7 @@ class FileCacheService: ObservableObject {
     // Config
     private let cacheLimitBytes: Int64 = 1 * 1024 * 1024 * 1024 // 1 GB
     private let fileManager = FileManager.default
-    private let baseURL = "https://bom.best/beats/api"
+    private let baseURL = "https://beats.bom.best"
     
     // Directories
     private var cacheDir: URL? {
@@ -156,5 +156,89 @@ class FileCacheService: ObservableObject {
         } catch {
             print("[Cache] Clean error: \(error)")
         }
+    }
+    
+    // MARK: - Download All Mode
+    
+    /// Download all tracks to local storage for offline playback
+    func downloadAllTracks(_ tracks: [Track]) {
+        Task {
+            print("[Download] Starting download of \(tracks.count) tracks")
+            var downloaded = 0
+            var failed = 0
+            
+            for track in tracks {
+                // Skip if already downloaded
+                if getLocalFile(for: track.id) != nil {
+                    downloaded += 1
+                    continue
+                }
+                
+                // Download to downloads folder (permanent)
+                guard let destURL = downloadsDir?.appendingPathComponent("\(track.id).mp3"),
+                      let streamURL = URL(string: "\(baseURL)/stream/\(track.id)") else {
+                    failed += 1
+                    continue
+                }
+                
+                var request = URLRequest(url: streamURL)
+                if let token = UserDefaults.standard.string(forKey: "authToken") {
+                    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+                }
+                
+                do {
+                    let (tempURL, _) = try await URLSession.shared.download(for: request)
+                    let data = try Data(contentsOf: tempURL)
+                    try data.write(to: destURL)
+                    downloaded += 1
+                    print("[Download] \(downloaded)/\(tracks.count): \(track.displayTitle)")
+                } catch {
+                    failed += 1
+                    print("[Download] Failed \(track.displayTitle): \(error.localizedDescription)")
+                }
+            }
+            
+            await MainActor.run {
+                print("[Download] Complete: \(downloaded) downloaded, \(failed) failed")
+            }
+        }
+    }
+    
+    /// Get count of downloaded tracks
+    func getDownloadedCount() -> Int {
+        guard let dir = downloadsDir else { return 0 }
+        let files = (try? fileManager.contentsOfDirectory(atPath: dir.path)) ?? []
+        return files.filter { $0.hasSuffix(".mp3") }.count
+    }
+    
+    /// Get total storage used by downloads (in bytes)
+    func getDownloadsSizeBytes() -> Int64 {
+        guard let dir = downloadsDir else { return 0 }
+        var total: Int64 = 0
+        
+        if let files = try? fileManager.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.fileSizeKey]) {
+            for file in files {
+                if let size = try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize {
+                    total += Int64(size)
+                }
+            }
+        }
+        return total
+    }
+    
+    /// Format bytes as human-readable string
+    func formattedStorageSize() -> String {
+        let bytes = getDownloadsSizeBytes()
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .file
+        return formatter.string(fromByteCount: bytes)
+    }
+    
+    /// Delete all downloads
+    func clearAllDownloads() {
+        guard let dir = downloadsDir else { return }
+        try? fileManager.removeItem(at: dir)
+        createDirs()
+        print("[Download] Cleared all downloads")
     }
 }
