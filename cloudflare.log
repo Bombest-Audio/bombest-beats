@@ -53,3 +53,103 @@
 2025-12-17T23:28:46Z ERR Request failed error="stream 1 canceled by remote with error code 0" connIndex=3 dest=https://beats.bom.best/stream/12 event=0 ip=198.41.200.193 type=http
 2025-12-17T23:29:26Z ERR  error="stream 4185 canceled by remote with error code 0" connIndex=2 event=1 ingressRule=0 originService=http://localhost:8338
 2025-12-17T23:29:26Z ERR Request failed error="stream 4185 canceled by remote with error code 0" connIndex=2 dest=https://beats.bom.best/stream/16 event=0 ip=198.41.192.7 type=http
+2025-12-17T23:35:45Z ERR failed to accept incoming stream requests error="failed to accept QUIC stream: write udp4 0.0.0.0:62645->198.41.200.43:7844: sendmsg: network is unreachable" connIndex=1 event=0 ip=198.41.200.43
+2025-12-17T23:35:45Z ERR failed to run the datagram handler error="write udp4 0.0.0.0:53497->198.41.192.7:7844: sendmsg: network is unreachable" connIndex=2 event=0 ip=198.41.192.7
+2025-12-17T23:35:45Z ERR failed to run the datagram handler error="context canceled" connIndex=1 event=0 ip=198.41.200.43
+2025-12-17T23:35:45Z WRN failed to serve tunnel connection error="accept stream listener encountered a failure while serving" connIndex=1 event=0 ip=198.41.200.43
+2025-12-17T23:35:45Z WRN Serve tunnel error error="accept stream listener encountered a failure while serving" connIndex=1 event=0 ip=198.41.200.43
+2025-12-17T23:35:45Z INF Retrying connection in up to 1s connIndex=1 event=0 ip=198.41.200.43
+2025-12-17T23:35:45Z ERR failed to accept incoming stream requests error="failed to accept QUIC stream: write udp4 0.0.0.0:52288->198.41.192.47:7844: sendmsg: network is unreachable" connIndex=0 event=0 ip=198.41.192.47
+2025-12-17T23:35:45Z ERR failed to run the datagram handler error="context canceled" connIndex=0 event=0 ip=198.41.192.47
+2025-12-17T23:35:45Z WRN failed to serve tunnel connection error="accept stream listener encountered a failure while serving" connIndex=0 event=0 ip=198.41.192.47
+2025-12-17T23:35:45Z WRN Serve tunnel error error="accept stream listener encountered a failure while serving" connIndex=0 event=0 ip=198.41.192.47
+2025-12-17T23:35:45Z INF Retrying connection in up to 1s connIndex=0 event=0 ip=198.41.192.47
+2025-12-17T23:35:44Z ERR failed to accept incoming stream requests error="failed to accept QUIC stream: write udp4 0.0.0.0:53497->198.41.192.7:7844: sendmsg: network is unreachable" connIndex=2 event=0 ip=198.41.192.7
+2025-12-17T23:35:45Z WRN failed to serve tunnel connection error="datagram manager encountered a failure while serving" connIndex=2 event=0 ip=198.41.192.7
+2025-12-17T23:35:45Z WRN Serve tunnel error error="datagram manager encountered a failure while serving" connIndex=2 event=0 ip=198.41.192.7
+2025-12-17T23:35:45Z INF Retrying connection in up to 1s connIndex=2 event=0 ip=198.41.192.7
+2025-12-17T23:35:45Z ERR failed to accept incoming stream requests error="failed to accept QUIC stream: write udp4 0.0.0.0:59047->198.41.200.193:7844: sendmsg: network is unreachable" connIndex=3 event=0 ip=198.41.200.193
+2025-12-17T23:35:45Z ERR failed to run the datagram handler error="context canceled" connIndex=3 event=0 ip=198.41.200.193
+2025-12-17T23:35:45Z ERR failed to serve tunnel connection error="accept stream listener encountered a failure while serving" connIndex=3 event=0 ip=198.41.200.193
+2025-12-17T23:35:45Z ERR Serve tunnel error error="accept stream listener encountered a failure while serving" connIndex=3 event=0 ip=198.41.200.193
+2025-12-17T23:35:45Z INF Retrying connection in up to 1s connIndex=3 event=0 ip=198.41.200.193
+2025-12-17T23:35:55Z ERR Failed to refresh protocol error="lookup protocol-v2.argotunnel.com on 100.100.100.100:53: no such host"
+2025-12-17T23:35:55Z INF Tunnel connection curve preferences: [X25519MLKEM768 CurveP256] connIndex=0 event=0 ip=198.41.192.47
+2025-12-17T23:35:55Z ERR Failed to dial a quic connection error="failed to dial to edge with quic: write udp4 0.0.0.0:52288->198.41.192.47:7844: sendmsg: network is unreachable" connIndex=0 event=0 ip=198.41.192.47
+2025-12-17T23:35:55Z INF Retrying connection in up to 4s connIndex=0 event=0 ip=198.41.192.47
+2025-12-17T23:35:56Z INF Tunnel connection curve preferences: [X25519MLKEM768 CurveP256] connIndex=0 event=0 ip=198.41.192.67
+2025-12-17T23:35:56Z ERR Failed to dial a quic connection error="failed to dial to edge with quic: write udp4 0.0.0.0:52288->198.41.192.67:7844: sendmsg: network is unreachable" connIndex=0 event=0 ip=198.41.192.67
+2025-12-17T23:35:56Z INF Retrying connection in up to 8s connIndex=0 event=0 ip=198.41.192.67
+2025-12-17T23:36:02Z INF Tunnel connection curve preferences: [X25519MLKEM768 CurveP256] connIndex=0 event=0 ip=198.41.192.107
+2025-12-17T23:36:02Z ERR Failed to dial a quic connection error="failed to dial to edge with quic: write udp4 0.0.0.0:52288->198.41.192.107:7844: sendmsg: network is unreachable" connIndex=0 event=0 ip=198.41.192.107
+2025-12-17T23:36:02Z INF Retrying connection in up to 16s connIndex=0 event=0 ip=198.41.192.107
+2025-12-17T23:36:04Z INF Tunnel connection curve preferences: [X25519MLKEM768 CurveP256] connIndex=0 event=0 ip=198.41.192.167
+2025-12-17T23:36:04Z ERR Failed to dial a quic connection error="failed to dial to edge with quic: write udp4 0.0.0.0:52288->198.41.192.167:7844: sendmsg: network is unreachable" connIndex=0 event=0 ip=198.41.192.167
+2025-12-17T23:36:04Z INF Retrying connection in up to 32s connIndex=0 event=0 ip=198.41.192.167
+2025-12-17T23:36:05Z ERR Failed to refresh protocol error="lookup protocol-v2.argotunnel.com on 100.100.100.100:53: no such host"
+2025-12-17T23:36:05Z ERR Connection terminated error="accept stream listener encountered a failure while serving" connIndex=3
+2025-12-17T23:36:08Z INF Tunnel connection curve preferences: [X25519MLKEM768 CurveP256] connIndex=3 event=0 ip=198.41.200.193
+2025-12-17T23:36:08Z ERR Failed to dial a quic connection error="failed to dial to edge with quic: write udp4 0.0.0.0:59047->198.41.200.193:7844: sendmsg: network is unreachable" connIndex=3 event=0 ip=198.41.200.193
+2025-12-17T23:36:08Z INF Retrying connection in up to 4s connIndex=3 event=0 ip=198.41.200.193
+2025-12-17T23:36:10Z ERR Connection terminated error="failed to dial to edge with quic: write udp4 0.0.0.0:59047->198.41.200.193:7844: sendmsg: network is unreachable" connIndex=3
+2025-12-17T23:36:11Z INF Tunnel connection curve preferences: [X25519MLKEM768 CurveP256] connIndex=3 event=0 ip=198.41.200.233
+2025-12-17T23:36:11Z ERR Failed to dial a quic connection error="failed to dial to edge with quic: write udp4 0.0.0.0:59047->198.41.200.233:7844: sendmsg: network is unreachable" connIndex=3 event=0 ip=198.41.200.233
+2025-12-17T23:36:11Z INF Retrying connection in up to 8s connIndex=3 event=0 ip=198.41.200.233
+2025-12-17T23:36:15Z ERR Connection terminated error="failed to dial to edge with quic: write udp4 0.0.0.0:59047->198.41.200.233:7844: sendmsg: network is unreachable" connIndex=3
+2025-12-17T23:36:15Z ERR Failed to refresh protocol error="lookup protocol-v2.argotunnel.com on 100.100.100.100:53: no such host"
+2025-12-17T23:36:15Z ERR Connection terminated error="accept stream listener encountered a failure while serving" connIndex=1
+2025-12-17T23:36:18Z INF Tunnel connection curve preferences: [X25519MLKEM768 CurveP256] connIndex=0 event=0 ip=198.41.192.47
+2025-12-17T23:36:18Z ERR Failed to dial a quic connection error="failed to dial to edge with quic: write udp4 0.0.0.0:52288->198.41.192.47:7844: sendmsg: network is unreachable" connIndex=0 event=0 ip=198.41.192.47
+2025-12-17T23:36:18Z INF Retrying connection in up to 1m4s connIndex=0 event=0 ip=198.41.192.47
+2025-12-17T23:36:25Z ERR Failed to refresh protocol error="lookup protocol-v2.argotunnel.com on 100.100.100.100:53: no such host"
+2025-12-17T23:36:25Z ERR Connection terminated error="datagram manager encountered a failure while serving" connIndex=2
+2025-12-17T23:49:06Z INF Tunnel connection curve preferences: [X25519MLKEM768 CurveP256] connIndex=3 event=0 ip=198.41.200.113
+2025-12-17T23:49:06Z INF Tunnel connection curve preferences: [X25519MLKEM768 CurveP256] connIndex=2 event=0 ip=198.41.192.7
+2025-12-17T23:49:06Z INF Tunnel connection curve preferences: [X25519MLKEM768 CurveP256] connIndex=1 event=0 ip=198.41.200.43
+2025-12-17T23:49:06Z ERR Failed to dial a quic connection error="failed to dial to edge with quic: write udp4 0.0.0.0:59047->198.41.200.113:7844: sendmsg: network is unreachable" connIndex=3 event=0 ip=198.41.200.113
+2025-12-17T23:49:06Z INF Retrying connection in up to 16s connIndex=3 event=0 ip=198.41.200.113
+2025-12-17T23:49:06Z ERR Failed to dial a quic connection error="failed to dial to edge with quic: write udp4 0.0.0.0:53497->198.41.192.7:7844: sendmsg: network is unreachable" connIndex=2 event=0 ip=198.41.192.7
+2025-12-17T23:49:06Z INF Retrying connection in up to 4s connIndex=2 event=0 ip=198.41.192.7
+2025-12-17T23:49:06Z ERR Failed to dial a quic connection error="failed to dial to edge with quic: write udp4 0.0.0.0:62645->198.41.200.43:7844: sendmsg: network is unreachable" connIndex=1 event=0 ip=198.41.200.43
+2025-12-17T23:49:06Z INF Retrying connection in up to 4s connIndex=1 event=0 ip=198.41.200.43
+2025-12-17T23:49:08Z ERR Connection terminated error="failed to dial to edge with quic: write udp4 0.0.0.0:62645->198.41.200.43:7844: sendmsg: network is unreachable" connIndex=1
+2025-12-17T23:49:09Z ERR Connection terminated error="failed to dial to edge with quic: write udp4 0.0.0.0:53497->198.41.192.7:7844: sendmsg: network is unreachable" connIndex=2
+2025-12-17T23:49:13Z ERR Connection terminated error="failed to dial to edge with quic: write udp4 0.0.0.0:59047->198.41.200.113:7844: sendmsg: network is unreachable" connIndex=3
+2025-12-17T23:49:17Z INF Tunnel connection curve preferences: [X25519MLKEM768 CurveP256] connIndex=0 event=0 ip=198.41.192.27
+2025-12-17T23:49:17Z INF Registered tunnel connection connIndex=0 connection=3f2c0ffd-26a5-4b7c-8769-cb14f3c889b0 event=0 ip=198.41.192.27 location=lax05 protocol=quic
+2025-12-17T23:49:58Z ERR failed to run the datagram handler error="timeout: no recent network activity" connIndex=0 event=0 ip=198.41.192.27
+2025-12-17T23:49:58Z ERR failed to accept incoming stream requests error="failed to accept QUIC stream: timeout: no recent network activity" connIndex=0 event=0 ip=198.41.192.27
+2025-12-17T23:49:58Z ERR  error="timeout: no recent network activity" connIndex=0 event=1 ingressRule=0 originService=http://localhost:8338
+2025-12-17T23:49:58Z ERR Request failed error="timeout: no recent network activity" connIndex=0 dest=https://beats.bom.best/stream/17 event=0 ip=198.41.192.27 type=http
+2025-12-17T23:49:58Z ERR failed to serve tunnel connection error="datagram manager encountered a failure while serving" connIndex=0 event=0 ip=198.41.192.27
+2025-12-17T23:49:58Z ERR Serve tunnel error error="datagram manager encountered a failure while serving" connIndex=0 event=0 ip=198.41.192.27
+2025-12-17T23:49:58Z INF Retrying connection in up to 1s connIndex=0 event=0 ip=198.41.192.27
+2025-12-17T23:50:00Z INF Tunnel connection curve preferences: [X25519MLKEM768 CurveP256] connIndex=0 event=0 ip=198.41.192.27
+2025-12-17T23:50:03Z INF Registered tunnel connection connIndex=0 connection=5a7e9b38-3682-4200-a4e3-ecc41e524263 event=0 ip=198.41.192.27 location=lax05 protocol=quic
+2025-12-17T23:50:19Z ERR  error="stream 1 canceled by remote with error code 0" connIndex=0 event=1 ingressRule=0 originService=http://localhost:8338
+2025-12-17T23:50:19Z ERR Request failed error="stream 1 canceled by remote with error code 0" connIndex=0 dest=https://beats.bom.best/stream/17 event=0 ip=198.41.192.27 type=http
+2025-12-17T23:50:28Z ERR failed to run the datagram handler error="timeout: no recent network activity" connIndex=0 event=0 ip=198.41.192.27
+2025-12-17T23:50:28Z ERR  error="timeout: no recent network activity" connIndex=0 event=1 ingressRule=0 originService=http://localhost:8338
+2025-12-17T23:50:28Z ERR Request failed error="timeout: no recent network activity" connIndex=0 dest=https://beats.bom.best/stream/18 event=0 ip=198.41.192.27 type=http
+2025-12-17T23:50:28Z ERR failed to accept incoming stream requests error="failed to accept QUIC stream: timeout: no recent network activity" connIndex=0 event=0 ip=198.41.192.27
+2025-12-17T23:50:28Z ERR failed to serve tunnel connection error="datagram manager encountered a failure while serving" connIndex=0 event=0 ip=198.41.192.27
+2025-12-17T23:50:28Z ERR Serve tunnel error error="datagram manager encountered a failure while serving" connIndex=0 event=0 ip=198.41.192.27
+2025-12-17T23:50:28Z INF Retrying connection in up to 1s connIndex=0 event=0 ip=198.41.192.27
+2025-12-17T23:50:30Z INF Tunnel connection curve preferences: [X25519MLKEM768 CurveP256] connIndex=0 event=0 ip=198.41.192.27
+2025-12-17T23:50:35Z ERR Failed to dial a quic connection error="failed to dial to edge with quic: timeout: no recent network activity" connIndex=0 event=0 ip=198.41.192.27
+2025-12-17T23:50:35Z INF Retrying connection in up to 4s connIndex=0 event=0 ip=198.41.192.27
+2025-12-17T23:50:37Z INF Tunnel connection curve preferences: [X25519MLKEM768 CurveP256] connIndex=0 event=0 ip=198.41.192.167
+2025-12-17T23:50:42Z ERR Failed to dial a quic connection error="failed to dial to edge with quic: timeout: no recent network activity" connIndex=0 event=0 ip=198.41.192.167
+2025-12-17T23:50:42Z INF Retrying connection in up to 8s connIndex=0 event=0 ip=198.41.192.167
+2025-12-17T23:50:45Z INF Tunnel connection curve preferences: [X25519MLKEM768 CurveP256] connIndex=0 event=0 ip=198.41.192.7
+2025-12-17T23:50:45Z ERR Failed to dial a quic connection error="failed to dial to edge with quic: write udp4 0.0.0.0:52288->198.41.192.7:7844: sendmsg: network is unreachable" connIndex=0 event=0 ip=198.41.192.7
+2025-12-17T23:50:45Z INF Retrying connection in up to 16s connIndex=0 event=0 ip=198.41.192.7
+2025-12-17T23:50:50Z ERR Failed to refresh DNS local resolver error="lookup region1.v2.argotunnel.com: i/o timeout"
+2025-12-17T23:50:56Z INF Tunnel connection curve preferences: [X25519MLKEM768 CurveP256] connIndex=0 event=0 ip=198.41.192.47
+2025-12-17T23:50:56Z INF Registered tunnel connection connIndex=0 connection=99fad0d2-a22f-4c71-8122-d689d389489a event=0 ip=198.41.192.47 location=lax05 protocol=quic
+2025-12-17T23:51:25Z INF Tunnel connection curve preferences: [X25519MLKEM768 CurveP256] connIndex=3 event=0 ip=198.41.200.193
+2025-12-17T23:51:25Z INF Tunnel connection curve preferences: [X25519MLKEM768 CurveP256] connIndex=1 event=0 ip=198.41.200.33
+2025-12-17T23:51:25Z INF Tunnel connection curve preferences: [X25519MLKEM768 CurveP256] connIndex=2 event=0 ip=198.41.192.57
+2025-12-17T23:51:25Z INF Registered tunnel connection connIndex=3 connection=fba5122c-b620-4023-87f7-c78a285459d1 event=0 ip=198.41.200.193 location=lax06 protocol=quic
+2025-12-17T23:51:25Z INF Registered tunnel connection connIndex=1 connection=8180d1fd-1ad6-4957-83d4-c026b210e8ef event=0 ip=198.41.200.33 location=lax06 protocol=quic
+2025-12-17T23:51:25Z INF Registered tunnel connection connIndex=2 connection=05b63d72-81f1-483a-838b-1564b1fef3ce event=0 ip=198.41.192.57 location=lax05 protocol=quic

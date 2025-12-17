@@ -151,26 +151,78 @@ class AudioService: NSObject, ObservableObject {
         player.removeAllItems()
         
         // 1. Check Cache
-        let asset: AVURLAsset
         if let localURL = FileCacheService.shared.getLocalFile(for: track.id) {
-            print("[Audio] Playing local file: \(localURL.lastPathComponent)")
-            asset = AVURLAsset(url: localURL)
-        } else {
-            // 2. Play Remote
-            guard let url = URL(string: "\(baseURL)/stream/\(track.id)") else { return }
-            print("[Audio] Playing remote: \(track.id)")
+            print("[Audio] Attempting local file: \(localURL.lastPathComponent)")
             
-             if let token = UserDefaults.standard.string(forKey: "authToken") {
-                  asset = AVURLAsset(url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": ["Authorization": "Bearer \(token)"]])
-             } else {
-                  asset = AVURLAsset(url: url)
-             }
-            
-            // 3. Trigger Cache Download (Background)
-            FileCacheService.shared.cacheTrack(trackId: track.id)
+            // Validate file exists and has content
+            if FileManager.default.fileExists(atPath: localURL.path),
+               let attrs = try? FileManager.default.attributesOfItem(atPath: localURL.path),
+               let size = attrs[.size] as? Int64, size > 1000 { // Minimum 1KB for valid audio
+                
+                let asset = AVURLAsset(url: localURL)
+                
+                // Async load to validate
+                Task {
+                    do {
+                        let isPlayable = try await asset.load(.isPlayable)
+                        if isPlayable {
+                            await MainActor.run {
+                                print("[Audio] Playing local file: \(localURL.lastPathComponent)")
+                                self.playAsset(asset, for: track)
+                            }
+                        } else {
+                            print("[Audio] Local file not playable, falling back to stream")
+                            await self.playFromStream(track: track)
+                        }
+                    } catch {
+                        print("[Audio] Local file error: \(error.localizedDescription), falling back to stream")
+                        await self.playFromStream(track: track)
+                    }
+                }
+                return
+            } else {
+                print("[Audio] Local file invalid or too small, using stream")
+            }
         }
         
+        // 2. Play Remote
+        Task {
+            await playFromStream(track: track)
+        }
+    }
+    
+    @MainActor
+    private func playFromStream(track: Track) async {
+        guard let url = URL(string: "\(baseURL)/stream/\(track.id)") else { return }
+        print("[Audio] Playing remote: \(track.id)")
+        
+        let asset: AVURLAsset
+        if let token = UserDefaults.standard.string(forKey: "authToken") {
+            asset = AVURLAsset(url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": ["Authorization": "Bearer \(token)"]])
+        } else {
+            asset = AVURLAsset(url: url)
+        }
+        
+        playAsset(asset, for: track)
+        
+        // Trigger Cache Download (Background)
+        FileCacheService.shared.cacheTrack(trackId: track.id)
+    }
+    
+    private func playAsset(_ asset: AVURLAsset, for track: Track) {
         let item = AVPlayerItem(asset: asset)
+        
+        // Observe for errors
+        NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemFailedToPlayToEndTime,
+            object: item,
+            queue: .main
+        ) { notification in
+            if let error = notification.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error {
+                print("[Audio] Playback error: \(error.localizedDescription)")
+            }
+        }
+        
         player.insert(item, after: nil)
         
         self.currentTrack = track
