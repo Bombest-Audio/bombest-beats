@@ -3,5 +3,22 @@
 [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
  * Running on all addresses (0.0.0.0)
  * Running on http://127.0.0.1:8338
- * Running on http://192.168.86.31:8338
+ * Running on http://10.28.65.39:8338
 [33mPress CTRL+C to quit[0m
+127.0.0.1 - - [18/Dec/2025 10:40:28] "GET /playlists HTTP/1.1" 200 -
+127.0.0.1 - - [18/Dec/2025 10:40:28] "GET /library HTTP/1.1" 200 -
+127.0.0.1 - - [18/Dec/2025 10:40:28] "GET /library HTTP/1.1" 200 -
+127.0.0.1 - - [18/Dec/2025 10:40:28] "GET /waveform/16 HTTP/1.1" 200 -
+127.0.0.1 - - [18/Dec/2025 10:40:29] "[35m[1mGET /stream/16 HTTP/1.1[0m" 206 -
+127.0.0.1 - - [18/Dec/2025 10:40:32] "GET /playlists HTTP/1.1" 200 -
+127.0.0.1 - - [18/Dec/2025 10:40:34] "GET /playlists/4/tracks HTTP/1.1" 200 -
+127.0.0.1 - - [18/Dec/2025 10:40:36] "GET /playlists/6/tracks HTTP/1.1" 200 -
+127.0.0.1 - - [18/Dec/2025 10:40:40] "GET /waveform/26 HTTP/1.1" 200 -
+127.0.0.1 - - [18/Dec/2025 10:40:40] "GET /stream/26 HTTP/1.1" 200 -
+127.0.0.1 - - [18/Dec/2025 10:40:40] "GET /waveform/26 HTTP/1.1" 200 -
+127.0.0.1 - - [18/Dec/2025 10:40:41] "DELETE /playlists/6/tracks HTTP/1.1" 200 -
+127.0.0.1 - - [18/Dec/2025 10:40:47] "GET /playlists/6/tracks HTTP/1.1" 200 -
+127.0.0.1 - - [18/Dec/2025 10:40:55] "POST /playlists/6/tracks HTTP/1.1" 200 -
+127.0.0.1 - - [18/Dec/2025 10:40:56] "GET /playlists/6/tracks HTTP/1.1" 200 -
+127.0.0.1 - - [18/Dec/2025 10:42:01] "GET /playlists HTTP/1.1" 200 -
+127.0.0.1 - - [18/Dec/2025 10:42:05] "GET /playlists/4/tracks HTTP/1.1" 200 -
