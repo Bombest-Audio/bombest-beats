@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Done
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.PlayArrow
@@ -98,17 +99,57 @@ fun PlaylistsScreen(
                 )
             } else if (playlists.isEmpty()) {
                 Text(
-                    text = "No playlists yet.\nTap + to create one!",
-                    color = Color.Gray,
-                    modifier = Modifier.align(Alignment.Center)
+                    "No playlists yet",
+                    modifier = Modifier.align(Alignment.Center),
+                    color = Color.Gray
                 )
             } else {
+                // Phase 3: Partition system playlists (All Songs, Favorites) from user playlists
+                val systemPlaylists = playlists.filter { it.name == "All Songs" || it.name == "Favorites" }
+                val userPlaylists = playlists.filter { it.name != "All Songs" && it.name != "Favorites" }
+                
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    items(playlists) { playlist ->
+                    // System Playlists Section - Pinned at top
+                    if (systemPlaylists.isNotEmpty()) {
+                        item {
+                            Text(
+                                text = "Library",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.Gray,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(bottom = 8.dp)
+                            )
+                        }
+                        
+                        items(systemPlaylists) { playlist ->
+                            SystemPlaylistCard(
+                                playlist = playlist,
+                                onClick = { onPlaylistClick(playlist.id) },
+                                onPlayClick = { onPlayPlaylist(playlist.id, playlist.name) }
+                            )
+                        }
+                        
+                        // Divider between system and user playlists
+                        if (userPlaylists.isNotEmpty()) {
+                            item {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    text = "Your Playlists",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color.Gray,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(top = 8.dp, bottom = 8.dp)
+                                )
+                            }
+                        }
+                    }
+                    
+                    // User Playlists  
+                    items(userPlaylists) { playlist ->
                         PlaylistItem(
                             playlist = playlist,
                             onClick = { onPlaylistClick(playlist.id) },
@@ -749,6 +790,89 @@ fun PlaylistTrackItem(
             
             IconButton(onClick = onRemove) {
                 Icon(Icons.Default.Delete, contentDescription = "Remove", tint = Color.Gray)
+            }
+        }
+    }
+}
+
+// Phase 3: System Playlist Card with distinctive styling
+@Composable
+fun SystemPlaylistCard(
+    playlist: Playlist,
+    onClick: () -> Unit,
+    onPlayClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = Color(0xFF252A3F)  // Slightly lighter than user playlists
+        )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Icon for playlist type
+            Box(
+                modifier = Modifier
+                    .size(56.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(
+                        Brush.linearGradient(
+                            colors = if (playlist.name == "Favorites") {
+                                listOf(Color(0xFFE90060), Color(0xFFFF1744))
+                            } else {
+                                listOf(Color(0xFF4A90E2), Color(0xFF357ABD))
+                            }
+                        )
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = if (playlist.name == "Favorites") {
+                        Icons.Default.FavoriteBorder
+                    } else {
+                        Icons.Default.List
+                    },
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(28.dp)
+                )
+            }
+            
+            Spacer(modifier = Modifier.width(16.dp))
+            
+            // Playlist info
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = playlist.name,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp,
+                    color = Color.White
+                )
+                Text(
+                    text = "${playlist.count} ${if (playlist.count == 1) "track" else "tracks"}",
+                    fontSize = 14.sp,
+                    color = Color.Gray
+                )
+            }
+            
+            // Play button
+            IconButton(
+                onClick = { onPlayClick() },
+                modifier = Modifier.size(40.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.PlayArrow,
+                    contentDescription = "Play",
+                    tint = Color(0xFFE90060),
+                    modifier = Modifier.size(28.dp)
+                )
             }
         }
     }
