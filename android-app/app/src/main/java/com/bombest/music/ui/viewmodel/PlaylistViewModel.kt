@@ -25,7 +25,7 @@ class PlaylistViewModel : ViewModel() {
     
     fun initialize(context: Context) {
         val logging = HttpLoggingInterceptor().apply {
-            level = HttpLoggingInterceptor.Level.BODY
+            level = HttpLoggingInterceptor.Level.BASIC
         }
         val client = OkHttpClient.Builder()
             .addInterceptor(logging)
@@ -34,7 +34,7 @@ class PlaylistViewModel : ViewModel() {
             .build()
         
         val retrofit = Retrofit.Builder()
-            .baseUrl("https://bom.best/beats/api/")
+            .baseUrl(com.bombest.music.data.NetworkModule.currentBaseUrl)
             .client(client)
             .addConverterFactory(MoshiConverterFactory.create())
             .build()
@@ -57,10 +57,10 @@ class PlaylistViewModel : ViewModel() {
         }
     }
     
-    fun createPlaylist(name: String) {
+    fun createPlaylist(name: String, isPublic: Boolean = false) {
         viewModelScope.launch {
             try {
-                val playlist = playlistApi.createPlaylist(CreatePlaylistRequest(name))
+                val playlist = playlistApi.createPlaylist(CreatePlaylistRequest(name, isPublic))
                 playlists.add(0, playlist)
             } catch (e: Exception) {
                 error.value = e.message

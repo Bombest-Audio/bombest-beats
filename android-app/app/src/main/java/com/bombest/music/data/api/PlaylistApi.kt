@@ -6,11 +6,15 @@ data class Playlist(
     val id: Int,
     val name: String,
     val count: Int = 0,
-    val created_at: String? = null
+    val created_at: String? = null,
+    val is_public: Boolean = false  // Admin can publish to all users
 )
 
 data class PlaylistsResponse(val playlists: List<Playlist>)
-data class CreatePlaylistRequest(val name: String)
+data class CreatePlaylistRequest(
+    val name: String,
+    val is_public: Boolean = false  // false = local only, true = published to network
+)
 data class AddTracksRequest(val track_ids: List<Int>)
 
 interface PlaylistApi {

@@ -1478,21 +1478,30 @@ def get_playlists():
 
 @app.route('/playlists', methods=['POST'])
 def create_playlist():
-    """Create a new playlist"""
+    """Create a new playlist. Admin can set is_public=True to publish to all users."""
     try:
         data = request.get_json()
         name = data.get('name')
+        is_public = data.get('is_public', False)
         if not name:
             return jsonify({'error': 'Name is required'}), 400
             
         conn = sqlite3.connect('music/users.db')
         cursor = conn.cursor()
-        cursor.execute("INSERT INTO playlists (name) VALUES (?)", (name,))
+        
+        # Check if is_public column exists, add if not
+        cursor.execute("PRAGMA table_info(playlists)")
+        columns = [col[1] for col in cursor.fetchall()]
+        if 'is_public' not in columns:
+            cursor.execute("ALTER TABLE playlists ADD COLUMN is_public INTEGER DEFAULT 0")
+            conn.commit()
+        
+        cursor.execute("INSERT INTO playlists (name, is_public) VALUES (?, ?)", (name, 1 if is_public else 0))
         playlist_id = cursor.lastrowid
         conn.commit()
         conn.close()
         
-        return jsonify({'id': playlist_id, 'name': name, 'count': 0}), 201
+        return jsonify({'id': playlist_id, 'name': name, 'count': 0, 'is_public': is_public}), 201
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
