@@ -33,10 +33,14 @@ class PlaylistViewModel : ViewModel() {
             .readTimeout(10, TimeUnit.SECONDS)
             .build()
         
+        val moshi = com.squareup.moshi.Moshi.Builder()
+            .add(com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory())
+            .build()
+        
         val retrofit = Retrofit.Builder()
             .baseUrl(com.bombest.music.data.NetworkModule.currentBaseUrl)
             .client(client)
-            .addConverterFactory(MoshiConverterFactory.create())
+            .addConverterFactory(MoshiConverterFactory.create(moshi))
             .build()
         
         playlistApi = retrofit.create(PlaylistApi::class.java)
@@ -60,9 +64,14 @@ class PlaylistViewModel : ViewModel() {
     fun createPlaylist(name: String, isPublic: Boolean = false) {
         viewModelScope.launch {
             try {
+                android.util.Log.d("PlaylistViewModel", "Creating playlist: $name, isPublic: $isPublic")
                 val playlist = playlistApi.createPlaylist(CreatePlaylistRequest(name, isPublic))
+                android.util.Log.d("PlaylistViewModel", "Playlist created: ${playlist.id}, ${playlist.name}")
                 playlists.add(0, playlist)
+                // Also reload to ensure sync
+                loadPlaylists()
             } catch (e: Exception) {
+                android.util.Log.e("PlaylistViewModel", "Failed to create playlist: ${e.message}", e)
                 error.value = e.message
             }
         }
@@ -100,6 +109,20 @@ class PlaylistViewModel : ViewModel() {
                 playlistApi.removeTracksFromPlaylist(playlistId, AddTracksRequest(listOf(trackId)))
                 currentPlaylistTracks.removeAll { it.id == trackId }
             } catch (e: Exception) {
+                error.value = e.message
+            }
+        }
+    }
+    
+    fun addTracksToPlaylist(playlistId: Int, trackIds: List<Int>) {
+        viewModelScope.launch {
+            try {
+                android.util.Log.d("PlaylistViewModel", "Adding ${trackIds.size} tracks to playlist $playlistId")
+                playlistApi.addTracksToPlaylist(playlistId, AddTracksRequest(trackIds))
+                // Reload playlist tracks to refresh the list
+                loadPlaylistTracks(playlistId, currentPlaylistName.value)
+            } catch (e: Exception) {
+                android.util.Log.e("PlaylistViewModel", "Failed to add tracks: ${e.message}", e)
                 error.value = e.message
             }
         }

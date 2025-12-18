@@ -239,14 +239,32 @@ fun MainContent(
             
             Screen.PLAYLIST_DETAIL -> {
                 PlaylistDetailScreen(
+                    playlistId = selectedPlaylistId ?: 0,
                     playlistName = playlistViewModel.currentPlaylistName.value,
                     tracks = playlistViewModel.currentPlaylistTracks,
+                    allTracks = viewModel.playlist.mapNotNull { mediaItem ->
+                        try {
+                            com.bombest.music.data.api.Track(
+                                id = mediaItem.mediaId.toInt(),
+                                title = mediaItem.mediaMetadata.title?.toString() ?: "Unknown",
+                                artist = mediaItem.mediaMetadata.artist?.toString() ?: "Unknown",
+                                album = mediaItem.mediaMetadata.albumTitle?.toString(),
+                                duration = null,
+                                path = ""
+                            )
+                        } catch (e: NumberFormatException) {
+                            null // Skip non-numeric IDs like "playlists"
+                        }
+                    },
                     isLoading = playlistViewModel.isLoading.value,
                     onTrackClick = { track ->
                         // TODO: Play track from playlist
                     },
                     onRemoveTrack = { trackId ->
                         selectedPlaylistId?.let { playlistViewModel.removeTrackFromPlaylist(it, trackId) }
+                    },
+                    onAddTracks = { trackIds ->
+                        selectedPlaylistId?.let { playlistViewModel.addTracksToPlaylist(it, trackIds) }
                     },
                     onBack = { currentScreen = Screen.PLAYLISTS }
                 )

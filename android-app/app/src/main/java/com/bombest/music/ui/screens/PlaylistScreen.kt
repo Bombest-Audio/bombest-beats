@@ -182,13 +182,19 @@ fun PlaylistItem(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PlaylistDetailScreen(
+    playlistId: Int = 0,
     playlistName: String,
     tracks: List<Track>,
+    allTracks: List<Track> = emptyList(),
     isLoading: Boolean,
     onTrackClick: (Track) -> Unit,
     onRemoveTrack: (Int) -> Unit,
+    onAddTracks: (List<Int>) -> Unit = {},
     onBack: () -> Unit
 ) {
+    var showAddTracksDialog by remember { mutableStateOf(false) }
+    var selectedTrackIds by remember { mutableStateOf(setOf<Int>()) }
+    
     Scaffold(
         topBar = {
             TopAppBar(
@@ -198,11 +204,24 @@ fun PlaylistDetailScreen(
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
                     }
                 },
+                actions = {
+                    IconButton(onClick = { showAddTracksDialog = true }) {
+                        Icon(Icons.Default.Add, contentDescription = "Add Tracks", tint = Color.White)
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = Color(0xFF15192A),
                     titleContentColor = Color.White
                 )
             )
+        },
+        floatingActionButton = {
+            FloatingActionButton(
+                onClick = { showAddTracksDialog = true },
+                containerColor = Color(0xFFE90060)
+            ) {
+                Icon(Icons.Default.Add, contentDescription = "Add Tracks", tint = Color.White)
+            }
         },
         containerColor = Color(0xFF0A0D14)
     ) { padding ->
@@ -217,11 +236,24 @@ fun PlaylistDetailScreen(
                     color = Color(0xFFE90060)
                 )
             } else if (tracks.isEmpty()) {
-                Text(
-                    text = "No tracks in this playlist",
-                    color = Color.Gray,
-                    modifier = Modifier.align(Alignment.Center)
-                )
+                Column(
+                    modifier = Modifier.align(Alignment.Center),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = "No tracks in this playlist",
+                        color = Color.Gray
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Button(
+                        onClick = { showAddTracksDialog = true },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE90060))
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Add Tracks")
+                    }
+                }
             } else {
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
@@ -238,6 +270,99 @@ fun PlaylistDetailScreen(
                 }
             }
         }
+    }
+    
+    // Add Tracks Dialog
+    if (showAddTracksDialog) {
+        val existingTrackIds = tracks.map { it.id }.toSet()
+        val availableTracks = allTracks.filter { it.id !in existingTrackIds }
+        
+        AlertDialog(
+            onDismissRequest = { 
+                showAddTracksDialog = false 
+                selectedTrackIds = emptySet()
+            },
+            title = { Text("Add Tracks", color = Color.White) },
+            text = {
+                if (availableTracks.isEmpty()) {
+                    Text("All tracks are already in this playlist", color = Color.Gray)
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.heightIn(max = 400.dp)
+                    ) {
+                        items(availableTracks) { track ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        selectedTrackIds = if (track.id in selectedTrackIds) {
+                                            selectedTrackIds - track.id
+                                        } else {
+                                            selectedTrackIds + track.id
+                                        }
+                                    }
+                                    .padding(vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Checkbox(
+                                    checked = track.id in selectedTrackIds,
+                                    onCheckedChange = { checked ->
+                                        selectedTrackIds = if (checked) {
+                                            selectedTrackIds + track.id
+                                        } else {
+                                            selectedTrackIds - track.id
+                                        }
+                                    },
+                                    colors = CheckboxDefaults.colors(
+                                        checkedColor = Color(0xFFE90060)
+                                    )
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Column {
+                                    Text(
+                                        text = track.title,
+                                        color = Color.White,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = track.artist,
+                                        color = Color.Gray,
+                                        fontSize = 12.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        if (selectedTrackIds.isNotEmpty()) {
+                            onAddTracks(selectedTrackIds.toList())
+                        }
+                        showAddTracksDialog = false
+                        selectedTrackIds = emptySet()
+                    },
+                    enabled = selectedTrackIds.isNotEmpty()
+                ) {
+                    Text("Add ${if (selectedTrackIds.isNotEmpty()) "(${selectedTrackIds.size})" else ""}", 
+                         color = if (selectedTrackIds.isNotEmpty()) Color(0xFFE90060) else Color.Gray)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { 
+                    showAddTracksDialog = false 
+                    selectedTrackIds = emptySet()
+                }) {
+                    Text("Cancel", color = Color.Gray)
+                }
+            },
+            containerColor = Color(0xFF1A1D2E)
+        )
     }
 }
 
