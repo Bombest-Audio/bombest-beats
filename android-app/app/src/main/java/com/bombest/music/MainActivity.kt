@@ -16,11 +16,9 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -29,22 +27,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.media3.common.MediaItem
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 import androidx.datastore.preferences.core.edit
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.bombest.music.data.authDataStore
-import com.bombest.music.data.AuthPreferences
 import com.bombest.music.ui.screens.*
 import com.bombest.music.ui.theme.BombestBeatsTheme
 import com.bombest.music.ui.viewmodel.MainViewModel
 import com.bombest.music.ui.viewmodel.PlaylistViewModel
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.first
-import androidx.datastore.preferences.core.stringPreferencesKey
 import com.bombest.music.data.PasskeyManager
 import com.bombest.music.data.repository.AuthRepository
 import com.bombest.music.data.NetworkModule
@@ -145,10 +138,6 @@ fun MainContent(
     val context = androidx.compose.ui.platform.LocalContext.current
     
     val playlistViewModel: PlaylistViewModel = viewModel()
-    val scope = rememberCoroutineScope()
-    var selectedMediaItems by remember { mutableStateOf(setOf<MediaItem>()) }
-    var showMetadataDialog by remember { mutableStateOf(false) }
-    var isProcessingMetadata by remember { mutableStateOf(false) }
     
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -160,7 +149,6 @@ fun MainContent(
         viewModel.initializeController(context)
         permissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
         playlistViewModel.initialize(context)
-        playlistViewModel.initializeSystemPlaylists()
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -168,74 +156,28 @@ fun MainContent(
             Screen.LIBRARY -> {
                 Scaffold(
                     topBar = {
-                        if (selectedMediaItems.isEmpty()) {
-                            TopAppBar(
-                                title = { Text("bombest beats", fontWeight = FontWeight.Bold) },
-                                navigationIcon = {
-                                    IconButton(onClick = { 
-                                        if (viewModel.canNavigateUp.value) {
-                                            viewModel.navigateUp()
-                                        } else {
-                                            isMenuOpen = true 
-                                        }
-                                    }) {
-                                        if (viewModel.canNavigateUp.value) {
-                                            Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
-                                        } else {
-                                            Icon(Icons.Default.Menu, contentDescription = "Menu", tint = Color.White)
-                                        }
+                        TopAppBar(
+                            title = { Text("bombest beats", fontWeight = FontWeight.Bold) },
+                            navigationIcon = {
+                                IconButton(onClick = { 
+                                    if (viewModel.canNavigateUp.value) {
+                                        viewModel.navigateUp()
+                                    } else {
+                                        isMenuOpen = true 
                                     }
-                                },
-                                colors = TopAppBarDefaults.topAppBarColors(
-                                    containerColor = Color(0xFF15192A),
-                                    titleContentColor = Color.White
-                                )
+                                }) {
+                                    if (viewModel.canNavigateUp.value) {
+                                        Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
+                                    } else {
+                                        Icon(Icons.Default.Menu, contentDescription = "Menu", tint = Color.White)
+                                    }
+                                }
+                            },
+                            colors = TopAppBarDefaults.topAppBarColors(
+                                containerColor = Color(0xFF15192A),
+                                titleContentColor = Color.White
                             )
-                        } else {
-                            TopAppBar(
-                                title = { Text("${selectedMediaItems.size} selected") },
-                                navigationIcon = {
-                                    IconButton(onClick = { selectedMediaItems = emptySet() }) {
-                                        Icon(Icons.Default.Close, contentDescription = "Clear Selection", tint = Color.White)
-                                    }
-                                },
-                                actions = {
-                                    IconButton(onClick = { showMetadataDialog = true }) {
-                                        Icon(Icons.Default.Edit, contentDescription = "Edit Metadata", tint = Color.White)
-                                    }
-                                    IconButton(onClick = { 
-                                        // Delete selected tracks
-                                        scope.launch {
-                                            val token = context.authDataStore.data.map { it[AuthPreferences.TOKEN_KEY] }.first()
-                                            if (token != null) {
-                                                selectedMediaItems.forEach { item ->
-                                                    val trackId = item.mediaId.toIntOrNull()
-                                                    if (trackId != null) {
-                                                        try {
-                                                            val response = NetworkModule.api.deleteTrack(trackId, "Bearer $token")
-                                                            if (response.isSuccessful) {
-                                                                // Remove from local playlist
-                                                                viewModel.playlist.remove(item)
-                                                            }
-                                                        } catch (e: Exception) {
-                                                            android.util.Log.e("MainActivity", "Failed to delete track", e)
-                                                        }
-                                                    }
-                                                }
-                                                selectedMediaItems = emptySet()
-                                                viewModel.refreshLibrary()
-                                            }
-                                        }
-                                    }) {
-                                        Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color(0xFFFF6B6B))
-                                    }
-                                },
-                                colors = TopAppBarDefaults.topAppBarColors(
-                                    containerColor = Color(0xFF15192A),
-                                    titleContentColor = Color.White
-                                )
-                            )
-                        }
+                        )
                     },
                     bottomBar = {
                         if (!isPlayerOpen) {
@@ -268,40 +210,8 @@ fun MainContent(
                             },
                             isRefreshing = viewModel.isRefreshing.value,
                             onRefresh = { viewModel.refreshLibrary() },
-                            onDelete = { item -> viewModel.playlist.remove(item) },
-                            selectedItems = selectedMediaItems,
-                            onToggleSelection = { item ->
-                                selectedMediaItems = if (selectedMediaItems.contains(item)) {
-                                    selectedMediaItems - item
-                                } else {
-                                    selectedMediaItems + item
-                                }
-                            }
+                            onDelete = { item -> viewModel.playlist.remove(item) }
                         )
-                        
-                        if (showMetadataDialog) {
-                            com.bombest.music.ui.components.MetadataEditDialog(
-                                initialTitle = if (selectedMediaItems.size == 1) selectedMediaItems.first().mediaMetadata.title?.toString() else null,
-                                initialArtist = if (selectedMediaItems.size == 1) selectedMediaItems.first().mediaMetadata.artist?.toString() else null,
-                                initialAlbum = if (selectedMediaItems.size == 1) selectedMediaItems.first().mediaMetadata.albumTitle?.toString() else null,
-                                isBatch = selectedMediaItems.size > 1,
-                                isProcessing = isProcessingMetadata,
-                                onConfirm = { metadata ->
-                                    val trackIds = selectedMediaItems.mapNotNull { it.mediaId.toIntOrNull() }
-                                    isProcessingMetadata = true
-                                    viewModel.modifyTracks(trackIds, metadata) { success ->
-                                        isProcessingMetadata = false
-                                        if (success) {
-                                            selectedMediaItems = emptySet()
-                                            showMetadataDialog = false
-                                        } else {
-                                            android.widget.Toast.makeText(context, "Failed to update metadata", android.widget.Toast.LENGTH_SHORT).show()
-                                        }
-                                    }
-                                },
-                                onDismiss = { showMetadataDialog = false }
-                            )
-                        }
                         
                         // Handle back button for library navigation
                         BackHandler(enabled = viewModel.canNavigateUp.value) {
@@ -322,18 +232,6 @@ fun MainContent(
                         playlistViewModel.loadPlaylistTracks(id, playlist?.name ?: "")
                         currentScreen = Screen.PLAYLIST_DETAIL
                     },
-                    onPlayPlaylist = { id, _ ->
-                        scope.launch {
-                            try {
-                                val tracks = playlistViewModel.getPlaylistTracksRaw(id)
-                                if (tracks.isNotEmpty()) {
-                                    viewModel.playCustomPlaylist(tracks, 0)
-                                }
-                            } catch (e: Exception) {
-                                android.util.Log.e("MainActivity", "Failed to play playlist: ${e.message}")
-                            }
-                        }
-                    },
                     onDeletePlaylist = { id -> playlistViewModel.deletePlaylist(id) },
                     onBack = { currentScreen = Screen.LIBRARY }
                 )
@@ -344,31 +242,16 @@ fun MainContent(
                     playlistId = selectedPlaylistId ?: 0,
                     playlistName = playlistViewModel.currentPlaylistName.value,
                     tracks = playlistViewModel.currentPlaylistTracks,
-                    allTracks = playlistViewModel.allTracks,
-                    stagedTrackIds = playlistViewModel.stagedTrackIds,
+                    allTracks = playlistViewModel.allTracks,  // Use ViewModel's allTracks from API
                     isLoading = playlistViewModel.isLoading.value,
                     onTrackClick = { track ->
-                        val index = playlistViewModel.currentPlaylistTracks.indexOf(track)
-                        if (index != -1) {
-                            viewModel.playCustomPlaylist(playlistViewModel.currentPlaylistTracks, index)
-                        }
+                        // TODO: Play track from playlist
                     },
-                    onRemoveTrack = { trackId -> 
+                    onRemoveTrack = { trackId ->
                         selectedPlaylistId?.let { playlistViewModel.removeTrackFromPlaylist(it, trackId) }
                     },
-                    onToggleStage = { trackId -> playlistViewModel.toggleStageTrack(trackId) },
                     onAddTracks = { trackIds ->
                         selectedPlaylistId?.let { playlistViewModel.addTracksToPlaylist(it, trackIds) }
-                    },
-                    // Phase 3: Wire search and sort callbacks
-                    onSearch = { query ->
-                        selectedPlaylistId?.let { playlistViewModel.searchPlaylist(it, query) }
-                    },
-                    onSort = { sortMode ->
-                        selectedPlaylistId?.let { playlistViewModel.sortPlaylist(it, sortMode) }
-                    },
-                    onDismiss = {
-                        playlistViewModel.clearStagedTracks()
                     },
                     onBack = { currentScreen = Screen.PLAYLISTS }
                 )

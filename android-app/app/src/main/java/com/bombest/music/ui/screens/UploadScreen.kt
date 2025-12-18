@@ -126,20 +126,16 @@ fun UploadScreen(onBack: () -> Unit) {
                     val mediaType = context.contentResolver.getType(uri)?.toMediaType() 
                         ?: "audio/mpeg".toMediaType()
                     
-                    Log.d(TAG, "Media type: $mediaType")
-                    
                     val requestBody = MultipartBody.Builder()
                         .setType(MultipartBody.FORM)
                         .addFormDataPart("file", fileName, tempFile.asRequestBody(mediaType))
                         .build()
                     
-                    Log.d(TAG, "Request body size: ${tempFile.length()} bytes")
-                    
                     // Use direct Tailscale URL for large files (bypasses Cloudflare 100s timeout)
                     val uploadUrl = if (useDirectUpload) {
-                        "http://100.97.70.51:8338/upload"  // Updated Tailscale IP
+                        "http://100.69.137.108:8338/upload"
                     } else {
-                        "https://beats.bom.best/upload"  // Changed from /beats/api/upload
+                        "https://bom.best/beats/api/upload"
                     }
                     Log.d(TAG, "Using upload URL: $uploadUrl (direct=$useDirectUpload)")
                     
@@ -150,41 +146,23 @@ fun UploadScreen(onBack: () -> Unit) {
                         .build()
                     
                     Log.d(TAG, "Sending upload request...")
-                    Log.d(TAG, "Request headers: ${request.headers}")
                     
                     withContext(Dispatchers.IO) {
-                        val startTime = System.currentTimeMillis()
                         val response = client.newCall(request).execute()
-                        val elapsed = System.currentTimeMillis() - startTime
-                        
                         val responseBody = response.body?.string() ?: ""
-                        
-                        Log.d(TAG, "Upload response received in ${elapsed}ms:")
-                        Log.d(TAG, "  Status: ${response.code} ${response.message}")
-                        Log.d(TAG, "  Headers: ${response.headers}")
-                        Log.d(TAG, "  Body preview: ${responseBody.take(500)}")
-                        
-                        // Log specific headers that might help debug 530
-                        response.header("cf-ray")?.let { Log.d(TAG, "  CF-Ray: $it") }
-                        response.header("cf-cache-status")?.let { Log.d(TAG, "  CF-Cache-Status: $it") }
-                        response.header("server")?.let { Log.d(TAG, "  Server: $it") }
+                        Log.d(TAG, "Response: ${response.code} - $responseBody")
                         
                         if (response.isSuccessful) {
-                            Log.d(TAG, "✅ Upload successful!")
                             successCount++
                         } else {
                             failCount++
-                            val errorDetail = when (response.code) {
+                            lastError = when (response.code) {
                                 401 -> "Unauthorized - please login again"
                                 403 -> "Admin access required"
                                 409 -> "Duplicate: file already exists"
                                 524 -> "Upload timeout - file too large"
-                                530 -> "Error 530 - Origin server issue (check Cloudflare tunnel/backend)"
-                                else -> "Error ${response.code}: ${response.message}"
+                                else -> "Error ${response.code}"
                             }
-                            lastError = errorDetail
-                            Log.e(TAG, "❌ Upload failed: $errorDetail")
-                            Log.e(TAG, "   Full response body: $responseBody")
                         }
                         response.close()
                     }
@@ -194,10 +172,6 @@ fun UploadScreen(onBack: () -> Unit) {
                     
                 } catch (e: Exception) {
                     Log.e(TAG, "Upload failed for $uri", e)
-                    Log.e(TAG, "Exception details:", e)
-                    Log.e(TAG, "  Type: ${e.javaClass.name}")
-                    Log.e(TAG, "  Message: ${e.message}")
-                    Log.e(TAG, "  Cause: ${e.cause}")
                     failCount++
                     lastError = e.message ?: "Unknown error"
                 }
