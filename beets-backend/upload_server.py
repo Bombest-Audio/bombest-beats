@@ -263,28 +263,48 @@ def upload_file():
         
         # Run beet import
         try:
-            subprocess.run(
+            result = subprocess.run(
                 ['beet', '-c', 'config.yaml', 'import', '-q', '--noautotag', '-s', filepath], 
-                check=True
+                check=True,
+                capture_output=True,
+                text=True
             )
+            print(f"Beet import output: {result.stdout}")
+            if result.stderr:
+                print(f"Beet import warnings: {result.stderr}")
             
-            # Update the title in the database for the most recently added track
-            # Beets doesn't always preserve metadata, so we set it directly
+            # Verify the import was successful by checking the database
             try:
                 conn = sqlite3.connect(LIBRARY_DB)
                 cursor = conn.cursor()
                 # Get the most recently added item (highest ID)
-                cursor.execute("SELECT id FROM items ORDER BY id DESC LIMIT 1")
+                cursor.execute("SELECT id, path FROM items ORDER BY id DESC LIMIT 1")
                 result = cursor.fetchone()
-                if result:
-                    new_id = result[0]
-                    # Format title: lowercase, underscores to spaces
-                    formatted_title = track_name.replace('_', ' ').lower()
-                    cursor.execute("UPDATE items SET title = ?, artist = ? WHERE id = ?", (formatted_title, 'thomas phillips', new_id))
-                    conn.commit()
+                
+                if not result:
+                    conn.close()
+                    return jsonify({'error': 'File upload failed: No database entry created'}), 500
+                
+                new_id, new_path = result
+                
+                # Validate that path was set
+                if not new_path or new_path == '':
+                    conn.close()
+                    return jsonify({'error': 'File upload failed: Path not set after import'}), 500
+                
+                # Format title: lowercase, underscores to spaces
+                formatted_title = track_name.replace('_', ' ').lower()
+                cursor.execute("UPDATE items SET title = ?, artist = ? WHERE id = ?", (formatted_title, 'thomas phillips', new_id))
+                conn.commit()
+                
+                print(f"✅ Successfully imported track ID {new_id} with path: {new_path}")
+                
                 conn.close()
             except Exception as db_err:
-                print(f"Warning: Could not update title in database: {db_err}")
+                print(f"Database validation error: {db_err}")
+                import traceback
+                traceback.print_exc()
+                return jsonify({'error': f'File upload failed: Database error - {str(db_err)}'}), 500
             
             # --- S3 Upload ---
             if s3_client:
