@@ -16,6 +16,8 @@ data class CreatePlaylistRequest(
     val is_public: Boolean = false  // false = local only, true = published to network
 )
 data class AddTracksRequest(val track_ids: List<Int>)
+data class FavoriteToggleRequest(val track_id: Int)
+data class FavoriteToggleResponse(val success: Boolean, val favorited: Boolean)
 
 interface PlaylistApi {
     @GET("playlists")
@@ -38,6 +40,9 @@ interface PlaylistApi {
     
     @HTTP(method = "DELETE", path = "playlists/{id}/tracks", hasBody = true)
     suspend fun removeTracksFromPlaylist(@Path("id") id: Int, @Body request: AddTracksRequest): Map<String, Any>
+    
+    @POST("playlists/{id}/favorites/toggle")
+    suspend fun toggleFavorite(@Path("id") id: Int, @Body request: FavoriteToggleRequest): FavoriteToggleResponse
 }
 
 data class TracksResponse(val tracks: List<Track>)

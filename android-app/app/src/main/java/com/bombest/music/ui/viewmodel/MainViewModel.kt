@@ -20,6 +20,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import com.bombest.music.data.DownloadManager
 import com.bombest.music.data.repository.MusicRepository
+import com.bombest.music.data.FavoritesManager
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
@@ -622,16 +623,106 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun onFavorite() {
-        val trackId = currentMediaItem.value?.mediaId ?: return
-        val currentFavorites = favorites.value.toMutableSet()
-        if (currentFavorites.contains(trackId)) {
-            currentFavorites.remove(trackId)
-            android.util.Log.d("MainViewModel", "Removed from favorites: $trackId")
-        } else {
-            currentFavorites.add(trackId)
-            android.util.Log.d("MainViewModel", "Added to favorites: $trackId")
+        val mediaId = currentMediaItem.value?.mediaId ?: return
+        val trackId = mediaId.toIntOrNull() ?: run {
+            android.util.Log.e("MainViewModel", "Invalid track ID: $mediaId")
+            return
         }
-        favorites.value = currentFavorites
+        
+        // #region agent log
+        try {
+            val logFile = java.io.File("/Users/thomasphillips/bombest-audio/.cursor/debug.log")
+            val logEntry = org.json.JSONObject().apply {
+                put("location", "MainViewModel.kt:625")
+                put("message", "onFavorite called")
+                put("data", org.json.JSONObject().apply {
+                    put("mediaId", mediaId)
+                    put("trackId", trackId)
+                })
+                put("timestamp", System.currentTimeMillis())
+                put("sessionId", "debug-session")
+                put("runId", "run1")
+                put("hypothesisId", "A")
+            }
+            logFile.appendText(logEntry.toString() + "\n")
+        } catch (e: Exception) {}
+        // #endregion
+        
+        viewModelScope.launch {
+            try {
+                // #region agent log
+                try {
+                    val logFile = java.io.File("/Users/thomasphillips/bombest-audio/.cursor/debug.log")
+                    val logEntry = org.json.JSONObject().apply {
+                        put("location", "MainViewModel.kt:640")
+                        put("message", "Before FavoritesManager.toggleFavorite")
+                        put("data", org.json.JSONObject().apply {
+                            put("trackId", trackId)
+                            put("wasFavorited", FavoritesManager.isFavorited(trackId))
+                        })
+                        put("timestamp", System.currentTimeMillis())
+                        put("sessionId", "debug-session")
+                        put("runId", "run1")
+                        put("hypothesisId", "A")
+                    }
+                    logFile.appendText(logEntry.toString() + "\n")
+                } catch (e: Exception) {}
+                // #endregion
+                
+                val result = FavoritesManager.toggleFavorite(trackId)
+                
+                // #region agent log
+                try {
+                    val logFile = java.io.File("/Users/thomasphillips/bombest-audio/.cursor/debug.log")
+                    val logEntry = org.json.JSONObject().apply {
+                        put("location", "MainViewModel.kt:650")
+                        put("message", "After FavoritesManager.toggleFavorite")
+                        put("data", org.json.JSONObject().apply {
+                            put("trackId", trackId)
+                            put("result", result)
+                            put("isFavorited", FavoritesManager.isFavorited(trackId))
+                        })
+                        put("timestamp", System.currentTimeMillis())
+                        put("sessionId", "debug-session")
+                        put("runId", "run1")
+                        put("hypothesisId", "A")
+                    }
+                    logFile.appendText(logEntry.toString() + "\n")
+                } catch (e: Exception) {}
+                // #endregion
+                
+                // Update local favorites state for UI
+                val currentFavorites = favorites.value.toMutableSet()
+                if (result) {
+                    currentFavorites.add(mediaId)
+                } else {
+                    currentFavorites.remove(mediaId)
+                }
+                favorites.value = currentFavorites
+                
+                android.util.Log.d("MainViewModel", "Favorite toggled: trackId=$trackId, result=$result")
+            } catch (e: Exception) {
+                android.util.Log.e("MainViewModel", "Failed to toggle favorite: ${e.message}", e)
+                // #region agent log
+                try {
+                    val logFile = java.io.File("/Users/thomasphillips/bombest-audio/.cursor/debug.log")
+                    val logEntry = org.json.JSONObject().apply {
+                        put("location", "MainViewModel.kt:675")
+                        put("message", "Error in onFavorite")
+                        put("data", org.json.JSONObject().apply {
+                            put("error", e.message)
+                            put("trackId", trackId)
+                        })
+                        put("timestamp", System.currentTimeMillis())
+                        put("sessionId", "debug-session")
+                        put("runId", "run1")
+                        put("hypothesisId", "A")
+                    }
+                    logFile.appendText(logEntry.toString() + "\n")
+                } catch (e2: Exception) {}
+                // #endregion
+            }
+        }
     }
 
     fun onDownload() {
