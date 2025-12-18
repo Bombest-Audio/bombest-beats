@@ -191,7 +191,7 @@ fun PlaylistItem(
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    text = "${playlist.count} tracks",
+                    text = "${playlist.count} ${if (playlist.count == 1) "track" else "tracks"}",
                     color = Color.Gray,
                     fontSize = 14.sp
                 )

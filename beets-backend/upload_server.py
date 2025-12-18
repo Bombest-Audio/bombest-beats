@@ -1638,13 +1638,24 @@ def get_playlist_tracks(playlist_id):
         rows = lib_cursor.fetchall()
         lib_conn.close()
         
-        # Convert to list of dicts and reorder
-        tracks_map = {row['id']: dict(row) for row in rows}
+        # Convert to list of dicts and reorder, excluding bytes fields
+        tracks_map = {}
+        for row in rows:
+            track_dict = {}
+            for key in row.keys():
+                value = row[key]
+                # Skip bytes fields (like album art) - they can't be JSON serialized
+                if not isinstance(value, bytes):
+                    track_dict[key] = value
+            tracks_map[track_dict['id']] = track_dict
+        
         ordered_tracks = [tracks_map[tid] for tid in track_ids if tid in tracks_map]
         
         return jsonify({'items': ordered_tracks})
     except Exception as e:
         print(f"Error fetching playlist tracks: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 @app.route('/playlists/<int:playlist_id>/tracks', methods=['POST'])
