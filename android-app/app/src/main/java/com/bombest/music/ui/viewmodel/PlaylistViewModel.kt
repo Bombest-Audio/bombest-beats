@@ -19,6 +19,7 @@ class PlaylistViewModel : ViewModel() {
     
     val playlists = mutableStateListOf<Playlist>()
     val currentPlaylistTracks = mutableStateListOf<Track>()
+    val allTracks = mutableStateListOf<Track>()  // All library tracks for picker
     val isLoading = mutableStateOf(false)
     val error = mutableStateOf<String?>(null)
     val currentPlaylistName = mutableStateOf("")
@@ -45,6 +46,29 @@ class PlaylistViewModel : ViewModel() {
         
         playlistApi = retrofit.create(PlaylistApi::class.java)
         loadPlaylists()
+        loadAllTracks()  // Load library tracks for picker
+    }
+    
+    private fun loadAllTracks() {
+        viewModelScope.launch {
+            try {
+                val response = com.bombest.music.data.NetworkModule.api.getLibrary()
+                allTracks.clear()
+                allTracks.addAll(response.items.map { item ->
+                    Track(
+                        id = item.id,
+                        title = item.title ?: "Unknown",
+                        artist = item.artist ?: "Unknown",
+                        album = item.album,
+                        duration = item.length,  // model.Track uses 'length' not 'duration'
+                        path = item.path ?: ""   // path is nullable in model.Track
+                    )
+                })
+                android.util.Log.d("PlaylistViewModel", "Loaded ${allTracks.size} library tracks")
+            } catch (e: Exception) {
+                android.util.Log.e("PlaylistViewModel", "Failed to load library: ${e.message}")
+            }
+        }
     }
     
     fun loadPlaylists() {
