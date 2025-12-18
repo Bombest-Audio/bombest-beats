@@ -340,7 +340,7 @@ fun PlaylistDetailScreen(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     items(tracks) { track ->
-                        PlaylistTrackItem(
+                        TrackItem(
                             track = track,
                             onClick = { onTrackClick(track) },
                             onRemove = { onRemoveTrack(track.id) }
