@@ -160,6 +160,7 @@ fun MainContent(
         viewModel.initializeController(context)
         permissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
         playlistViewModel.initialize(context)
+        playlistViewModel.initializeSystemPlaylists()
     }
 
     Box(modifier = Modifier.fillMaxSize()) {

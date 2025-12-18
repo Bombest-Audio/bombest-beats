@@ -23,6 +23,39 @@ class PlaylistViewModel : ViewModel() {
     val allTracks = mutableStateListOf<Track>()  // All library tracks for picker
     val isLoading = mutableStateOf(false)
     val error = mutableStateOf<String?>(null)
+    
+    // Phase 2: System playlist IDs
+    var allSongsPlaylistId by mutableStateOf<Int?>(null)
+        private set
+    var favoritesPlaylistId by mutableStateOf<Int?>(null)
+        private set
+    
+    /**
+     * Initialize system playlists (All Songs, Favorites)
+     * Call this once on app start
+     */
+    fun initializeSystemPlaylists() {
+        viewModelScope.launch {
+            try {
+                android.util.Log.d("PlaylistViewModel", "Initializing system playlists...")
+                val response = playlistApi.initializeSystemPlaylists()
+                allSongsPlaylistId = response.all_songs_id
+                favoritesPlaylistId = response.favorites_id
+                
+                android.util.Log.d("PlaylistViewModel", "System playlists initialized: All Songs=${response.all_songs_id}, Favorites=${response.favorites_id}")
+                
+                // Initialize FavoritesManager
+                com.bombest.music.data.FavoritesManager.initialize(playlistApi, response.favorites_id)
+                com.bombest.music.data.FavoritesManager.loadFavorites(response.favorites_id)
+                
+                // Reload playlists to show new system playlists
+                loadPlaylists()
+            } catch (e: Exception) {
+                android.util.Log.e("PlaylistViewModel", "Failed to initialize system playlists", e)
+                error.value = "Failed to initialize playlists: ${e.message}"
+            }
+        }
+    }
     val currentPlaylistName = mutableStateOf("")
     val stagedTrackIds = mutableStateListOf<Int>()
     
