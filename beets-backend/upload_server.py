@@ -1463,8 +1463,8 @@ def get_playlists():
     try:
         conn = sqlite3.connect('music/users.db')
         cursor = conn.cursor()
-        cursor.execute("SELECT id, name, created_at FROM playlists ORDER BY created_at DESC")
-        playlists = [{'id': row[0], 'name': row[1], 'created_at': row[2]} for row in cursor.fetchall()]
+        cursor.execute("SELECT id, name, created_at, is_system FROM playlists ORDER BY created_at DESC")
+        playlists = [{'id': row[0], 'name': row[1], 'created_at': row[2], 'is_system': bool(row[3])} for row in cursor.fetchall()]
         
         # Get track counts for each playlist
         for pl in playlists:
@@ -1571,13 +1571,19 @@ def get_playlist_tracks(playlist_id):
         # Format tracks for Android API (expects 'tracks' field, not 'items')
         formatted_tracks = []
         for track in ordered_tracks:
+            # Helper to decode bytes to string
+            def decode_val(val):
+                if isinstance(val, bytes):
+                    return val.decode('utf-8', errors='ignore')
+                return val
+
             formatted_tracks.append({
                 'id': track['id'],
-                'title': track.get('title') or track.get('title_sort', 'Unknown'),
-                'artist': track.get('artist') or track.get('artist_sort', 'Unknown Artist'),
-                'album': track.get('album') or track.get('album_sort'),
+                'title': decode_val(track.get('title') or track.get('title_sort', 'Unknown')),
+                'artist': decode_val(track.get('artist') or track.get('artist_sort', 'Unknown Artist')),
+                'album': decode_val(track.get('album') or track.get('album_sort')),
                 'duration': track.get('length', 0.0),
-                'path': track.get('path', '')
+                'path': decode_val(track.get('path', ''))
             })
         
         return jsonify({'tracks': formatted_tracks})
@@ -1635,6 +1641,150 @@ def remove_tracks_from_playlist(playlist_id):
         
         return jsonify({'success': True})
     except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/playlists/system/init', methods=['POST'])
+def initialize_system_playlists():
+    """Initialize All Songs and Favorites system playlists"""
+    try:
+        conn = sqlite3.connect('music/users.db')
+        cursor = conn.cursor()
+        
+        # Create All Songs playlist if it doesn't exist
+        cursor.execute("SELECT id FROM playlists WHERE name = 'All Songs' AND is_system = 1")
+        all_songs_exists = cursor.fetchone()
+        
+        if not all_songs_exists:
+            cursor.execute("""
+                INSERT INTO playlists (name, is_system, is_synced, sort_mode, description)
+                VALUES ('All Songs', 1, 0, 'custom', 'Contains every track in your library')
+            """)
+            all_songs_id = cursor.lastrowid
+            
+            # Populate with all tracks from library
+            lib_conn = sqlite3.connect(LIBRARY_DB)
+            lib_cursor = lib_conn.cursor()
+            lib_cursor.execute("SELECT id FROM items ORDER BY added DESC")
+            track_ids = [row[0] for row in lib_cursor.fetchall()]
+            lib_conn.close()
+            
+            for pos, track_id in enumerate(track_ids):
+                cursor.execute("""
+                    INSERT INTO playlist_tracks (playlist_id, track_id, position)
+                    VALUES (?, ?, ?)
+                """, (all_songs_id, track_id, pos))
+        else:
+            all_songs_id = all_songs_exists[0]
+        
+        # Create Favorites playlist if it doesn't exist
+        cursor.execute("SELECT id FROM playlists WHERE name = 'Favorites' AND is_system = 1")
+        favorites_exists = cursor.fetchone()
+        
+        if not favorites_exists:
+            cursor.execute("""
+                INSERT INTO playlists (name, is_system, is_synced, sort_mode, description)
+                VALUES ('Favorites', 1, 1, 'custom', 'Your favorite tracks')
+            """)
+            favorites_id = cursor.lastrowid
+        else:
+            favorites_id = favorites_exists[0]
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'all_songs_id': all_songs_id,
+            'favorites_id': favorites_id
+        })
+    except Exception as e:
+        print(f"Error initializing system playlists: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/playlists/<int:playlist_id>/reorder', methods=['PUT'])
+def reorder_playlist_tracks(playlist_id):
+    """Reorder tracks in playlist"""
+    try:
+        data = request.get_json()
+        track_ids = data.get('track_ids', [])  # New ordered list
+        
+        conn = sqlite3.connect('music/users.db')
+        cursor = conn.cursor()
+        
+        # Delete all existing positions
+        cursor.execute("DELETE FROM playlist_tracks WHERE playlist_id = ?", (playlist_id,))
+        
+        # Insert with new positions
+        for pos, track_id in enumerate(track_ids):
+            cursor.execute("""
+                INSERT INTO playlist_tracks (playlist_id, track_id, position)
+                VALUES (?, ?, ?)
+            """, (playlist_id, track_id, pos))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'success': True, 'count': len(track_ids)})
+    except Exception as e:
+        print(f"Error reordering playlist: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/playlists/<int:playlist_id>/search', methods=['GET'])
+def search_playlist(playlist_id):
+    """Search within playlist"""
+    try:
+        query = request.args.get('q', '').lower()
+        
+        if not query:
+            return jsonify({'tracks': []})
+        
+        conn = sqlite3.connect('music/users.db')
+        cursor = conn.cursor()
+        
+        # Get track IDs from playlist
+        cursor.execute("SELECT track_id FROM playlist_tracks WHERE playlist_id = ? ORDER BY position", (playlist_id,))
+        track_ids = [row[0] for row in cursor.fetchall()]
+        conn.close()
+        
+        if not track_ids:
+            return jsonify({'tracks': []})
+        
+        # Search in library
+        lib_conn = sqlite3.connect(LIBRARY_DB)
+        lib_conn.row_factory = sqlite3.Row
+        lib_cursor = lib_conn.cursor()
+        
+        placeholders = ','.join('?' for _ in track_ids)
+        lib_cursor.execute(f"""
+            SELECT * FROM items 
+            WHERE id IN ({placeholders})
+            AND (LOWER(title) LIKE ? OR LOWER(artist) LIKE ? OR LOWER(album) LIKE ?)
+        """, (*track_ids, f'%{query}%', f'%{query}%', f'%{query}%'))
+        
+        rows = lib_cursor.fetchall()
+        lib_conn.close()
+        
+        # Format tracks and decode bytes
+        formatted_tracks = []
+        for row in rows:
+            track = dict(row)
+            def decode_val(val):
+                if isinstance(val, bytes):
+                    return val.decode('utf-8', errors='ignore')
+                return val
+
+            formatted_tracks.append({
+                'id': track['id'],
+                'title': decode_val(track.get('title') or track.get('title_sort', 'Unknown')),
+                'artist': decode_val(track.get('artist') or track.get('artist_sort', 'Unknown Artist')),
+                'album': decode_val(track.get('album') or track.get('album_sort')),
+                'duration': track.get('length', 0.0),
+                'path': decode_val(track.get('path', ''))
+            })
+        
+        return jsonify({'tracks': formatted_tracks})
+    except Exception as e:
+        print(f"Error searching playlist: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/stream/<int:track_id>', methods=['GET'])

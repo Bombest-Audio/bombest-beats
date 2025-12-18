@@ -88,7 +88,8 @@ fun PlaylistsScreen(
                         PlaylistItem(
                             playlist = playlist,
                             onClick = { onPlaylistClick(playlist.id) },
-                            onDelete = { onDeletePlaylist(playlist.id) }
+                            onDelete = { onDeletePlaylist(playlist.id) },
+                            isSystem = playlist.is_system
                         )
                     }
                 }
@@ -139,7 +140,8 @@ fun PlaylistsScreen(
 fun PlaylistItem(
     playlist: Playlist,
     onClick: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    isSystem: Boolean = false
 ) {
     Card(
         modifier = Modifier
@@ -175,8 +177,10 @@ fun PlaylistItem(
                 IconButton(onClick = onClick) {
                     Icon(Icons.Default.PlayArrow, contentDescription = "Play", tint = Color(0xFFE90060))
                 }
-                IconButton(onClick = onDelete) {
-                    Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color.Gray)
+                if (!isSystem) {
+                    IconButton(onClick = onDelete) {
+                        Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color.Gray)
+                    }
                 }
             }
         }
@@ -191,6 +195,7 @@ fun PlaylistDetailScreen(
     tracks: List<Track>,
     allTracks: List<Track> = emptyList(),
     isLoading: Boolean,
+    isSystem: Boolean = false,
     onTrackClick: (Track) -> Unit,
     onRemoveTrack: (Int) -> Unit,
     onAddTracks: (List<Int>) -> Unit = {},
@@ -209,8 +214,10 @@ fun PlaylistDetailScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = { showAddTracksDialog = true }) {
-                        Icon(Icons.Default.Add, contentDescription = "Add Tracks", tint = Color.White)
+                    if (!isSystem) {
+                        IconButton(onClick = { showAddTracksDialog = true }) {
+                            Icon(Icons.Default.Add, contentDescription = "Add Tracks", tint = Color.White)
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -220,11 +227,13 @@ fun PlaylistDetailScreen(
             )
         },
         floatingActionButton = {
-            FloatingActionButton(
-                onClick = { showAddTracksDialog = true },
-                containerColor = Color(0xFFE90060)
-            ) {
-                Icon(Icons.Default.Add, contentDescription = "Add Tracks", tint = Color.White)
+            if (!isSystem) {
+                FloatingActionButton(
+                    onClick = { showAddTracksDialog = true },
+                    containerColor = Color(0xFFE90060)
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = "Add Tracks", tint = Color.White)
+                }
             }
         },
         containerColor = Color(0xFF0A0D14)
@@ -268,7 +277,7 @@ fun PlaylistDetailScreen(
                         PlaylistTrackItem(
                             track = track,
                             onClick = { onTrackClick(track) },
-                            onRemove = { onRemoveTrack(track.id) }
+                            onRemove = if (!isSystem) { { onRemoveTrack(track.id) } } else null
                         )
                     }
                 }
@@ -374,7 +383,7 @@ fun PlaylistDetailScreen(
 fun PlaylistTrackItem(
     track: Track,
     onClick: () -> Unit,
-    onRemove: () -> Unit
+    onRemove: (() -> Unit)? = null
 ) {
     Card(
         modifier = Modifier
@@ -408,8 +417,10 @@ fun PlaylistTrackItem(
                 )
             }
             
-            IconButton(onClick = onRemove) {
-                Icon(Icons.Default.Delete, contentDescription = "Remove", tint = Color.Gray)
+            if (onRemove != null) {
+                IconButton(onClick = onRemove) {
+                    Icon(Icons.Default.Delete, contentDescription = "Remove", tint = Color.Gray)
+                }
             }
         }
     }

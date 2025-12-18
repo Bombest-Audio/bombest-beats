@@ -229,12 +229,14 @@ fun MainContent(
             }
             
             Screen.PLAYLIST_DETAIL -> {
+                val currentPlaylist = playlistViewModel.playlists.find { it.id == selectedPlaylistId }
                 PlaylistDetailScreen(
                     playlistId = selectedPlaylistId ?: 0,
                     playlistName = playlistViewModel.currentPlaylistName.value,
                     tracks = playlistViewModel.currentPlaylistTracks,
                     allTracks = playlistViewModel.allTracks,  // Use ViewModel's allTracks from API
                     isLoading = playlistViewModel.isLoading.value,
+                    isSystem = currentPlaylist?.is_system ?: false,
                     onTrackClick = { track ->
                         // TODO: Play track from playlist
                     },
