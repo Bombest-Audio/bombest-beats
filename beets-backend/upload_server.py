@@ -2158,6 +2158,371 @@ def get_dashboard_metrics():
         'users': users
     })
 
+@app.route('/playlists/system/init', methods=['POST'])
+def initialize_system_playlists():
+    """Initialize All Songs and Favorites system playlists"""
+    try:
+        conn = sqlite3.connect('music/users.db')
+        cursor = conn.cursor()
+        
+        # Create All Songs playlist if it doesn't exist
+        cursor.execute("SELECT id FROM playlists WHERE name = 'All Songs' AND is_system = 1")
+        all_songs_exists = cursor.fetchone()
+        
+        if not all_songs_exists:
+            cursor.execute("""
+                INSERT INTO playlists (name, is_system, is_synced, sort_mode, description)
+                VALUES ('All Songs', 1, 0, 'custom', 'Contains every track in your library')
+            """)
+            all_songs_id = cursor.lastrowid
+            
+            # Populate with all tracks from library
+            lib_conn = sqlite3.connect(LIBRARY_DB)
+            lib_cursor = lib_conn.cursor()
+            lib_cursor.execute("SELECT id FROM items ORDER BY added DESC")
+            track_ids = [row[0] for row in lib_cursor.fetchall()]
+            lib_conn.close()
+            
+            for pos, track_id in enumerate(track_ids):
+                cursor.execute("""
+                    INSERT INTO playlist_tracks (playlist_id, track_id, position)
+                    VALUES (?, ?, ?)
+                """, (all_songs_id, track_id, pos))
+        else:
+            all_songs_id = all_songs_exists[0]
+        
+        # Create Favorites playlist if it doesn't exist
+        cursor.execute("SELECT id FROM playlists WHERE name = 'Favorites' AND is_system = 1")
+        favorites_exists = cursor.fetchone()
+        
+        if not favorites_exists:
+            cursor.execute("""
+                INSERT INTO playlists (name, is_system, is_synced, sort_mode, description)
+                VALUES ('Favorites', 1, 1, 'custom', 'Your favorite tracks')
+            """)
+            favorites_id = cursor.lastrowid
+        else:
+            favorites_id = favorites_exists[0]
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'all_songs_id': all_songs_id,
+            'favorites_id': favorites_id
+        })
+    except Exception as e:
+        print(f"Error initializing system playlists: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/playlists/<int:playlist_id>/reorder', methods=['PUT'])
+def reorder_playlist_tracks(playlist_id):
+    """Reorder tracks in playlist"""
+    try:
+        data = request.get_json()
+        track_ids = data.get('track_ids', [])  # New ordered list
+        
+        conn = sqlite3.connect('music/users.db')
+        cursor = conn.cursor()
+        
+        # Delete all existing positions
+        cursor.execute("DELETE FROM playlist_tracks WHERE playlist_id = ?", (playlist_id,))
+        
+        # Insert with new positions
+        for pos, track_id in enumerate(track_ids):
+            cursor.execute("""
+                INSERT INTO playlist_tracks (playlist_id, track_id, position)
+                VALUES (?, ?, ?)
+            """, (playlist_id, track_id, pos))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'success': True, 'count': len(track_ids)})
+    except Exception as e:
+        print(f"Error reordering playlist: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/playlists/<int:playlist_id>/search', methods=['GET'])
+def search_playlist(playlist_id):
+    """Search within playlist"""
+    try:
+        query = request.args.get('q', '').lower()
+        
+        if not query:
+            return jsonify({'items': []})
+        
+        conn = sqlite3.connect('music/users.db')
+        cursor = conn.cursor()
+        
+        # Get track IDs from playlist
+        cursor.execute("SELECT track_id FROM playlist_tracks WHERE playlist_id = ? ORDER BY position", (playlist_id,))
+        track_ids = [row[0] for row in cursor.fetchall()]
+        conn.close()
+        
+        if not track_ids:
+            return jsonify({'items': []})
+        
+        # Search in library
+        lib_conn = sqlite3.connect(LIBRARY_DB)
+        lib_conn.row_factory = sqlite3.Row
+        lib_cursor = lib_conn.cursor()
+        
+        placeholders = ','.join('?' for _ in track_ids)
+        lib_cursor.execute(f"""
+            SELECT * FROM items 
+            WHERE id IN ({placeholders})
+            AND (LOWER(title) LIKE ? OR LOWER(artist) LIKE ? OR LOWER(album) LIKE ?)
+        """, (*track_ids, f'%{query}%', f'%{query}%', f'%{query}%'))
+        
+        rows = lib_cursor.fetchall()
+        lib_conn.close()
+        
+        # Filter out bytes fields
+        results = []
+        for row in rows:
+            track_dict = {}
+            for key in row.keys():
+                value = row[key]
+                if not isinstance(value, bytes):
+                    track_dict[key] = value
+            results.append(track_dict)
+        
+        return jsonify({'items': results})
+    except Exception as e:
+        print(f"Error searching playlist: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/playlists/<int:playlist_id>/favorites/toggle', methods=['POST'])
+@admin_required()
+def toggle_favorite(playlist_id):
+    """Toggle favorite status for a track"""
+    try:
+        data = request.get_json()
+        track_id = data.get('track_id')
+        user_id = data.get('user_id', 1)  # Default to admin user
+        
+        conn = sqlite3.connect('music/users.db')
+        cursor = conn.cursor()
+        
+        # Check if already favorited
+        cursor.execute("SELECT 1 FROM favorites WHERE user_id = ? AND track_id = ?", (user_id, track_id))
+        is_favorited = cursor.fetchone() is not None
+        
+        if is_favorited:
+            # Remove from favorites
+            cursor.execute("DELETE FROM favorites WHERE user_id = ? AND track_id = ?", (user_id, track_id))
+            
+            # Remove from Favorites playlist
+            cursor.execute("""
+                SELECT id FROM playlists WHERE name = 'Favorites' AND is_system = 1 LIMIT 1
+            """)
+            fav_playlist = cursor.fetchone()
+            if fav_playlist:
+                cursor.execute("""
+                    DELETE FROM playlist_tracks 
+                    WHERE playlist_id = ? AND track_id = ?
+                """, (fav_playlist[0], track_id))
+            
+            favorited = False
+        else:
+            # Add to favorites
+            cursor.execute("""
+                INSERT INTO favorites (user_id, track_id) VALUES (?, ?)
+            """, (user_id, track_id))
+            
+            # Add to Favorites playlist
+            cursor.execute("""
+                SELECT id FROM playlists WHERE name = 'Favorites' AND is_system = 1 LIMIT 1
+            """)
+            fav_playlist = cursor.fetchone()
+            if fav_playlist:
+                cursor.execute("""
+                    SELECT MAX(position) FROM playlist_tracks WHERE playlist_id = ?
+                """, (fav_playlist[0],))
+                max_pos = cursor.fetchone()[0] or -1
+                cursor.execute("""
+                    INSERT INTO playlist_tracks (playlist_id, track_id, position)
+                    VALUES (?, ?, ?)
+                """, (fav_playlist[0], track_id, max_pos + 1))
+            
+            favorited = True
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'success': True, 'favorited': favorited})
+    except Exception as e:
+        print(f"Error toggling favorite: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/playlists/<int:playlist_id>/sort', methods=['PUT'])
+def sort_playlist(playlist_id):
+    """Apply sort mode to playlist"""
+    try:
+        data = request.get_json()
+        sort_mode = data.get('sort_mode', 'custom')  # custom/title/artist/date
+        
+        if sort_mode not in ['custom', 'title', 'artist', 'date']:
+            return jsonify({'error': 'Invalid sort_mode. Must be: custom, title, artist, or date'}), 400
+        
+        conn = sqlite3.connect('music/users.db')
+        cursor = conn.cursor()
+        
+        # Update sort mode
+        cursor.execute("UPDATE playlists SET sort_mode = ? WHERE id = ?", (sort_mode, playlist_id))
+        
+        # Get track IDs
+        cursor.execute("SELECT track_id FROM playlist_tracks WHERE playlist_id = ? ORDER BY position", (playlist_id,))
+        track_ids = [row[0] for row in cursor.fetchall()]
+        conn.close()
+        
+        if not track_ids or sort_mode == 'custom':
+            conn = sqlite3.connect('music/users.db')
+            conn.execute("UPDATE playlists SET sort_mode = ? WHERE id = ?", (sort_mode, playlist_id))
+            conn.commit()
+            conn.close()
+            return jsonify({'success': True, 'sort_mode': sort_mode, 'count': len(track_ids)})
+        
+        # Get track metadata for sorting
+        lib_conn = sqlite3.connect(LIBRARY_DB)
+        lib_conn.row_factory = sqlite3.Row
+        lib_cursor = lib_conn.cursor()
+        
+        placeholders = ','.join('?' for _ in track_ids)
+        lib_cursor.execute(f"SELECT id, title, artist, added FROM items WHERE id IN ({placeholders})", track_ids)
+        tracks = [dict(row) for row in lib_cursor.fetchall()]
+        lib_conn.close()
+        
+        # Sort tracks
+        if sort_mode == 'title':
+            tracks.sort(key=lambda t: (t.get('title') or '').lower())
+        elif sort_mode == 'artist':
+            tracks.sort(key=lambda t: (t.get('artist') or '').lower())
+        elif sort_mode == 'date':
+            tracks.sort(key=lambda t: t.get('added') or 0, reverse=True)
+        
+        # Update positions
+        conn = sqlite3.connect('music/users.db')
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM playlist_tracks WHERE playlist_id = ?", (playlist_id,))
+        
+        for pos, track in enumerate(tracks):
+            cursor.execute("INSERT INTO playlist_tracks (playlist_id, track_id, position) VALUES (?, ?, ?)",
+                         (playlist_id, track['id'], pos))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'success': True, 'sort_mode': sort_mode, 'count': len(tracks)})
+    except Exception as e:
+        print(f"Error sorting playlist: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/playlists/<int:playlist_id>/publish', methods=['POST'])
+@admin_required()
+def publish_playlist(playlist_id):
+    """Admin: Publish playlist to all users"""
+    try:
+        conn = sqlite3.connect('music/users.db')
+        cursor = conn.cursor()
+        
+        # Check if playlist exists
+        cursor.execute("SELECT name FROM playlists WHERE id = ?", (playlist_id,))
+        playlist = cursor.fetchone()
+        if not playlist:
+            conn.close()
+            return jsonify({'error': 'Playlist not found'}), 404
+        
+        # Publish it
+        cursor.execute("UPDATE playlists SET is_published = 1 WHERE id = ?", (playlist_id,))
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'success': True, 'playlist_id': playlist_id, 'published': True})
+    except Exception as e:
+        print(f"Error publishing playlist: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/playlists/published', methods=['GET'])
+def get_published_playlists():
+    """Get all published playlists"""
+    try:
+        conn = sqlite3.connect('music/users.db')
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT p.id, p.name, p.description, p.created_at, COUNT(pt.track_id) as count
+            FROM playlists p
+            LEFT JOIN playlist_tracks pt ON p.id = pt.playlist_id
+            WHERE p.is_published = 1
+            GROUP BY p.id
+            ORDER BY p.created_at DESC
+        """)
+        
+        playlists = [{
+            'id': row[0],
+            'name': row[1],
+            'description': row[2],
+            'created_at': row[3],
+            'count': row[4],
+            'is_published': True
+        } for row in cursor.fetchall()]
+        
+        conn.close()
+        return jsonify({'playlists': playlists})
+    except Exception as e:
+        print(f"Error fetching published playlists: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/playlists/<int:playlist_id>/save', methods=['POST'])
+@admin_required()
+def save_published_playlist(playlist_id):
+    """Save a published playlist as personal copy"""
+    try:
+        data = request.get_json()
+        user_id = data.get('user_id', 1)
+        
+        conn = sqlite3.connect('music/users.db')
+        cursor = conn.cursor()
+        
+        # Get source playlist
+        cursor.execute("SELECT name, description, is_published FROM playlists WHERE id = ?", (playlist_id,))
+        source = cursor.fetchone()
+        
+        if not source or not source[2]:  # Check if published
+            conn.close()
+            return jsonify({'error': 'Playlist not found or not published'}), 404
+        
+        # Create copy
+        cursor.execute("""
+            INSERT INTO playlists (name, description, user_id, source_playlist_id, is_synced, sort_mode)
+            VALUES (?, ?, ?, ?, 1, 'custom')
+        """, (f"{source[0]} (Copy)", source[1], user_id, playlist_id))
+        
+        new_playlist_id = cursor.lastrowid
+        
+        # Copy tracks
+        cursor.execute("SELECT track_id, position FROM playlist_tracks WHERE playlist_id = ? ORDER BY position", (playlist_id,))
+        tracks = cursor.fetchall()
+        
+        for track_id, position in tracks:
+            cursor.execute("""
+                INSERT INTO playlist_tracks (playlist_id, track_id, position)
+                VALUES (?, ?, ?)
+            """, (new_playlist_id, track_id, position))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'success': True, 'new_playlist_id': new_playlist_id, 'track_count': len(tracks)})
+    except Exception as e:
+        print(f"Error saving published playlist: {e}")
+        return jsonify({'error': str(e)}), 500
+
 if __name__ == '__main__':
     # Initialize DB on start if needed (optional since we have init_db script)
     app.run(host='0.0.0.0', port=8338)

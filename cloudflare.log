@@ -709,3 +709,5 @@
 2025-12-18T19:00:11Z INF Registered tunnel connection connIndex=2 connection=9a0e7e00-58c1-4cbd-94e4-b1f7ec11538b event=0 ip=198.41.192.77 location=lax10 protocol=quic
 2025-12-18T19:00:11Z INF Registered tunnel connection connIndex=3 connection=5f0f427d-05eb-413f-b949-edf9c82c49ae event=0 ip=198.41.200.43 location=lax06 protocol=quic
 2025-12-18T19:00:11Z INF Registered tunnel connection connIndex=1 connection=2a1ba3eb-5021-474a-81bc-acf42f4ecc1d event=0 ip=198.41.192.47 location=lax11 protocol=quic
+2025-12-18T19:22:43Z ERR  error="stream 1 canceled by remote with error code 0" connIndex=2 event=1 ingressRule=0 originService=http://127.0.0.1:8338
+2025-12-18T19:22:43Z ERR Request failed error="stream 1 canceled by remote with error code 0" connIndex=2 dest=https://beats.bom.best/stream/17 event=0 ip=198.41.192.77 type=http
