@@ -347,7 +347,12 @@ fun MainContent(
                     allTracks = playlistViewModel.allTracks,
                     stagedTrackIds = playlistViewModel.stagedTrackIds,
                     isLoading = playlistViewModel.isLoading.value,
-                    onTrackClick = { track -> viewModel.playTrack(track.path ?: "", track.title, track.artist) },
+                    onTrackClick = { track ->
+                        val index = playlistViewModel.currentPlaylistTracks.indexOf(track)
+                        if (index != -1) {
+                            viewModel.playCustomPlaylist(playlistViewModel.currentPlaylistTracks, index)
+                        }
+                    },
                     onRemoveTrack = { trackId -> 
                         selectedPlaylistId?.let { playlistViewModel.removeTrackFromPlaylist(it, trackId) }
                     },
