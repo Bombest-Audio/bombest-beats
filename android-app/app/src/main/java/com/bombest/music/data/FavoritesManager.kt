@@ -63,7 +63,7 @@ object FavoritesManager {
             
             val response = playlistApi.toggleFavorite(
                 pid,
-                FavoriteToggleRequest(trackId = trackId)
+                FavoriteToggleRequest(track_id = trackId)
             )
             
             if (response.success) {
