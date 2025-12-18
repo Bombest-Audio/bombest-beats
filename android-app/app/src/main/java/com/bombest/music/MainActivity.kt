@@ -305,10 +305,6 @@ fun MainContent(
             exit = slideOutVertically(targetOffsetY = { it }),
             modifier = Modifier.fillMaxSize()
         ) {
-            enter = slideInVertically(initialOffsetY = { it }),
-            exit = slideOutVertically(targetOffsetY = { it }),
-            modifier = Modifier.fillMaxSize()
-        ) {
             viewModel.currentMediaItem.value?.let { mediaItem ->
                 // Observe FavoritesManager state reactively
                 val favoriteTrackIds by FavoritesManager.favoritedTrackIds.collectAsState()
@@ -341,6 +337,27 @@ fun MainContent(
                     },
                     onRegisterPasskey = onRegisterPasskey,
                     onClose = { isPlayerOpen = false }
+                )
+            }
+        }
+        
+        // Global Mini Player - appears on all screens except fullscreen player
+        if (!isPlayerOpen && viewModel.currentMediaItem.value != null) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .align(Alignment.BottomCenter)
+            ) {
+                PlayerBar(
+                    currentMediaItem = viewModel.currentMediaItem.value,
+                    isPlaying = viewModel.isPlaying.value,
+                    onPlayPause = viewModel::playPause,
+                    onNext = viewModel::skipNext,
+                    onPrevious = viewModel::skipPrevious,
+                    onClick = { isPlayerOpen = true },
+                    progress = if (viewModel.duration.value > 0) 
+                        viewModel.currentPosition.value.toFloat() / viewModel.duration.value.toFloat()
+                    else 0f
                 )
             }
         }
