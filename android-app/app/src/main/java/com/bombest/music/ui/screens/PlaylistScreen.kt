@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Done
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Menu
@@ -751,11 +752,17 @@ fun TrackArt(track: Track, modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun PlaylistTrackItem(
+fun TrackItem(
     track: Track,
     onClick: () -> Unit,
-    onRemove: () -> Unit
+    onRemove: () -> Unit = {},
+    onFavoriteToggle: ((Int) -> Unit)? = null,  // Phase 3: Favorites support
+    showRemove: Boolean = true
 ) {
+    // Phase 3: Reactive favorites state
+    val isFavorited = com.bombest.music.data.FavoritesManager.favoritedTrackIds.collectAsState()
+    val trackIsFavorited = isFavorited.value.contains(track.id)
+    
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -767,14 +774,24 @@ fun PlaylistTrackItem(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
+            // Album art placeholder
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(Color(0xFF2A2F42))
+            )
+            
+            Spacer(modifier = Modifier.width(12.dp))
+            
+            // Track info
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = track.title,
                     color = Color.White,
-                    fontSize = 16.sp,
+                    fontSize = 15.sp,
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -782,14 +799,40 @@ fun PlaylistTrackItem(
                 Text(
                     text = track.artist,
                     color = Color.Gray,
-                    fontSize = 14.sp,
+                    fontSize = 13.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
             }
             
-            IconButton(onClick = onRemove) {
-                Icon(Icons.Default.Delete, contentDescription = "Remove", tint = Color.Gray)
+            // Phase 3: Favorite heart icon
+            if (onFavoriteToggle != null) {
+                IconButton(
+                    onClick = { onFavoriteToggle(track.id) },
+                    modifier = Modifier.size(40.dp)
+                ) {
+                    Icon(
+                        imageVector = if (trackIsFavorited) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                        contentDescription = if (trackIsFavorited) "Remove from favorites" else "Add to favorites",
+                        tint = if (trackIsFavorited) Color(0xFFE90060) else Color.Gray,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+            
+            // Remove button
+            if (showRemove) {
+                IconButton(
+                    onClick = onRemove,
+                    modifier = Modifier.size(40.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Delete,
+                        contentDescription = "Remove",
+                        tint = Color.Gray.copy(alpha = 0.7f),
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
             }
         }
     }
