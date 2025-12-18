@@ -25,10 +25,8 @@ class PlaylistViewModel : ViewModel() {
     val error = mutableStateOf<String?>(null)
     
     // Phase 2: System playlist IDs
-    var allSongsPlaylistId by mutableStateOf<Int?>(null)
-        private set
-    var favoritesPlaylistId by mutableStateOf<Int?>(null)
-        private set
+    val allSongsPlaylistId = mutableStateOf<Int?>(null)
+    val favoritesPlaylistId = mutableStateOf<Int?>(null)
     
     /**
      * Initialize system playlists (All Songs, Favorites)
@@ -39,8 +37,8 @@ class PlaylistViewModel : ViewModel() {
             try {
                 android.util.Log.d("PlaylistViewModel", "Initializing system playlists...")
                 val response = playlistApi.initializeSystemPlaylists()
-                allSongsPlaylistId = response.all_songs_id
-                favoritesPlaylistId = response.favorites_id
+                allSongsPlaylistId.value = response.all_songs_id
+                favoritesPlaylistId.value = response.favorites_id
                 
                 android.util.Log.d("PlaylistViewModel", "System playlists initialized: All Songs=${response.all_songs_id}, Favorites=${response.favorites_id}")
                 
