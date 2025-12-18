@@ -7,7 +7,8 @@ data class Playlist(
     val name: String,
     val count: Int = 0,
     val created_at: String? = null,
-    val is_public: Boolean = false  // Admin can publish to all users
+    val is_public: Boolean = false, // Admin can publish to all users
+    val is_system: Boolean = false
 )
 
 data class PlaylistsResponse(val playlists: List<Playlist>)
@@ -43,6 +44,15 @@ interface PlaylistApi {
     
     @POST("playlists/{id}/favorites/toggle")
     suspend fun toggleFavorite(@Path("id") id: Int, @Body request: FavoriteToggleRequest): FavoriteToggleResponse
+
+    @POST("playlists/system/init")
+    suspend fun initializeSystemPlaylists(): Map<String, Any>
+
+    @PUT("playlists/{id}/reorder")
+    suspend fun reorderPlaylistTracks(@Path("id") id: Int, @Body request: AddTracksRequest): Map<String, Any>
+
+    @GET("playlists/{id}/search")
+    suspend fun searchPlaylist(@Path("id") id: Int, @Query("q") query: String): TracksResponse
 }
 
 data class TracksResponse(val tracks: List<Track>)
