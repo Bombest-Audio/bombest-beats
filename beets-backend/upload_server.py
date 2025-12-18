@@ -244,10 +244,13 @@ def upload_file():
         return jsonify({'error': 'No selected file'}), 400
     
     if file and allowed_file(file.filename):
-        filename = secure_filename(file.filename)
-        track_name = get_track_name(filename)
+        # Extract track name from ORIGINAL filename to preserve special characters (parentheses, accents, etc.)
+        track_name = get_track_name(file.filename)
         
-        # Check for duplicates
+        # Sanitize filename for safe filesystem operations
+        filename = secure_filename(file.filename)
+        
+        # Check for duplicates using original track name
         existing = check_duplicate(track_name)
         if existing:
             return jsonify({
@@ -258,7 +261,7 @@ def upload_file():
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(filepath)
         
-        # Set title metadata before import
+        # Set title metadata using ORIGINAL track name (with special chars)
         set_audio_title(filepath, track_name)
         
         # Run beet import
@@ -292,8 +295,8 @@ def upload_file():
                     conn.close()
                     return jsonify({'error': 'File upload failed: Path not set after import'}), 500
                 
-                # Format title: lowercase, underscores to spaces
-                formatted_title = track_name.replace('_', ' ').lower()
+                # Use track_name as-is (already has original special characters)
+                formatted_title = track_name.lower()
                 cursor.execute("UPDATE items SET title = ?, artist = ? WHERE id = ?", (formatted_title, 'thomas phillips', new_id))
                 conn.commit()
                 
