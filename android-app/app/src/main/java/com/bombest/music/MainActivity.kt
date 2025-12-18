@@ -143,6 +143,7 @@ fun MainContent(
     val scope = rememberCoroutineScope()
     var selectedMediaItems by remember { mutableStateOf(setOf<MediaItem>()) }
     var showMetadataDialog by remember { mutableStateOf(false) }
+    var isProcessingMetadata by remember { mutableStateOf(false) }
     
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -252,12 +253,17 @@ fun MainContent(
                                 initialArtist = if (selectedMediaItems.size == 1) selectedMediaItems.first().mediaMetadata.artist?.toString() else null,
                                 initialAlbum = if (selectedMediaItems.size == 1) selectedMediaItems.first().mediaMetadata.albumTitle?.toString() else null,
                                 isBatch = selectedMediaItems.size > 1,
+                                isProcessing = isProcessingMetadata,
                                 onConfirm = { metadata ->
                                     val trackIds = selectedMediaItems.mapNotNull { it.mediaId.toIntOrNull() }
+                                    isProcessingMetadata = true
                                     viewModel.modifyTracks(trackIds, metadata) { success ->
+                                        isProcessingMetadata = false
                                         if (success) {
                                             selectedMediaItems = emptySet()
                                             showMetadataDialog = false
+                                        } else {
+                                            android.widget.Toast.makeText(context, "Failed to update metadata", android.widget.Toast.LENGTH_SHORT).show()
                                         }
                                     }
                                 },

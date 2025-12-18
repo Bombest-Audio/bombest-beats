@@ -15,6 +15,7 @@ fun MetadataEditDialog(
     initialArtist: String? = null,
     initialAlbum: String? = null,
     isBatch: Boolean = false,
+    isProcessing: Boolean = false,
     onConfirm: (Map<String, String>) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -23,7 +24,7 @@ fun MetadataEditDialog(
     var album by remember { mutableStateOf(initialAlbum ?: "") }
 
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { if (!isProcessing) onDismiss() },
         containerColor = Color(0xFF1A1D2E),
         title = { 
             Text(
@@ -38,20 +39,23 @@ fun MetadataEditDialog(
                     MetadataTextField(
                         value = title,
                         onValueChange = { title = it },
-                        label = "Title"
+                        label = "Title",
+                        enabled = !isProcessing
                     )
                 }
                 MetadataTextField(
                     value = artist,
                     onValueChange = { artist = it },
                     label = "Artist",
-                    placeholder = if (isBatch) "Leave blank to keep original" else null
+                    placeholder = if (isBatch) "Leave blank to keep original" else null,
+                    enabled = !isProcessing
                 )
                 MetadataTextField(
                     value = album,
                     onValueChange = { album = it },
                     label = "Album",
-                    placeholder = if (isBatch) "Leave blank to keep original" else null
+                    placeholder = if (isBatch) "Leave blank to keep original" else null,
+                    enabled = !isProcessing
                 )
                 
                 if (isBatch) {
@@ -73,13 +77,25 @@ fun MetadataEditDialog(
                     if (album.isNotBlank()) metadata["album"] = album
                     onConfirm(metadata)
                 },
+                enabled = !isProcessing,
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE90060))
             ) {
-                Text("Save Changes", color = Color.White)
+                if (isProcessing) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        color = Color.White,
+                        strokeWidth = 2.dp
+                    )
+                } else {
+                    Text("Save Changes", color = Color.White)
+                }
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
+            TextButton(
+                onClick = onDismiss,
+                enabled = !isProcessing
+            ) {
                 Text("Cancel", color = Color.Gray)
             }
         }
@@ -91,7 +107,8 @@ private fun MetadataTextField(
     value: String,
     onValueChange: (String) -> Unit,
     label: String,
-    placeholder: String? = null
+    placeholder: String? = null,
+    enabled: Boolean = true
 ) {
     OutlinedTextField(
         value = value,
@@ -100,6 +117,7 @@ private fun MetadataTextField(
         placeholder = placeholder?.let { { Text(it, fontSize = 12.sp) } },
         modifier = Modifier.fillMaxWidth(),
         singleLine = true,
+        enabled = enabled,
         colors = OutlinedTextFieldDefaults.colors(
             focusedBorderColor = Color(0xFFE90060),
             unfocusedBorderColor = Color.Gray.copy(alpha = 0.5f),

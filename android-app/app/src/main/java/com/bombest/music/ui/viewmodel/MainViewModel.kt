@@ -750,8 +750,35 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             val result = repo.modifyTracks(trackIds, metadata, token)
             if (result.isSuccess) {
-                refreshLibrary()
+                // Optimistically update local playlist for immediate reflection
+                val updatedPlaylist = playlist.toMutableList()
+                var changed = false
+                
+                trackIds.forEach { tid ->
+                    val index = updatedPlaylist.indexOfFirst { it.mediaId == tid.toString() }
+                    if (index != -1) {
+                        val item = updatedPlaylist[index]
+                        val metaBuilder = item.mediaMetadata.buildUpon()
+                        
+                        metadata["title"]?.let { metaBuilder.setTitle(it) }
+                        metadata["artist"]?.let { metaBuilder.setArtist(it) }
+                        metadata["album"]?.let { metaBuilder.setAlbumTitle(it) }
+                        
+                        updatedPlaylist[index] = item.buildUpon()
+                            .setMediaMetadata(metaBuilder.build())
+                            .build()
+                        changed = true
+                    }
+                }
+                
+                if (changed) {
+                    playlist.clear()
+                    playlist.addAll(updatedPlaylist)
+                }
+
                 onResult(true)
+                // Refresh library in background to ensure full sync (art, etc)
+                refreshLibrary()
             } else {
                 android.util.Log.e("MainViewModel", "Modify failed: ${result.exceptionOrNull()?.message}")
                 onResult(false)
