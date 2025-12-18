@@ -131,11 +131,18 @@ class PlaylistViewModel : ViewModel() {
         currentPlaylistName.value = name
         viewModelScope.launch {
             isLoading.value = true
+            android.util.Log.d("PlaylistViewModel", "Loading tracks for playlist $id ($name)")
             try {
                 val tracks = getPlaylistTracksRaw(id)
+                android.util.Log.d("PlaylistViewModel", "Received ${tracks.size} tracks from API")
+                tracks.forEachIndexed { index, track ->
+                    android.util.Log.d("PlaylistViewModel", "  Track $index: ${track.title} by ${track.artist}")
+                }
                 currentPlaylistTracks.clear()
                 currentPlaylistTracks.addAll(tracks)
+                android.util.Log.d("PlaylistViewModel", "Current playlist now has ${currentPlaylistTracks.size} tracks")
             } catch (e: Exception) {
+                android.util.Log.e("PlaylistViewModel", "Error loading playlist tracks", e)
                 error.value = e.message
             }
             isLoading.value = false
@@ -143,7 +150,10 @@ class PlaylistViewModel : ViewModel() {
     }
     
     suspend fun getPlaylistTracksRaw(id: Int): List<Track> = withContext(kotlinx.coroutines.Dispatchers.IO) {
-        playlistApi.getPlaylistTracks(id).items
+        android.util.Log.d("PlaylistViewModel", "API call: getPlaylistTracks($id)")
+        val response = playlistApi.getPlaylistTracks(id)
+        android.util.Log.d("PlaylistViewModel", "API response: ${response.items.size} items")
+        response.items
     }
     
     fun removeTrackFromPlaylist(playlistId: Int, trackId: Int) {

@@ -48,6 +48,6 @@ data class Track(
     val artist: String,
     val album: String?,
     @com.squareup.moshi.Json(name = "length") val duration: Double?,
-    val path: String,
+    val path: String?,  // Nullable because some tracks may not have paths yet
     @com.squareup.moshi.Json(name = "album_id") val album_id: Int? = null
 )
