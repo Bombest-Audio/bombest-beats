@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -35,11 +36,15 @@ import androidx.datastore.preferences.core.edit
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.bombest.music.data.authDataStore
+import com.bombest.music.data.AuthPreferences
 import com.bombest.music.ui.screens.*
 import com.bombest.music.ui.theme.BombestBeatsTheme
 import com.bombest.music.ui.viewmodel.MainViewModel
 import com.bombest.music.ui.viewmodel.PlaylistViewModel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.first
+import androidx.datastore.preferences.core.stringPreferencesKey
 import com.bombest.music.data.PasskeyManager
 import com.bombest.music.data.repository.AuthRepository
 import com.bombest.music.data.NetworkModule
@@ -196,6 +201,32 @@ fun MainContent(
                                 actions = {
                                     IconButton(onClick = { showMetadataDialog = true }) {
                                         Icon(Icons.Default.Edit, contentDescription = "Edit Metadata", tint = Color.White)
+                                    }
+                                    IconButton(onClick = { 
+                                        // Delete selected tracks
+                                        scope.launch {
+                                            val token = context.authDataStore.data.map { it[AuthPreferences.TOKEN_KEY] }.first()
+                                            if (token != null) {
+                                                selectedMediaItems.forEach { item ->
+                                                    val trackId = item.mediaId.toIntOrNull()
+                                                    if (trackId != null) {
+                                                        try {
+                                                            val response = NetworkModule.api.deleteTrack(trackId, "Bearer $token")
+                                                            if (response.isSuccessful) {
+                                                                // Remove from local playlist
+                                                                viewModel.playlist.remove(item)
+                                                            }
+                                                        } catch (e: Exception) {
+                                                            android.util.Log.e("MainActivity", "Failed to delete track", e)
+                                                        }
+                                                    }
+                                                }
+                                                selectedMediaItems = emptySet()
+                                                viewModel.refreshLibrary()
+                                            }
+                                        }
+                                    }) {
+                                        Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color(0xFFFF6B6B))
                                     }
                                 },
                                 colors = TopAppBarDefaults.topAppBarColors(

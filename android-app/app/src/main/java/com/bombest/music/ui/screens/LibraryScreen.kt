@@ -63,14 +63,22 @@ fun LibraryScreen(
     var showEditDialog by remember { mutableStateOf(false) }
     
     // Pull-to-refresh state
-    var pullOffset by remember { mutableFloatStateOf(0f) }
+    var pullOffsetTarget by remember { mutableFloatStateOf(0f) }
+    val pullOffset by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = if (isRefreshing) 60f else pullOffsetTarget,
+        animationSpec = androidx.compose.animation.core.spring(
+            dampingRatio = 0.8f,
+            stiffness = 300f
+        ),
+        label = "pullOffset"
+    )
     val refreshThreshold = 120f
     val density = LocalDensity.current
     
-    // Reset offset when refresh completes
+    // Reset target offset when refresh completes
     LaunchedEffect(isRefreshing) {
         if (!isRefreshing) {
-            pullOffset = 0f
+            pullOffsetTarget = 0f
         }
     }
     
@@ -85,13 +93,13 @@ fun LibraryScreen(
         object : NestedScrollConnection {
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
                 // If we have a pull offset and user is scrolling up (negative), consume it
-                if (pullOffset > 0 && available.y < 0) {
-                    val consumed = if (-available.y >= pullOffset) {
-                        val old = pullOffset
-                        pullOffset = 0f
+                if (pullOffsetTarget > 0 && available.y < 0) {
+                    val consumed = if (-available.y >= pullOffsetTarget) {
+                        val old = pullOffsetTarget
+                        pullOffsetTarget = 0f
                         old
                     } else {
-                        pullOffset += available.y
+                        pullOffsetTarget += available.y
                         -available.y
                     }
                     return Offset(0f, -consumed)
@@ -109,7 +117,7 @@ fun LibraryScreen(
                     listState.firstVisibleItemIndex == 0 && 
                     listState.firstVisibleItemScrollOffset == 0 &&
                     !isRefreshing) {
-                    pullOffset = (pullOffset + available.y * 0.5f).coerceIn(0f, 200f)
+                    pullOffsetTarget = (pullOffsetTarget + available.y * 0.5f).coerceIn(0f, 200f)
                     return Offset(0f, available.y)
                 }
                 return Offset.Zero
@@ -117,11 +125,10 @@ fun LibraryScreen(
             
             override suspend fun onPreFling(available: Velocity): Velocity {
                 // When user releases, check if we should trigger refresh
-                if (pullOffset >= refreshThreshold && !isRefreshing) {
-                    pullOffset = 0f  // Reset immediately
+                if (pullOffsetTarget >= refreshThreshold && !isRefreshing) {
                     onRefresh()
                 } else {
-                    pullOffset = 0f
+                    pullOffsetTarget = 0f
                 }
                 return Velocity.Zero
             }
@@ -259,8 +266,8 @@ fun LibraryScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .offset(y = with(density) { pullOffset.toDp() }),
-            contentPadding = PaddingValues(top = 16.dp, bottom = 100.dp, start = 16.dp, end = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            contentPadding = PaddingValues(top = 12.dp, bottom = 100.dp, start = 12.dp, end = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             items(playlist) { item ->
                 TrackItem(
@@ -360,7 +367,7 @@ fun TrackItem(
     ) {
         Row(
             modifier = Modifier
-                .padding(12.dp)
+                .padding(8.dp)
                 .fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -374,24 +381,24 @@ fun TrackItem(
                 contentDescription = "Album Art",
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
-                    .size(56.dp)
-                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
+                    .size(44.dp)
+                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(6.dp))
                     .then(if (isSelected) Modifier.background(Color(0xFFE90060).copy(alpha = 0.4f)) else Modifier)
             )
             
             if (isSelected) {
                 Box(
                     modifier = Modifier
-                        .size(56.dp)
-                        .clip(androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
+                        .size(44.dp)
+                        .clip(androidx.compose.foundation.shape.RoundedCornerShape(6.dp))
                         .background(Color(0xFFE90060).copy(alpha = 0.6f)),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(androidx.compose.material.icons.Icons.Default.Check, contentDescription = null, tint = Color.White)
+                    Icon(androidx.compose.material.icons.Icons.Default.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
                 }
             }
             
-            Spacer(modifier = Modifier.width(16.dp))
+            Spacer(modifier = Modifier.width(12.dp))
             
             Column(modifier = Modifier.weight(1f)) {
                 Text(
@@ -401,7 +408,7 @@ fun TrackItem(
                     maxLines = 1,
                     fontWeight = FontWeight.SemiBold
                 )
-                Spacer(modifier = Modifier.height(4.dp))
+                Spacer(modifier = Modifier.height(2.dp))
                 Text(
                     text = item.mediaMetadata.artist?.toString() ?: "Unknown Artist",
                     style = MaterialTheme.typography.bodyMedium,
