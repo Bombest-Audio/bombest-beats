@@ -54,6 +54,69 @@ class PlaylistViewModel : ViewModel() {
             }
         }
     }
+    
+    /**
+     * Phase 3: Search within a playlist
+     */
+    fun searchPlaylist(playlistId: Int, query: String) {
+        if (query.isBlank()) {
+            // Reload full playlist if search cleared
+            loadPlaylistTracks(playlistId, currentPlaylistName.value)
+            return
+        }
+        
+        viewModelScope.launch {
+            try {
+                android.util.Log.d("PlaylistViewModel", "Searching playlist $playlistId for: $query")
+                val response = playlistApi.searchPlaylist(playlistId, query)
+                currentPlaylistTracks.clear()
+                currentPlaylistTracks.addAll(response.items)
+                android.util.Log.d("PlaylistViewModel", "Search returned ${response.items.size} tracks")
+            } catch (e: Exception) {
+                android.util.Log.e("PlaylistViewModel", "Search failed", e)
+                error.value = "Search failed: ${e.message}"
+            }
+        }
+    }
+    
+    /**
+     * Phase 3: Sort playlist tracks
+     */
+    fun sortPlaylist(playlistId: Int, sortMode: String) {
+        viewModelScope.launch {
+            try {
+                android.util.Log.d("PlaylistViewModel", "Sorting playlist $playlistId by $sortMode")
+                val response = playlistApi.sortPlaylist(playlistId, com.bombest.music.data.api.SortRequest(sortMode))
+                android.util.Log.d("PlaylistViewModel", "Sort response: $response")
+                // Reload tracks to show sorted order
+                loadPlaylistTracks(playlistId, currentPlaylistName.value)
+            } catch (e: Exception) {
+                android.util.Log.e("PlaylistViewModel", "Sort failed", e)
+                error.value = "Sort failed: ${e.message}"
+            }
+        }
+    }
+    
+    /**
+     * Phase 3: Reorder playlist tracks via drag-and-drop
+     */
+    fun reorderPlaylist(playlistId: Int, newTrackOrder: List<Int>) {
+        viewModelScope.launch {
+            try {
+                android.util.Log.d("PlaylistViewModel", "Reordering playlist $playlistId with ${newTrackOrder.size} tracks")
+                val response = playlistApi.reorderPlaylist(
+                    playlistId, 
+                    com.bombest.music.data.api.ReorderRequest(newTrackOrder)
+                )
+                android.util.Log.d("PlaylistViewModel", "Reorder response: $response")
+                // Reload to confirm new order
+                loadPlaylistTracks(playlistId, currentPlaylistName.value)
+            } catch (e: Exception) {
+                android.util.Log.e("PlaylistViewModel", "Reorder failed", e)
+                error.value = "Reorder failed: ${e.message}"
+            }
+        }
+    }
     val currentPlaylistName = mutableStateOf("")
     val stagedTrackIds = mutableStateListOf<Int>()
     
