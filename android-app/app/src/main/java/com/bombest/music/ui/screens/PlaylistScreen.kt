@@ -1,58 +1,27 @@
 package com.bombest.music.ui.screens
 
-import androidx.compose.animation.*
-import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Done
-import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.filled.FavoriteBorder
-import androidx.compose.material.icons.filled.List
-import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInRoot
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.zIndex
-import coil.compose.AsyncImage
 import com.bombest.music.data.api.Playlist
 import com.bombest.music.data.api.Track
-import com.bombest.music.data.NetworkModule
-import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -61,7 +30,6 @@ fun PlaylistsScreen(
     isLoading: Boolean,
     onCreatePlaylist: (String) -> Unit,
     onPlaylistClick: (Int) -> Unit,
-    onPlayPlaylist: (Int, String) -> Unit = { _, _ -> },
     onDeletePlaylist: (Int) -> Unit,
     onBack: () -> Unit
 ) {
@@ -102,61 +70,20 @@ fun PlaylistsScreen(
                 )
             } else if (playlists.isEmpty()) {
                 Text(
-                    "No playlists yet",
-                    modifier = Modifier.align(Alignment.Center),
-                    color = Color.Gray
+                    text = "No playlists yet.\nTap + to create one!",
+                    color = Color.Gray,
+                    modifier = Modifier.align(Alignment.Center)
                 )
             } else {
-                // Phase 3: Partition system playlists (All Songs, Favorites) from user playlists
-                val systemPlaylists = playlists.filter { it.name == "All Songs" || it.name == "Favorites" }
-                val userPlaylists = playlists.filter { it.name != "All Songs" && it.name != "Favorites" }
-                
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    // System Playlists Section - Pinned at top
-                    if (systemPlaylists.isNotEmpty()) {
-                        item {
-                            Text(
-                                text = "Library",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = Color.Gray,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(bottom = 8.dp)
-                            )
-                        }
-                        
-                        items(systemPlaylists) { playlist ->
-                            SystemPlaylistCard(
-                                playlist = playlist,
-                                onClick = { onPlaylistClick(playlist.id) },
-                                onPlayClick = { onPlayPlaylist(playlist.id, playlist.name) }
-                            )
-                        }
-                        
-                        // Divider between system and user playlists
-                        if (userPlaylists.isNotEmpty()) {
-                            item {
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Text(
-                                    text = "Your Playlists",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = Color.Gray,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(top = 8.dp, bottom = 8.dp)
-                                )
-                            }
-                        }
-                    }
-                    
-                    // User Playlists  
-                    items(userPlaylists) { playlist ->
+                    items(playlists) { playlist ->
                         PlaylistItem(
                             playlist = playlist,
                             onClick = { onPlaylistClick(playlist.id) },
-                            onPlay = { onPlayPlaylist(playlist.id, playlist.name) },
                             onDelete = { onDeletePlaylist(playlist.id) }
                         )
                     }
@@ -208,7 +135,6 @@ fun PlaylistsScreen(
 fun PlaylistItem(
     playlist: Playlist,
     onClick: () -> Unit,
-    onPlay: () -> Unit,
     onDelete: () -> Unit
 ) {
     Card(
@@ -235,14 +161,14 @@ fun PlaylistItem(
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    text = "${playlist.count} ${if (playlist.count == 1) "track" else "tracks"}",
+                    text = "${playlist.count} tracks",
                     color = Color.Gray,
                     fontSize = 14.sp
                 )
             }
             
             Row {
-                IconButton(onClick = onPlay) {
+                IconButton(onClick = onClick) {
                     Icon(Icons.Default.PlayArrow, contentDescription = "Play", tint = Color(0xFFE90060))
                 }
                 IconButton(onClick = onDelete) {
@@ -260,117 +186,25 @@ fun PlaylistDetailScreen(
     playlistName: String,
     tracks: List<Track>,
     allTracks: List<Track> = emptyList(),
-    stagedTrackIds: List<Int> = emptyList(),
     isLoading: Boolean,
     onTrackClick: (Track) -> Unit,
     onRemoveTrack: (Int) -> Unit,
-    onToggleStage: (Int) -> Unit = {},
     onAddTracks: (List<Int>) -> Unit = {},
-    onSearch: (String) -> Unit = {},  // Phase 3: Search callback
-    onSort: (String) -> Unit = {},     // Phase 3: Sort callback
-    onDismiss: () -> Unit = {},
     onBack: () -> Unit
 ) {
     var showAddTracksDialog by remember { mutableStateOf(false) }
-    var searchQuery by remember { mutableStateOf("") }
-    var showSearchBar by remember { mutableStateOf(false) }
-    var showSortMenu by remember { mutableStateOf(false) }
-
+    var selectedTrackIds by remember { mutableStateOf(setOf<Int>()) }
+    
     Scaffold(
         topBar = {
             TopAppBar(
-                title = {
-                    if (showSearchBar) {
-                        androidx.compose.material3.TextField(
-                            value = searchQuery,
-                            onValueChange = {
-                                searchQuery = it
-                                onSearch(it)
-                            },
-                            placeholder = { Text("Search tracks...") },
-                            singleLine = true,
-                            colors = androidx.compose.material3.TextFieldDefaults.colors(
-                                focusedContainerColor = Color.Transparent,
-                                unfocusedContainerColor = Color.Transparent,
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White,
-                                cursorColor = Color(0xFFE90060)
-                            ),
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    } else {
-                        Text(playlistName, fontWeight = FontWeight.Bold)
-                    }
-                },
+                title = { Text(playlistName, fontWeight = FontWeight.Bold) },
                 navigationIcon = {
-                    IconButton(onClick = {
-                        if (showSearchBar) {
-                            showSearchBar = false
-                            searchQuery = ""
-                            onSearch("")
-                        } else {
-                            onBack()
-                        }
-                    }) {
+                    IconButton(onClick = onBack) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
                     }
                 },
                 actions = {
-                    // Phase 3: Search icon
-                    IconButton(onClick = { showSearchBar = !showSearchBar }) {
-                        Icon(
-                            imageVector = if (showSearchBar) Icons.Default.Close else Icons.Default.Search,
-                            contentDescription = "Search",
-                            tint = Color.White
-                        )
-                    }
-
-                    // Phase 3: Sort menu
-                    Box {
-                        IconButton(onClick = { showSortMenu = true }) {
-                            Icon(Icons.Default.Menu, contentDescription = "Sort", tint = Color.White)
-                        }
-
-                        DropdownMenu(
-                            expanded = showSortMenu,
-                            onDismissRequest = { showSortMenu = false }
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text("Sort by Title") },
-                                onClick = {
-                                    onSort("title")
-                                    showSortMenu = false
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Sort by Artist") },
-                                onClick = {
-                                    onSort("artist")
-                                    showSortMenu = false
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Sort by Date Added") },
-                                onClick = {
-                                    onSort("date")
-                                    showSortMenu = false
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Custom Order") },
-                                onClick = {
-                                    onSort("custom")
-                                    showSortMenu = false
-                                }
-                            )
-                        }
-                    }
-
-                    if (tracks.isNotEmpty()) {
-                        IconButton(onClick = { onTrackClick(tracks[0]) }) {
-                            Icon(Icons.Default.PlayArrow, contentDescription = "Play All", tint = Color.White)
-                        }
-                    }
                     IconButton(onClick = { showAddTracksDialog = true }) {
                         Icon(Icons.Default.Add, contentDescription = "Add Tracks", tint = Color.White)
                     }
@@ -427,7 +261,7 @@ fun PlaylistDetailScreen(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     items(tracks) { track ->
-                        TrackItem(
+                        PlaylistTrackItem(
                             track = track,
                             onClick = { onTrackClick(track) },
                             onRemove = { onRemoveTrack(track.id) }
@@ -437,419 +271,107 @@ fun PlaylistDetailScreen(
             }
         }
     }
-
+    
+    // Add Tracks Dialog
     if (showAddTracksDialog) {
         val existingTrackIds = tracks.map { it.id }.toSet()
         val availableTracks = allTracks.filter { it.id !in existingTrackIds }
         
-        DragAndDropTrackPicker(
-            availableTracks = availableTracks,
-            stagedTrackIds = stagedTrackIds,
-            onToggleStage = onToggleStage,
-            onAddTracks = {
-                onAddTracks(stagedTrackIds.toList())
-                showAddTracksDialog = false
+        AlertDialog(
+            onDismissRequest = { 
+                showAddTracksDialog = false 
+                selectedTrackIds = emptySet()
             },
-            onDismiss = {
-                onDismiss()
-                showAddTracksDialog = false
-            }
-        )
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun DragAndDropTrackPicker(
-    availableTracks: List<Track>,
-    stagedTrackIds: List<Int>,
-    onToggleStage: (Int) -> Unit,
-    onAddTracks: () -> Unit,
-    onDismiss: () -> Unit
-) {
-    var draggingTrackId by remember { mutableStateOf<Int?>(null) }
-    var fingerPosition by remember { mutableStateOf(Offset.Zero) }
-    var bucketPosition by remember { mutableStateOf(Offset.Zero) }
-    var bucketSize by remember { mutableStateOf(IntSize.Zero) }
-    var isHoveringBucket by remember { mutableStateOf(false) }
-    var isGridView by remember { mutableStateOf(true) }
-    
-    val bucketScale by animateFloatAsState(if (isHoveringBucket) 1.2f else 1f)
-    val bucketColor by animateColorAsState(if (isHoveringBucket) Color(0xFFE90060) else Color(0xFF1A1D2E))
-
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color(0xFF0A0D14))
-            .zIndex(100f)
-    ) {
-        Column(modifier = Modifier.fillMaxSize()) {
-            TopAppBar(
-                title = { Text("Drag Tracks to Bucket", fontWeight = FontWeight.Bold) },
-                navigationIcon = {
-                    IconButton(onClick = onDismiss) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
-                    }
-                },
-                actions = {
-                    IconButton(onClick = { isGridView = !isGridView }) {
-                        Icon(
-                            imageVector = if (isGridView) Icons.Default.List else Icons.Default.GridView,
-                            contentDescription = "Toggle View",
-                            tint = Color.White
-                        )
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color(0xFF15192A),
-                    titleContentColor = Color.White
-                )
-            )
-            
-            if (availableTracks.isEmpty()) {
-                Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                    Text("No more tracks to add", color = Color.Gray)
-                }
-            } else {
-                Box(modifier = Modifier.weight(0.7f)) {
-                    if (isGridView) {
-                        LazyVerticalGrid(
-                            columns = GridCells.Fixed(3),
-                            modifier = Modifier.fillMaxSize(),
-                            contentPadding = PaddingValues(16.dp),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            items(availableTracks, key = { it.id }) { track ->
-                                val isStaged = stagedTrackIds.contains(track.id)
-                                TrackGridItem(
-                                    track = track,
-                                    isStaged = isStaged,
-                                    bucketPosition = bucketPosition,
-                                    bucketSize = bucketSize,
-                                    onDragStart = { globalTouchPosition ->
-                                        draggingTrackId = track.id
-                                        fingerPosition = globalTouchPosition
-                                    },
-                                    onDrag = { globalFingerPosition -> fingerPosition = globalFingerPosition },
-                                    onDragEnd = {
-                                        if (isHoveringBucket && !isStaged) onToggleStage(track.id)
-                                        draggingTrackId = null
-                                        isHoveringBucket = false
-                                    },
-                                    onHoverChange = { hovering -> isHoveringBucket = hovering }
-                                )
-                            }
-                        }
-                    } else {
-                        LazyColumn(
-                            modifier = Modifier.fillMaxSize(),
-                            contentPadding = PaddingValues(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            items(availableTracks, key = { it.id }) { track ->
-                                val isStaged = stagedTrackIds.contains(track.id)
-                                TrackListItem(
-                                    track = track,
-                                    isStaged = isStaged,
-                                    bucketPosition = bucketPosition,
-                                    bucketSize = bucketSize,
-                                    onDragStart = { globalTouchPosition ->
-                                        draggingTrackId = track.id
-                                        fingerPosition = globalTouchPosition
-                                    },
-                                    onDrag = { globalFingerPosition -> fingerPosition = globalFingerPosition },
-                                    onDragEnd = {
-                                        if (isHoveringBucket && !isStaged) onToggleStage(track.id)
-                                        draggingTrackId = null
-                                        isHoveringBucket = false
-                                    },
-                                    onHoverChange = { hovering -> isHoveringBucket = hovering }
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-            
-            // Bucket Area (Bottom 30%)
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(0.3f)
-                    .onGloballyPositioned { 
-                        bucketPosition = it.positionInRoot()
-                        bucketSize = it.size
-                    }
-                    .background(Color(0xFF0F121B))
-                    .padding(16.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Box(
-                        modifier = Modifier
-                            .size(100.dp)
-                            .graphicsLayer(scaleX = bucketScale, scaleY = bucketScale)
-                            .shadow(if (isHoveringBucket) 20.dp else 0.dp, RoundedCornerShape(50))
-                            .background(bucketColor, RoundedCornerShape(50))
-                            .border(2.dp, if (isHoveringBucket) Color.White else Color.Transparent, RoundedCornerShape(50)),
-                        contentAlignment = Alignment.Center
+            title = { Text("Add Tracks", color = Color.White) },
+            text = {
+                if (availableTracks.isEmpty()) {
+                    Text("All tracks are already in this playlist", color = Color.Gray)
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.heightIn(max = 400.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Add,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(48.dp)
-                        )
-                    }
-                    
-                    Spacer(modifier = Modifier.height(16.dp))
-                    
-                    Text(
-                        text = if (stagedTrackIds.isEmpty()) "Drag tracks here" else "${stagedTrackIds.size} tracks staged",
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold
-                    )
-                    
-                    if (stagedTrackIds.isNotEmpty()) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Button(
-                            onClick = onAddTracks,
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE90060)),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Icon(Icons.Default.Done, contentDescription = null)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Save Changes")
+                        items(availableTracks) { track ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        selectedTrackIds = if (track.id in selectedTrackIds) {
+                                            selectedTrackIds - track.id
+                                        } else {
+                                            selectedTrackIds + track.id
+                                        }
+                                    }
+                                    .padding(vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Checkbox(
+                                    checked = track.id in selectedTrackIds,
+                                    onCheckedChange = { checked ->
+                                        selectedTrackIds = if (checked) {
+                                            selectedTrackIds + track.id
+                                        } else {
+                                            selectedTrackIds - track.id
+                                        }
+                                    },
+                                    colors = CheckboxDefaults.colors(
+                                        checkedColor = Color(0xFFE90060)
+                                    )
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Column {
+                                    Text(
+                                        text = track.title,
+                                        color = Color.White,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = track.artist,
+                                        color = Color.Gray,
+                                        fontSize = 12.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
                         }
                     }
                 }
-            }
-        }
-        
-        // Floating Dragged Item
-        draggingTrackId?.let { id ->
-            val track = availableTracks.find { it.id == id }
-            track?.let {
-                val boxSize = with(LocalDensity.current) { 100.dp.toPx() }
-                Box(
-                    modifier = Modifier
-                        .offset { 
-                            IntOffset(
-                                (fingerPosition.x - boxSize / 2).roundToInt(), 
-                                (fingerPosition.y - boxSize / 2).roundToInt()
-                            ) 
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        if (selectedTrackIds.isNotEmpty()) {
+                            onAddTracks(selectedTrackIds.toList())
                         }
-                        .size(100.dp)
-                        .shadow(10.dp, RoundedCornerShape(8.dp))
-                        .background(Color(0xFF1A1D2E), RoundedCornerShape(8.dp))
-                        .zIndex(200f),
-                    contentAlignment = Alignment.Center
+                        showAddTracksDialog = false
+                        selectedTrackIds = emptySet()
+                    },
+                    enabled = selectedTrackIds.isNotEmpty()
                 ) {
-                    TrackArt(track = it, modifier = Modifier.fillMaxSize())
+                    Text("Add ${if (selectedTrackIds.isNotEmpty()) "(${selectedTrackIds.size})" else ""}", 
+                         color = if (selectedTrackIds.isNotEmpty()) Color(0xFFE90060) else Color.Gray)
                 }
-            }
-        }
-    }
-}
-
-@Composable
-fun TrackListItem(
-    track: Track,
-    isStaged: Boolean,
-    onDragStart: (Offset) -> Unit,
-    onDrag: (Offset) -> Unit,
-    onDragEnd: () -> Unit,
-    onHoverChange: (Boolean) -> Unit,
-    bucketPosition: Offset,
-    bucketSize: IntSize
-) {
-    var itemPosition by remember { mutableStateOf(Offset.Zero) }
-
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .onGloballyPositioned { itemPosition = it.positionInRoot() }
-            .pointerInput(bucketPosition, bucketSize) {
-                detectDragGesturesAfterLongPress(
-                    onDragStart = { touchOffset -> onDragStart(itemPosition + touchOffset) },
-                    onDrag = { change, _ ->
-                        change.consume()
-                        onDrag(itemPosition + change.position)
-                        val globalPointerY = itemPosition.y + change.position.y
-                        onHoverChange(globalPointerY > bucketPosition.y)
-                    },
-                    onDragEnd = { onDragEnd() },
-                    onDragCancel = { onDragEnd() }
-                )
             },
-        shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = if (isStaged) Color(0xFFE90060).copy(alpha = 0.2f) else Color(0xFF1A1D2E)
+            dismissButton = {
+                TextButton(onClick = { 
+                    showAddTracksDialog = false 
+                    selectedTrackIds = emptySet()
+                }) {
+                    Text("Cancel", color = Color.Gray)
+                }
+            },
+            containerColor = Color(0xFF1A1D2E)
         )
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(modifier = Modifier.size(50.dp)) {
-                TrackArt(track = track, modifier = Modifier.fillMaxSize())
-            }
-            Spacer(modifier = Modifier.width(12.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = track.title,
-                    color = Color.White,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    text = track.artist,
-                    color = Color.Gray,
-                    fontSize = 12.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-            if (isStaged) {
-                Icon(Icons.Default.Done, contentDescription = null, tint = Color(0xFFE90060))
-            }
-        }
     }
 }
 
 @Composable
-fun TrackGridItem(
-    track: Track,
-    isStaged: Boolean,
-    onDragStart: (Offset) -> Unit,
-    onDrag: (Offset) -> Unit,
-    onDragEnd: () -> Unit,
-    onHoverChange: (Boolean) -> Unit,
-    bucketPosition: Offset,
-    bucketSize: IntSize
-) {
-    var itemPosition by remember { mutableStateOf(Offset.Zero) }
-
-    Box(
-        modifier = Modifier
-            .aspectRatio(1f)
-            .clip(RoundedCornerShape(8.dp))
-            .background(if (isStaged) Color(0xFFE90060).copy(alpha = 0.3f) else Color(0xFF1A1D2E))
-            .onGloballyPositioned { itemPosition = it.positionInRoot() }
-            .pointerInput(bucketPosition, bucketSize) {
-                detectDragGesturesAfterLongPress(
-                    onDragStart = { touchOffset -> onDragStart(itemPosition + touchOffset) },
-                    onDrag = { change, _ ->
-                        change.consume()
-                        onDrag(itemPosition + change.position)
-                        
-                        // Accurate hover detection
-                        val globalPointerY = itemPosition.y + change.position.y
-                        onHoverChange(globalPointerY > bucketPosition.y)
-                    },
-                    onDragEnd = { onDragEnd() },
-                    onDragCancel = { onDragEnd() }
-                )
-            },
-        contentAlignment = Alignment.Center
-    ) {
-        TrackArt(track = track, modifier = Modifier.fillMaxSize())
-        
-        // Semi-transparent overlay with Title/Artist so it's not "empty"
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.7f)),
-                        startY = 50f
-                    )
-                )
-                .padding(8.dp),
-            contentAlignment = Alignment.BottomStart
-        ) {
-            Column {
-                Text(
-                    text = track.title,
-                    color = Color.White,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    text = track.artist,
-                    color = Color.LightGray,
-                    fontSize = 10.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-        }
-        
-        if (isStaged) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color(0xFFE90060).copy(alpha = 0.4f)),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(Icons.Default.Done, contentDescription = null, tint = Color.White, modifier = Modifier.size(32.dp))
-            }
-        }
-    }
-}
-
-@Composable
-fun TrackArt(track: Track, modifier: Modifier = Modifier) {
-    val artUrl = if (track.album_id != null) {
-        "${NetworkModule.currentBaseUrl}/album/${track.album_id}/art"
-    } else null
-
-    Box(modifier = modifier, contentAlignment = Alignment.Center) {
-        if (artUrl != null) {
-            AsyncImage(
-                model = artUrl,
-                contentDescription = null,
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop
-            )
-        } else {
-            // Textual Fallback for "Empty Tiles"
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color(0xFF25293E)),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = track.title.take(1).uppercase(),
-                    color = Color.White.copy(alpha = 0.2f),
-                    fontSize = 40.sp,
-                    fontWeight = FontWeight.Black
-                )
-            }
-        }
-    }
-}
-
-@Composable
-fun TrackItem(
+fun PlaylistTrackItem(
     track: Track,
     onClick: () -> Unit,
-    onRemove: () -> Unit = {},
-    onFavoriteToggle: ((Int) -> Unit)? = null,  // Phase 3: Favorites support
-    showRemove: Boolean = true
+    onRemove: () -> Unit
 ) {
-    // Phase 3: Reactive favorites state
-    val isFavorited = com.bombest.music.data.FavoritesManager.favoritedTrackIds.collectAsState()
-    val trackIsFavorited = isFavorited.value.contains(track.id)
-    
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -861,24 +383,14 @@ fun TrackItem(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Album art placeholder
-            Box(
-                modifier = Modifier
-                    .size(48.dp)
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(Color(0xFF2A2F42))
-            )
-            
-            Spacer(modifier = Modifier.width(12.dp))
-            
-            // Track info
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = track.title,
                     color = Color.White,
-                    fontSize = 15.sp,
+                    fontSize = 16.sp,
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -886,40 +398,14 @@ fun TrackItem(
                 Text(
                     text = track.artist,
                     color = Color.Gray,
-                    fontSize = 13.sp,
+                    fontSize = 14.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
             }
             
-            // Phase 3: Favorite heart icon
-            if (onFavoriteToggle != null) {
-                IconButton(
-                    onClick = { onFavoriteToggle(track.id) },
-                    modifier = Modifier.size(40.dp)
-                ) {
-                    Icon(
-                        imageVector = if (trackIsFavorited) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                        contentDescription = if (trackIsFavorited) "Remove from favorites" else "Add to favorites",
-                        tint = if (trackIsFavorited) Color(0xFFE90060) else Color.Gray,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-            }
-            
-            // Remove button
-            if (showRemove) {
-                IconButton(
-                    onClick = onRemove,
-                    modifier = Modifier.size(40.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Delete,
-                        contentDescription = "Remove",
-                        tint = Color.Gray.copy(alpha = 0.7f),
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
+            IconButton(onClick = onRemove) {
+                Icon(Icons.Default.Delete, contentDescription = "Remove", tint = Color.Gray)
             }
         }
     }

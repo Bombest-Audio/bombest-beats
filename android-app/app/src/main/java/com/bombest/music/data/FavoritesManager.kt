@@ -3,12 +3,9 @@ package com.bombest.music.data
 import android.util.Log
 import com.bombest.music.data.api.FavoriteToggleRequest
 import com.bombest.music.data.api.PlaylistApi
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.launch
 
 /**
  * Singleton manager for favorites state and synchronization.
@@ -45,6 +42,8 @@ object FavoritesManager {
         val wasFavorited = isFavorited(trackId)
         val nowFavorited = !wasFavorited
         
+        Log.d("FavoritesManager", "Toggling favorite for track $trackId (was: $wasFavorited, now: $nowFavorited)")
+        
         // Optimistic update
         val currentFavorites = _favoritedTrackIds.value.toMutableSet()
         if (nowFavorited) {
@@ -57,9 +56,11 @@ object FavoritesManager {
         // Sync to backend
         try {
             val pid = playlistId ?: favoritesPlaylistId ?: run {
-                Log.e("FavoritesManager", "No favorites playlist ID set")
+                Log.e("FavoritesManager", "No favorites playlist ID set - cannot sync to backend")
                 return nowFavorited
             }
+            
+            Log.d("FavoritesManager", "Calling backend API: toggleFavorite(playlistId=$pid, trackId=$trackId)")
             
             val response = playlistApi.toggleFavorite(
                 pid,
@@ -67,10 +68,10 @@ object FavoritesManager {
             )
             
             if (response.success) {
-                Log.d("FavoritesManager", "Toggled favorite for track $trackId: ${response.favorited}")
-                // Backend confirms our optimistic update
+                Log.d("FavoritesManager", "Backend sync successful! Track $trackId favorited=${response.favorited}")
                 return response.favorited
             } else {
+                Log.e("FavoritesManager", "Backend returned success=false for track $trackId")
                 // Revert optimistic update on failure
                 _favoritedTrackIds.value = _favoritedTrackIds.value.toMutableSet().apply {
                     if (wasFavorited) add(trackId) else remove(trackId)
@@ -78,7 +79,7 @@ object FavoritesManager {
                 return wasFavorited
             }
         } catch (e: Exception) {
-            Log.e("FavoritesManager", "Failed to sync favorite toggle", e)
+            Log.e("FavoritesManager", "Failed to sync favorite toggle for track $trackId", e)
             // Revert on error
             _favoritedTrackIds.value = _favoritedTrackIds.value.toMutableSet().apply {
                 if (wasFavorited) add(trackId) else remove(trackId)
@@ -92,10 +93,11 @@ object FavoritesManager {
      */
     suspend fun loadFavorites(favoritesId: Int) {
         try {
+            Log.d("FavoritesManager", "Loading favorites from backend (playlist $favoritesId)")
             val response = playlistApi.getPlaylistTracks(favoritesId)
             val favoriteIds = response.items.map { it.id }.toSet()
             _favoritedTrackIds.value = favoriteIds
-            Log.d("FavoritesManager", "Loaded ${favoriteIds.size} favorites")
+            Log.d("FavoritesManager", "Loaded ${favoriteIds.size} favorites: $favoriteIds")
         } catch (e: Exception) {
             Log.e("FavoritesManager", "Failed to load favorites", e)
         }

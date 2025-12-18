@@ -7,7 +7,6 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.bombest.music.data.api.*
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
@@ -23,114 +22,7 @@ class PlaylistViewModel : ViewModel() {
     val allTracks = mutableStateListOf<Track>()  // All library tracks for picker
     val isLoading = mutableStateOf(false)
     val error = mutableStateOf<String?>(null)
-    
-    // Phase 2: System playlist IDs
-    val allSongsPlaylistId = mutableStateOf<Int?>(null)
-    val favoritesPlaylistId = mutableStateOf<Int?>(null)
-    
-    /**
-     * Initialize system playlists (All Songs, Favorites)
-     * Call this once on app start
-     */
-    fun initializeSystemPlaylists() {
-        viewModelScope.launch {
-            try {
-                android.util.Log.d("PlaylistViewModel", "Initializing system playlists...")
-                val response = playlistApi.initializeSystemPlaylists()
-                allSongsPlaylistId.value = response.all_songs_id
-                favoritesPlaylistId.value = response.favorites_id
-                
-                android.util.Log.d("PlaylistViewModel", "System playlists initialized: All Songs=${response.all_songs_id}, Favorites=${response.favorites_id}")
-                
-                // Initialize FavoritesManager
-                com.bombest.music.data.FavoritesManager.initialize(playlistApi, response.favorites_id)
-                com.bombest.music.data.FavoritesManager.loadFavorites(response.favorites_id)
-                
-                // Reload playlists to show new system playlists
-                loadPlaylists()
-            } catch (e: Exception) {
-                android.util.Log.e("PlaylistViewModel", "Failed to initialize system playlists", e)
-                error.value = "Failed to initialize playlists: ${e.message}"
-            }
-        }
-    }
-    
-    /**
-     * Phase 3: Search within a playlist
-     */
-    fun searchPlaylist(playlistId: Int, query: String) {
-        if (query.isBlank()) {
-            // Reload full playlist if search cleared
-            loadPlaylistTracks(playlistId, currentPlaylistName.value)
-            return
-        }
-        
-        viewModelScope.launch {
-            try {
-                android.util.Log.d("PlaylistViewModel", "Searching playlist $playlistId for: $query")
-                val response = playlistApi.searchPlaylist(playlistId, query)
-                currentPlaylistTracks.clear()
-                currentPlaylistTracks.addAll(response.items)
-                android.util.Log.d("PlaylistViewModel", "Search returned ${response.items.size} tracks")
-            } catch (e: Exception) {
-                android.util.Log.e("PlaylistViewModel", "Search failed", e)
-                error.value = "Search failed: ${e.message}"
-            }
-        }
-    }
-    
-    /**
-     * Phase 3: Sort playlist tracks
-     */
-    fun sortPlaylist(playlistId: Int, sortMode: String) {
-        viewModelScope.launch {
-            try {
-                android.util.Log.d("PlaylistViewModel", "Sorting playlist $playlistId by $sortMode")
-                val response = playlistApi.sortPlaylist(playlistId, com.bombest.music.data.api.SortRequest(sortMode))
-                android.util.Log.d("PlaylistViewModel", "Sort response: $response")
-                // Reload tracks to show sorted order
-                loadPlaylistTracks(playlistId, currentPlaylistName.value)
-            } catch (e: Exception) {
-                android.util.Log.e("PlaylistViewModel", "Sort failed", e)
-                error.value = "Sort failed: ${e.message}"
-            }
-        }
-    }
-    
-    /**
-     * Phase 3: Reorder playlist tracks via drag-and-drop
-     */
-    fun reorderPlaylist(playlistId: Int, newTrackOrder: List<Int>) {
-        viewModelScope.launch {
-            try {
-                android.util.Log.d("PlaylistViewModel", "Reordering playlist $playlistId with ${newTrackOrder.size} tracks")
-                val response = playlistApi.reorderPlaylist(
-                    playlistId, 
-                    com.bombest.music.data.api.ReorderRequest(newTrackOrder)
-                )
-                android.util.Log.d("PlaylistViewModel", "Reorder response: $response")
-                // Reload to confirm new order
-                loadPlaylistTracks(playlistId, currentPlaylistName.value)
-            } catch (e: Exception) {
-                android.util.Log.e("PlaylistViewModel", "Reorder failed", e)
-                error.value = "Reorder failed: ${e.message}"
-            }
-        }
-    }
     val currentPlaylistName = mutableStateOf("")
-    val stagedTrackIds = mutableStateListOf<Int>()
-    
-    fun toggleStageTrack(trackId: Int) {
-        if (stagedTrackIds.contains(trackId)) {
-            stagedTrackIds.remove(trackId)
-        } else {
-            stagedTrackIds.add(trackId)
-        }
-    }
-    
-    fun clearStagedTracks() {
-        stagedTrackIds.clear()
-    }
     
     fun initialize(context: Context) {
         val logging = HttpLoggingInterceptor().apply {
@@ -169,8 +61,7 @@ class PlaylistViewModel : ViewModel() {
                         artist = item.artist ?: "Unknown",
                         album = item.album,
                         duration = item.length,  // model.Track uses 'length' not 'duration'
-                        path = item.path ?: "",  // path is nullable in model.Track
-                        album_id = item.albumId
+                        path = item.path ?: ""   // path is nullable in model.Track
                     )
                 })
                 android.util.Log.d("PlaylistViewModel", "Loaded ${allTracks.size} library tracks")
@@ -225,29 +116,15 @@ class PlaylistViewModel : ViewModel() {
         currentPlaylistName.value = name
         viewModelScope.launch {
             isLoading.value = true
-            android.util.Log.d("PlaylistViewModel", "Loading tracks for playlist $id ($name)")
             try {
-                val tracks = getPlaylistTracksRaw(id)
-                android.util.Log.d("PlaylistViewModel", "Received ${tracks.size} tracks from API")
-                tracks.forEachIndexed { index, track ->
-                    android.util.Log.d("PlaylistViewModel", "  Track $index: ${track.title} by ${track.artist}")
-                }
+                val response = playlistApi.getPlaylistTracks(id)
                 currentPlaylistTracks.clear()
-                currentPlaylistTracks.addAll(tracks)
-                android.util.Log.d("PlaylistViewModel", "Current playlist now has ${currentPlaylistTracks.size} tracks")
+                currentPlaylistTracks.addAll(response.tracks)
             } catch (e: Exception) {
-                android.util.Log.e("PlaylistViewModel", "Error loading playlist tracks", e)
                 error.value = e.message
             }
             isLoading.value = false
         }
-    }
-    
-    suspend fun getPlaylistTracksRaw(id: Int): List<Track> = withContext(kotlinx.coroutines.Dispatchers.IO) {
-        android.util.Log.d("PlaylistViewModel", "API call: getPlaylistTracks($id)")
-        val response = playlistApi.getPlaylistTracks(id)
-        android.util.Log.d("PlaylistViewModel", "API response: ${response.items.size} items")
-        response.items
     }
     
     fun removeTrackFromPlaylist(playlistId: Int, trackId: Int) {
@@ -266,7 +143,6 @@ class PlaylistViewModel : ViewModel() {
             try {
                 android.util.Log.d("PlaylistViewModel", "Adding ${trackIds.size} tracks to playlist $playlistId")
                 playlistApi.addTracksToPlaylist(playlistId, AddTracksRequest(trackIds))
-                clearStagedTracks()
                 // Reload playlist tracks to refresh the list
                 loadPlaylistTracks(playlistId, currentPlaylistName.value)
             } catch (e: Exception) {

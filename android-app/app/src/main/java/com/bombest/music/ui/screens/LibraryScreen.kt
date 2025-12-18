@@ -2,7 +2,6 @@ package com.bombest.music.ui.screens
 
 import android.util.Log
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -13,11 +12,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -51,34 +45,21 @@ fun LibraryScreen(
     currentMediaItem: MediaItem?,
     isRefreshing: Boolean = false,
     onRefresh: () -> Unit = {},
-    onDelete: (MediaItem) -> Unit = {},
-    selectedItems: Set<MediaItem> = emptySet(),
-    onToggleSelection: (MediaItem) -> Unit = {},
-    onEditMetadata: (List<MediaItem>, Map<String, String>) -> Unit = { _, _ -> }
+    onDelete: (MediaItem) -> Unit = {}
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
     
-    var showEditDialog by remember { mutableStateOf(false) }
-    
     // Pull-to-refresh state
-    var pullOffsetTarget by remember { mutableFloatStateOf(0f) }
-    val pullOffset by androidx.compose.animation.core.animateFloatAsState(
-        targetValue = if (isRefreshing) 60f else pullOffsetTarget,
-        animationSpec = androidx.compose.animation.core.spring(
-            dampingRatio = 0.8f,
-            stiffness = 300f
-        ),
-        label = "pullOffset"
-    )
+    var pullOffset by remember { mutableFloatStateOf(0f) }
     val refreshThreshold = 120f
     val density = LocalDensity.current
     
-    // Reset target offset when refresh completes
+    // Reset offset when refresh completes
     LaunchedEffect(isRefreshing) {
         if (!isRefreshing) {
-            pullOffsetTarget = 0f
+            pullOffset = 0f
         }
     }
     
@@ -93,13 +74,13 @@ fun LibraryScreen(
         object : NestedScrollConnection {
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
                 // If we have a pull offset and user is scrolling up (negative), consume it
-                if (pullOffsetTarget > 0 && available.y < 0) {
-                    val consumed = if (-available.y >= pullOffsetTarget) {
-                        val old = pullOffsetTarget
-                        pullOffsetTarget = 0f
+                if (pullOffset > 0 && available.y < 0) {
+                    val consumed = if (-available.y >= pullOffset) {
+                        val old = pullOffset
+                        pullOffset = 0f
                         old
                     } else {
-                        pullOffsetTarget += available.y
+                        pullOffset += available.y
                         -available.y
                     }
                     return Offset(0f, -consumed)
@@ -117,7 +98,7 @@ fun LibraryScreen(
                     listState.firstVisibleItemIndex == 0 && 
                     listState.firstVisibleItemScrollOffset == 0 &&
                     !isRefreshing) {
-                    pullOffsetTarget = (pullOffsetTarget + available.y * 0.5f).coerceIn(0f, 200f)
+                    pullOffset = (pullOffset + available.y * 0.5f).coerceIn(0f, 200f)
                     return Offset(0f, available.y)
                 }
                 return Offset.Zero
@@ -125,10 +106,11 @@ fun LibraryScreen(
             
             override suspend fun onPreFling(available: Velocity): Velocity {
                 // When user releases, check if we should trigger refresh
-                if (pullOffsetTarget >= refreshThreshold && !isRefreshing) {
+                if (pullOffset >= refreshThreshold && !isRefreshing) {
+                    pullOffset = 0f  // Reset immediately
                     onRefresh()
                 } else {
-                    pullOffsetTarget = 0f
+                    pullOffset = 0f
                 }
                 return Velocity.Zero
             }
@@ -266,40 +248,21 @@ fun LibraryScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .offset(y = with(density) { pullOffset.toDp() }),
-            contentPadding = PaddingValues(top = 12.dp, bottom = 100.dp, start = 12.dp, end = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            contentPadding = PaddingValues(top = 16.dp, bottom = 100.dp, start = 16.dp, end = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             items(playlist) { item ->
                 TrackItem(
                     item = item,
                     isPlaying = item.mediaId == currentMediaItem?.mediaId,
-                    isSelected = selectedItems.contains(item),
-                    onClick = { 
-                        if (selectedItems.isNotEmpty()) {
-                            onToggleSelection(item)
-                        } else {
-                            onTrackClick(item)
-                        }
-                    },
+                    onClick = { onTrackClick(item) },
                     onLongClick = {
-                        onToggleSelection(item)
+                        trackToDelete = item
+                        showDeleteDialog = true
+                        deleteError = null
                     }
                 )
             }
-        }
-        
-        if (showEditDialog) {
-            com.bombest.music.ui.components.MetadataEditDialog(
-                initialTitle = if (selectedItems.size == 1) selectedItems.first().mediaMetadata.title?.toString() else null,
-                initialArtist = if (selectedItems.size == 1) selectedItems.first().mediaMetadata.artist?.toString() else null,
-                initialAlbum = if (selectedItems.size == 1) selectedItems.first().mediaMetadata.albumTitle?.toString() else null,
-                isBatch = selectedItems.size > 1,
-                onConfirm = { metadata ->
-                    onEditMetadata(selectedItems.toList(), metadata)
-                    showEditDialog = false
-                },
-                onDismiss = { showEditDialog = false }
-            )
         }
         
         // Pull/Refresh indicator at top - always visible when pulling or refreshing
@@ -343,16 +306,11 @@ fun LibraryScreen(
 fun TrackItem(
     item: MediaItem, 
     isPlaying: Boolean, 
-    isSelected: Boolean = false,
     onClick: () -> Unit,
     onLongClick: () -> Unit = {}
 ) {
-    val containerColor = when {
-        isSelected -> Color(0xFFE90060).copy(alpha = 0.2f)
-        isPlaying -> MaterialTheme.colorScheme.secondary.copy(alpha = 0.1f)
-        else -> Color(0xFF1A1D2E)
-    }
-    val contentColor = Color.White
+    val containerColor = if (isPlaying) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.surface
+    val contentColor = if (isPlaying) MaterialTheme.colorScheme.onSecondary else MaterialTheme.colorScheme.onSurface
     
     Card(
         colors = CardDefaults.cardColors(containerColor = containerColor),
@@ -367,7 +325,7 @@ fun TrackItem(
     ) {
         Row(
             modifier = Modifier
-                .padding(8.dp)
+                .padding(12.dp)
                 .fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -381,24 +339,11 @@ fun TrackItem(
                 contentDescription = "Album Art",
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
-                    .size(44.dp)
-                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(6.dp))
-                    .then(if (isSelected) Modifier.background(Color(0xFFE90060).copy(alpha = 0.4f)) else Modifier)
+                    .size(56.dp)
+                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
             )
             
-            if (isSelected) {
-                Box(
-                    modifier = Modifier
-                        .size(44.dp)
-                        .clip(androidx.compose.foundation.shape.RoundedCornerShape(6.dp))
-                        .background(Color(0xFFE90060).copy(alpha = 0.6f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(androidx.compose.material.icons.Icons.Default.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
-                }
-            }
-            
-            Spacer(modifier = Modifier.width(12.dp))
+            Spacer(modifier = Modifier.width(16.dp))
             
             Column(modifier = Modifier.weight(1f)) {
                 Text(
@@ -408,7 +353,7 @@ fun TrackItem(
                     maxLines = 1,
                     fontWeight = FontWeight.SemiBold
                 )
-                Spacer(modifier = Modifier.height(2.dp))
+                Spacer(modifier = Modifier.height(4.dp))
                 Text(
                     text = item.mediaMetadata.artist?.toString() ?: "Unknown Artist",
                     style = MaterialTheme.typography.bodyMedium,

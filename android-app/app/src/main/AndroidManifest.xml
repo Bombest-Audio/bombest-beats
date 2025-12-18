@@ -34,7 +34,6 @@
         <activity
             android:name=".MainActivity"
             android:exported="false"
-            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
             android:theme="@style/Theme.BombestBeats" />
 
         <!-- Media3 Service for Background Playback & Android Auto -->

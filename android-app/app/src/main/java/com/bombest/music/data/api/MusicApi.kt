@@ -66,28 +66,7 @@ interface MusicApi {
         @retrofit2.http.Body request: BatchPlayRequest,
         @Header("Authorization") auth: String
     ): Response<Unit>
-
-    @retrofit2.http.POST("tracks/modify")
-    suspend fun modifyTracks(
-        @retrofit2.http.Body request: ModifyTracksRequest,
-        @Header("Authorization") auth: String
-    ): Response<ModifyTracksResponse>
 }
-
-data class ModifyTracksRequest(
-    val track_ids: List<Int>,
-    val metadata: Map<String, String>
-)
-
-data class ModifyTracksResponse(
-    val message: String,
-    val results: List<TrackModifyResult>
-)
-
-data class TrackModifyResult(
-    val id: Int,
-    val status: String
-)
 
 data class BatchPlayRequest(
     val events: List<PlayEvent>

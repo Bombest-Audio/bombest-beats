@@ -23,9 +23,6 @@ import com.bombest.music.data.repository.MusicRepository
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
-import com.bombest.music.data.authDataStore
-import kotlinx.coroutines.flow.first
-import androidx.datastore.preferences.core.stringPreferencesKey
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -556,38 +553,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
     
-    fun playCustomPlaylist(tracks: List<com.bombest.music.data.api.Track>, startIndex: Int) {
-        val mediaItems = tracks.map { track ->
-            val artUrl = if (track.album_id != null) {
-                "${NetworkModule.getStreamBaseUrl()}/album/${track.album_id}/art"
-            } else null
-            
-            MediaItem.Builder()
-                .setMediaId(track.id.toString())
-                .setUri(android.net.Uri.parse("${NetworkModule.getStreamBaseUrl()}/stream/${track.id}"))
-                .setMediaMetadata(
-                    androidx.media3.common.MediaMetadata.Builder()
-                        .setTitle(track.title)
-                        .setArtist(track.artist)
-                        .setAlbumTitle(track.album)
-                        .setArtworkUri(artUrl?.let { android.net.Uri.parse(it) })
-                        .setIsBrowsable(false)
-                        .setIsPlayable(true)
-                        .build()
-                )
-                .build()
-        }
-        
-        mediaBrowser?.let {
-            playlist.clear()
-            playlist.addAll(mediaItems)
-            it.setMediaItems(mediaItems)
-            it.seekTo(startIndex, 0)
-            it.prepare()
-            it.play()
-        }
-    }
-
     fun playPause() {
         mediaBrowser?.let {
             if (it.isPlaying) it.pause() else it.play()
@@ -657,29 +622,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun onFavorite() {
-    val trackId = currentMediaItem.value?.mediaId?.toIntOrNull() ?: return
-    android.util.Log.d("MainViewModel", "Toggling favorite for track: $trackId")
-    
-    // Use FavoritesManager for backend-synced favorites
-    viewModelScope.launch {
-        try {
-            com.bombest.music.data.FavoritesManager.toggleFavorite(trackId)
-            android.util.Log.d("MainViewModel", "Successfully toggled favorite for: $trackId")
-        } catch (e: Exception) {
-            android.util.Log.e("MainViewModel", "Failed to toggle favorite", e)
+        val trackId = currentMediaItem.value?.mediaId ?: return
+        val currentFavorites = favorites.value.toMutableSet()
+        if (currentFavorites.contains(trackId)) {
+            currentFavorites.remove(trackId)
+            android.util.Log.d("MainViewModel", "Removed from favorites: $trackId")
+        } else {
+            currentFavorites.add(trackId)
+            android.util.Log.d("MainViewModel", "Added to favorites: $trackId")
         }
+        favorites.value = currentFavorites
     }
-    
-    // Also update local state for immediate UI feedback (optimistic update)
-    val currentFavorites = favorites.value.toMutableSet()
-    val mediaId = currentMediaItem.value?.mediaId ?: return
-    if (currentFavorites.contains(mediaId)) {
-        currentFavorites.remove(mediaId)
-    } else {
-        currentFavorites.add(mediaId)
-    }
-    favorites.value = currentFavorites
-}
 
     fun onDownload() {
         val trackId = currentMediaItem.value?.mediaId ?: return
@@ -750,59 +703,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             context.startActivity(intent)
         }
-    }
-
-    fun modifyTracks(trackIds: List<Int>, metadata: Map<String, String>, onResult: (Boolean) -> Unit = {}) {
-        val repo = musicRepository ?: MusicRepository(getApplication())
-        viewModelScope.launch {
-            val token = getAuthToken()
-            if (token == null) {
-                onResult(false)
-                return@launch
-            }
-            val result = repo.modifyTracks(trackIds, metadata, token)
-            if (result.isSuccess) {
-                // Optimistically update local playlist for immediate reflection
-                val updatedPlaylist = playlist.toMutableList()
-                var changed = false
-                
-                trackIds.forEach { tid ->
-                    val index = updatedPlaylist.indexOfFirst { it.mediaId == tid.toString() }
-                    if (index != -1) {
-                        val item = updatedPlaylist[index]
-                        val metaBuilder = item.mediaMetadata.buildUpon()
-                        
-                        metadata["title"]?.let { metaBuilder.setTitle(it) }
-                        metadata["artist"]?.let { metaBuilder.setArtist(it) }
-                        metadata["album"]?.let { metaBuilder.setAlbumTitle(it) }
-                        
-                        updatedPlaylist[index] = item.buildUpon()
-                            .setMediaMetadata(metaBuilder.build())
-                            .build()
-                        changed = true
-                    }
-                }
-                
-                if (changed) {
-                    playlist.clear()
-                    playlist.addAll(updatedPlaylist)
-                }
-
-                onResult(true)
-                // Refresh library in background to ensure full sync (art, etc)
-                refreshLibrary()
-            } else {
-                android.util.Log.e("MainViewModel", "Modify failed: ${result.exceptionOrNull()?.message}")
-                onResult(false)
-            }
-        }
-    }
-
-    private suspend fun getAuthToken(): String? {
-        val context = getApplication<Application>()
-        val accessKey = stringPreferencesKey("access_token")
-        val preferences = context.authDataStore.data.first()
-        return preferences[accessKey]
     }
 
     override fun onCleared() {
