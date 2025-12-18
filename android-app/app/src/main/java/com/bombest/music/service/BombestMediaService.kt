@@ -154,22 +154,11 @@ class BombestMediaService : MediaLibraryService() {
                         .add(SessionCommand("REFRESH_LIBRARY", Bundle.EMPTY))
                         .build()
                     
-                    // Create custom action buttons for Android Auto playback screen
-                    val shuffleButton = CommandButton.Builder()
-                        .setDisplayName("Shuffle")
-                        .setIconResId(R.drawable.ic_shuffle)
-                        .setSessionCommand(shuffleCommand)
-                        .build()
-                    
-                    val repeatButton = CommandButton.Builder()
-                        .setDisplayName("Repeat")
-                        .setIconResId(R.drawable.ic_repeat)
-                        .setSessionCommand(repeatCommand)
-                        .build()
-                    
+                    // Return default connection result - uses standard transport controls 
+                    // (prev, play/pause, next) which Android Auto displays properly
+                    // Custom commands (shuffle, repeat) are available via voice or menu
                     return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
                         .setAvailableSessionCommands(sessionCommands)
-                        .setCustomLayout(ImmutableList.of(shuffleButton, repeatButton))
                         .build()
                 }
                 
