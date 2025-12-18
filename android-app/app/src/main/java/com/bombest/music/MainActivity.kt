@@ -347,20 +347,20 @@ fun MainContent(
                     allTracks = playlistViewModel.allTracks,
                     stagedTrackIds = playlistViewModel.stagedTrackIds,
                     isLoading = playlistViewModel.isLoading.value,
-                    onTrackClick = { track ->
-                        val index = playlistViewModel.currentPlaylistTracks.indexOf(track)
-                        if (index != -1) {
-                            viewModel.playCustomPlaylist(playlistViewModel.currentPlaylistTracks, index)
-                        }
-                    },
-                    onRemoveTrack = { trackId ->
+                    onTrackClick = { track -> viewModel.playTrack(track.path ?: "", track.title, track.artist) },
+                    onRemoveTrack = { trackId -> 
                         selectedPlaylistId?.let { playlistViewModel.removeTrackFromPlaylist(it, trackId) }
                     },
-                    onToggleStage = { trackId ->
-                        playlistViewModel.toggleStageTrack(trackId)
-                    },
+                    onToggleStage = { trackId -> playlistViewModel.toggleStageTrack(trackId) },
                     onAddTracks = { trackIds ->
                         selectedPlaylistId?.let { playlistViewModel.addTracksToPlaylist(it, trackIds) }
+                    },
+                    // Phase 3: Wire search and sort callbacks
+                    onSearch = { query ->
+                        selectedPlaylistId?.let { playlistViewModel.searchPlaylist(it, query) }
+                    },
+                    onSort = { sortMode ->
+                        selectedPlaylistId?.let { playlistViewModel.sortPlaylist(it, sortMode) }
                     },
                     onDismiss = {
                         playlistViewModel.clearStagedTracks()
