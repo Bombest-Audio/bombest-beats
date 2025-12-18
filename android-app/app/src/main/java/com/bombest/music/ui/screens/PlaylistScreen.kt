@@ -16,6 +16,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.Favorite
@@ -23,6 +24,7 @@ import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -264,21 +266,106 @@ fun PlaylistDetailScreen(
     onRemoveTrack: (Int) -> Unit,
     onToggleStage: (Int) -> Unit = {},
     onAddTracks: (List<Int>) -> Unit = {},
+    onSearch: (String) -> Unit = {},  // Phase 3: Search callback
+    onSort: (String) -> Unit = {},     // Phase 3: Sort callback
     onDismiss: () -> Unit = {},
     onBack: () -> Unit
 ) {
     var showAddTracksDialog by remember { mutableStateOf(false) }
-    
+    var searchQuery by remember { mutableStateOf("") }
+    var showSearchBar by remember { mutableStateOf(false) }
+    var showSortMenu by remember { mutableStateOf(false) }
+
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(playlistName, fontWeight = FontWeight.Bold) },
+                title = {
+                    if (showSearchBar) {
+                        androidx.compose.material3.TextField(
+                            value = searchQuery,
+                            onValueChange = {
+                                searchQuery = it
+                                onSearch(it)
+                            },
+                            placeholder = { Text("Search tracks...") },
+                            singleLine = true,
+                            colors = androidx.compose.material3.TextFieldDefaults.colors(
+                                focusedContainerColor = Color.Transparent,
+                                unfocusedContainerColor = Color.Transparent,
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White,
+                                cursorColor = Color(0xFFE90060)
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    } else {
+                        Text(playlistName, fontWeight = FontWeight.Bold)
+                    }
+                },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(onClick = {
+                        if (showSearchBar) {
+                            showSearchBar = false
+                            searchQuery = ""
+                            onSearch("")
+                        } else {
+                            onBack()
+                        }
+                    }) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
                     }
                 },
                 actions = {
+                    // Phase 3: Search icon
+                    IconButton(onClick = { showSearchBar = !showSearchBar }) {
+                        Icon(
+                            imageVector = if (showSearchBar) Icons.Default.Close else Icons.Default.Search,
+                            contentDescription = "Search",
+                            tint = Color.White
+                        )
+                    }
+
+                    // Phase 3: Sort menu
+                    Box {
+                        IconButton(onClick = { showSortMenu = true }) {
+                            Icon(Icons.Default.Menu, contentDescription = "Sort", tint = Color.White)
+                        }
+
+                        DropdownMenu(
+                            expanded = showSortMenu,
+                            onDismissRequest = { showSortMenu = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Sort by Title") },
+                                onClick = {
+                                    onSort("title")
+                                    showSortMenu = false
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Sort by Artist") },
+                                onClick = {
+                                    onSort("artist")
+                                    showSortMenu = false
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Sort by Date Added") },
+                                onClick = {
+                                    onSort("date")
+                                    showSortMenu = false
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Custom Order") },
+                                onClick = {
+                                    onSort("custom")
+                                    showSortMenu = false
+                                }
+                            )
+                        }
+                    }
+
                     if (tracks.isNotEmpty()) {
                         IconButton(onClick = { onTrackClick(tracks[0]) }) {
                             Icon(Icons.Default.PlayArrow, contentDescription = "Play All", tint = Color.White)
