@@ -441,6 +441,80 @@ def update_track(track_id):
         return jsonify({'error': f'Failed to update track: {str(e)}'}), 500
 
 
+@app.route('/tracks/modify', methods=['POST'])
+@admin_required()
+def modify_tracks_batch():
+    """Modify metadata for multiple tracks in database and audio files"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+        
+        track_ids = data.get('track_ids', [])
+        metadata = data.get('metadata', {})
+        
+        if not track_ids:
+            return jsonify({'error': 'No track_ids provided'}), 400
+            
+        if not metadata:
+            return jsonify({'error': 'No metadata changes provided'}), 400
+
+        conn = sqlite3.connect(LIBRARY_DB)
+        cursor = conn.cursor()
+        
+        results = []
+        from mutagen import File
+        
+        for track_id in track_ids:
+            # Get current track path
+            cursor.execute("SELECT path FROM items WHERE id = ?", (track_id,))
+            result = cursor.fetchone()
+            if not result:
+                results.append({'id': track_id, 'status': 'not_found'})
+                continue
+            
+            track_path = result[0]
+            if isinstance(track_path, bytes):
+                track_path = track_path.decode('utf-8')
+            
+            # Update database
+            updates = []
+            params = []
+            for field, value in metadata.items():
+                if value and field in ['title', 'artist', 'album', 'genre', 'year', 'track', 'composer']:
+                    updates.append(f"{field} = ?")
+                    params.append(value)
+            
+            if updates:
+                params.append(track_id)
+                cursor.execute(f"UPDATE items SET {', '.join(updates)} WHERE id = ?", params)
+                
+                # Update audio file metadata
+                if os.path.exists(track_path):
+                    try:
+                        audio = File(track_path, easy=True)
+                        if audio is not None:
+                            for field, value in metadata.items():
+                                if value and field in ['title', 'artist', 'album', 'genre', 'composer']:
+                                    audio[field] = value
+                            audio.save()
+                    except Exception as e:
+                        print(f"Warning: Could not update audio file metadata for {track_id}: {e}")
+
+            results.append({'id': track_id, 'status': 'success'})
+            
+        conn.commit()
+        conn.close()
+        
+        return jsonify({
+            'message': f'Processed {len(track_ids)} tracks',
+            'results': results
+        }), 200
+        
+    except Exception as e:
+        return jsonify({'error': f'Batch modification failed: {str(e)}'}), 500
+
+
 @app.route('/track/<int:track_id>', methods=['DELETE'])
 @admin_required()
 def delete_track(track_id):

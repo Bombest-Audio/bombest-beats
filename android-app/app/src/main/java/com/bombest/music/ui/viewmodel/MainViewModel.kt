@@ -23,6 +23,9 @@ import com.bombest.music.data.repository.MusicRepository
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
+import com.bombest.music.data.authDataStore
+import kotlinx.coroutines.flow.first
+import androidx.datastore.preferences.core.stringPreferencesKey
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -553,6 +556,38 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
     
+    fun playCustomPlaylist(tracks: List<com.bombest.music.data.api.Track>, startIndex: Int) {
+        val mediaItems = tracks.map { track ->
+            val artUrl = if (track.album_id != null) {
+                "${NetworkModule.getStreamBaseUrl()}/album/${track.album_id}/art"
+            } else null
+            
+            MediaItem.Builder()
+                .setMediaId(track.id.toString())
+                .setUri(android.net.Uri.parse("${NetworkModule.getStreamBaseUrl()}/stream/${track.id}"))
+                .setMediaMetadata(
+                    androidx.media3.common.MediaMetadata.Builder()
+                        .setTitle(track.title)
+                        .setArtist(track.artist)
+                        .setAlbumTitle(track.album)
+                        .setArtworkUri(artUrl?.let { android.net.Uri.parse(it) })
+                        .setIsBrowsable(false)
+                        .setIsPlayable(true)
+                        .build()
+                )
+                .build()
+        }
+        
+        mediaBrowser?.let {
+            playlist.clear()
+            playlist.addAll(mediaItems)
+            it.setMediaItems(mediaItems)
+            it.seekTo(startIndex, 0)
+            it.prepare()
+            it.play()
+        }
+    }
+
     fun playPause() {
         mediaBrowser?.let {
             if (it.isPlaying) it.pause() else it.play()
@@ -703,6 +738,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             context.startActivity(intent)
         }
+    }
+
+    fun modifyTracks(trackIds: List<Int>, metadata: Map<String, String>, onResult: (Boolean) -> Unit = {}) {
+        val repo = musicRepository ?: MusicRepository(getApplication())
+        viewModelScope.launch {
+            val token = getAuthToken()
+            if (token == null) {
+                onResult(false)
+                return@launch
+            }
+            val result = repo.modifyTracks(trackIds, metadata, token)
+            if (result.isSuccess) {
+                refreshLibrary()
+                onResult(true)
+            } else {
+                android.util.Log.e("MainViewModel", "Modify failed: ${result.exceptionOrNull()?.message}")
+                onResult(false)
+            }
+        }
+    }
+
+    private suspend fun getAuthToken(): String? {
+        val context = getApplication<Application>()
+        val accessKey = stringPreferencesKey("access_token")
+        val preferences = context.authDataStore.data.first()
+        return preferences[accessKey]
     }
 
     override fun onCleared() {

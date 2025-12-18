@@ -18,7 +18,10 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Done
+import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -54,6 +57,7 @@ fun PlaylistsScreen(
     isLoading: Boolean,
     onCreatePlaylist: (String) -> Unit,
     onPlaylistClick: (Int) -> Unit,
+    onPlayPlaylist: (Int, String) -> Unit = { _, _ -> },
     onDeletePlaylist: (Int) -> Unit,
     onBack: () -> Unit
 ) {
@@ -108,6 +112,7 @@ fun PlaylistsScreen(
                         PlaylistItem(
                             playlist = playlist,
                             onClick = { onPlaylistClick(playlist.id) },
+                            onPlay = { onPlayPlaylist(playlist.id, playlist.name) },
                             onDelete = { onDeletePlaylist(playlist.id) }
                         )
                     }
@@ -159,6 +164,7 @@ fun PlaylistsScreen(
 fun PlaylistItem(
     playlist: Playlist,
     onClick: () -> Unit,
+    onPlay: () -> Unit,
     onDelete: () -> Unit
 ) {
     Card(
@@ -192,7 +198,7 @@ fun PlaylistItem(
             }
             
             Row {
-                IconButton(onClick = onClick) {
+                IconButton(onClick = onPlay) {
                     Icon(Icons.Default.PlayArrow, contentDescription = "Play", tint = Color(0xFFE90060))
                 }
                 IconButton(onClick = onDelete) {
@@ -231,6 +237,11 @@ fun PlaylistDetailScreen(
                     }
                 },
                 actions = {
+                    if (tracks.isNotEmpty()) {
+                        IconButton(onClick = { onTrackClick(tracks[0]) }) {
+                            Icon(Icons.Default.PlayArrow, contentDescription = "Play All", tint = Color.White)
+                        }
+                    }
                     IconButton(onClick = { showAddTracksDialog = true }) {
                         Icon(Icons.Default.Add, contentDescription = "Add Tracks", tint = Color.White)
                     }
@@ -307,7 +318,7 @@ fun PlaylistDetailScreen(
             stagedTrackIds = stagedTrackIds,
             onToggleStage = onToggleStage,
             onAddTracks = {
-                onAddTracks(stagedTrackIds)
+                onAddTracks(stagedTrackIds.toList())
                 showAddTracksDialog = false
             },
             onDismiss = {
@@ -328,10 +339,11 @@ fun DragAndDropTrackPicker(
     onDismiss: () -> Unit
 ) {
     var draggingTrackId by remember { mutableStateOf<Int?>(null) }
-    var dragOffset by remember { mutableStateOf(Offset.Zero) }
+    var fingerPosition by remember { mutableStateOf(Offset.Zero) }
     var bucketPosition by remember { mutableStateOf(Offset.Zero) }
     var bucketSize by remember { mutableStateOf(IntSize.Zero) }
     var isHoveringBucket by remember { mutableStateOf(false) }
+    var isGridView by remember { mutableStateOf(true) }
     
     val bucketScale by animateFloatAsState(if (isHoveringBucket) 1.2f else 1f)
     val bucketColor by animateColorAsState(if (isHoveringBucket) Color(0xFFE90060) else Color(0xFF1A1D2E))
@@ -350,6 +362,15 @@ fun DragAndDropTrackPicker(
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
                     }
                 },
+                actions = {
+                    IconButton(onClick = { isGridView = !isGridView }) {
+                        Icon(
+                            imageVector = if (isGridView) Icons.Default.List else Icons.Default.GridView,
+                            contentDescription = "Toggle View",
+                            tint = Color.White
+                        )
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = Color(0xFF15192A),
                     titleContentColor = Color.White
@@ -361,39 +382,63 @@ fun DragAndDropTrackPicker(
                     Text("No more tracks to add", color = Color.Gray)
                 }
             } else {
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(3),
-                    modifier = Modifier.weight(0.7f),
-                    contentPadding = PaddingValues(16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    items(availableTracks, key = { it.id }) { track ->
-                        val isStaged = stagedTrackIds.contains(track.id)
-                        TrackGridItem(
-                            track = track,
-                            isStaged = isStaged,
-                            onDragStart = { 
-                                draggingTrackId = track.id
-                                dragOffset = Offset.Zero
-                            },
-                            onDrag = { offset ->
-                                dragOffset += offset
-                                // Check if hovering over bucket
-                                // Note: bucketPosition is in root coordinates
-                                val globalX = bucketPosition.x
-                                val globalY = bucketPosition.y
-                                // Simplified hit test - bucket is bottom 30%
-                            },
-                            onDragEnd = {
-                                if (isHoveringBucket) {
-                                    if (!isStaged) onToggleStage(track.id)
-                                }
-                                draggingTrackId = null
-                                isHoveringBucket = false
-                            },
-                            onHoverChange = { hovering -> isHoveringBucket = hovering }
-                        )
+                Box(modifier = Modifier.weight(0.7f)) {
+                    if (isGridView) {
+                        LazyVerticalGrid(
+                            columns = GridCells.Fixed(3),
+                            modifier = Modifier.fillMaxSize(),
+                            contentPadding = PaddingValues(16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            items(availableTracks, key = { it.id }) { track ->
+                                val isStaged = stagedTrackIds.contains(track.id)
+                                TrackGridItem(
+                                    track = track,
+                                    isStaged = isStaged,
+                                    bucketPosition = bucketPosition,
+                                    bucketSize = bucketSize,
+                                    onDragStart = { globalTouchPosition ->
+                                        draggingTrackId = track.id
+                                        fingerPosition = globalTouchPosition
+                                    },
+                                    onDrag = { globalFingerPosition -> fingerPosition = globalFingerPosition },
+                                    onDragEnd = {
+                                        if (isHoveringBucket && !isStaged) onToggleStage(track.id)
+                                        draggingTrackId = null
+                                        isHoveringBucket = false
+                                    },
+                                    onHoverChange = { hovering -> isHoveringBucket = hovering }
+                                )
+                            }
+                        }
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier.fillMaxSize(),
+                            contentPadding = PaddingValues(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            items(availableTracks, key = { it.id }) { track ->
+                                val isStaged = stagedTrackIds.contains(track.id)
+                                TrackListItem(
+                                    track = track,
+                                    isStaged = isStaged,
+                                    bucketPosition = bucketPosition,
+                                    bucketSize = bucketSize,
+                                    onDragStart = { globalTouchPosition ->
+                                        draggingTrackId = track.id
+                                        fingerPosition = globalTouchPosition
+                                    },
+                                    onDrag = { globalFingerPosition -> fingerPosition = globalFingerPosition },
+                                    onDragEnd = {
+                                        if (isHoveringBucket && !isStaged) onToggleStage(track.id)
+                                        draggingTrackId = null
+                                        isHoveringBucket = false
+                                    },
+                                    onHoverChange = { hovering -> isHoveringBucket = hovering }
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -457,9 +502,15 @@ fun DragAndDropTrackPicker(
         draggingTrackId?.let { id ->
             val track = availableTracks.find { it.id == id }
             track?.let {
+                val boxSize = with(LocalDensity.current) { 100.dp.toPx() }
                 Box(
                     modifier = Modifier
-                        .offset { IntOffset(dragOffset.x.roundToInt(), dragOffset.y.roundToInt()) }
+                        .offset { 
+                            IntOffset(
+                                (fingerPosition.x - boxSize / 2).roundToInt(), 
+                                (fingerPosition.y - boxSize / 2).roundToInt()
+                            ) 
+                        }
                         .size(100.dp)
                         .shadow(10.dp, RoundedCornerShape(8.dp))
                         .background(Color(0xFF1A1D2E), RoundedCornerShape(8.dp))
@@ -474,13 +525,84 @@ fun DragAndDropTrackPicker(
 }
 
 @Composable
+fun TrackListItem(
+    track: Track,
+    isStaged: Boolean,
+    onDragStart: (Offset) -> Unit,
+    onDrag: (Offset) -> Unit,
+    onDragEnd: () -> Unit,
+    onHoverChange: (Boolean) -> Unit,
+    bucketPosition: Offset,
+    bucketSize: IntSize
+) {
+    var itemPosition by remember { mutableStateOf(Offset.Zero) }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .onGloballyPositioned { itemPosition = it.positionInRoot() }
+            .pointerInput(bucketPosition, bucketSize) {
+                detectDragGesturesAfterLongPress(
+                    onDragStart = { touchOffset -> onDragStart(itemPosition + touchOffset) },
+                    onDrag = { change, _ ->
+                        change.consume()
+                        onDrag(itemPosition + change.position)
+                        val globalPointerY = itemPosition.y + change.position.y
+                        onHoverChange(globalPointerY > bucketPosition.y)
+                    },
+                    onDragEnd = { onDragEnd() },
+                    onDragCancel = { onDragEnd() }
+                )
+            },
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (isStaged) Color(0xFFE90060).copy(alpha = 0.2f) else Color(0xFF1A1D2E)
+        )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(modifier = Modifier.size(50.dp)) {
+                TrackArt(track = track, modifier = Modifier.fillMaxSize())
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = track.title,
+                    color = Color.White,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = track.artist,
+                    color = Color.Gray,
+                    fontSize = 12.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            if (isStaged) {
+                Icon(Icons.Default.Done, contentDescription = null, tint = Color(0xFFE90060))
+            }
+        }
+    }
+}
+
+@Composable
 fun TrackGridItem(
     track: Track,
     isStaged: Boolean,
-    onDragStart: () -> Unit,
+    onDragStart: (Offset) -> Unit,
     onDrag: (Offset) -> Unit,
     onDragEnd: () -> Unit,
-    onHoverChange: (Boolean) -> Unit
+    onHoverChange: (Boolean) -> Unit,
+    bucketPosition: Offset,
+    bucketSize: IntSize
 ) {
     var itemPosition by remember { mutableStateOf(Offset.Zero) }
 
@@ -490,13 +612,16 @@ fun TrackGridItem(
             .clip(RoundedCornerShape(8.dp))
             .background(if (isStaged) Color(0xFFE90060).copy(alpha = 0.3f) else Color(0xFF1A1D2E))
             .onGloballyPositioned { itemPosition = it.positionInRoot() }
-            .pointerInput(Unit) {
+            .pointerInput(bucketPosition, bucketSize) {
                 detectDragGesturesAfterLongPress(
-                    onDragStart = { onDragStart() },
-                    onDrag = { change, dragAmount ->
+                    onDragStart = { touchOffset -> onDragStart(itemPosition + touchOffset) },
+                    onDrag = { change, _ ->
                         change.consume()
-                        onDrag(dragAmount)
-                        onHoverChange(change.position.y + itemPosition.y > 1500f) 
+                        onDrag(itemPosition + change.position)
+                        
+                        // Accurate hover detection
+                        val globalPointerY = itemPosition.y + change.position.y
+                        onHoverChange(globalPointerY > bucketPosition.y)
                     },
                     onDragEnd = { onDragEnd() },
                     onDragCancel = { onDragEnd() }

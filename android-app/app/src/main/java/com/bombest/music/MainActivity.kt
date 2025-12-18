@@ -16,9 +16,10 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -27,6 +28,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.media3.common.MediaItem
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 import androidx.datastore.preferences.core.edit
@@ -138,6 +140,9 @@ fun MainContent(
     val context = androidx.compose.ui.platform.LocalContext.current
     
     val playlistViewModel: PlaylistViewModel = viewModel()
+    val scope = rememberCoroutineScope()
+    var selectedMediaItems by remember { mutableStateOf(setOf<MediaItem>()) }
+    var showMetadataDialog by remember { mutableStateOf(false) }
     
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -156,28 +161,48 @@ fun MainContent(
             Screen.LIBRARY -> {
                 Scaffold(
                     topBar = {
-                        TopAppBar(
-                            title = { Text("bombest beats", fontWeight = FontWeight.Bold) },
-                            navigationIcon = {
-                                IconButton(onClick = { 
-                                    if (viewModel.canNavigateUp.value) {
-                                        viewModel.navigateUp()
-                                    } else {
-                                        isMenuOpen = true 
+                        if (selectedMediaItems.isEmpty()) {
+                            TopAppBar(
+                                title = { Text("bombest beats", fontWeight = FontWeight.Bold) },
+                                navigationIcon = {
+                                    IconButton(onClick = { 
+                                        if (viewModel.canNavigateUp.value) {
+                                            viewModel.navigateUp()
+                                        } else {
+                                            isMenuOpen = true 
+                                        }
+                                    }) {
+                                        if (viewModel.canNavigateUp.value) {
+                                            Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
+                                        } else {
+                                            Icon(Icons.Default.Menu, contentDescription = "Menu", tint = Color.White)
+                                        }
                                     }
-                                }) {
-                                    if (viewModel.canNavigateUp.value) {
-                                        Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
-                                    } else {
-                                        Icon(Icons.Default.Menu, contentDescription = "Menu", tint = Color.White)
-                                    }
-                                }
-                            },
-                            colors = TopAppBarDefaults.topAppBarColors(
-                                containerColor = Color(0xFF15192A),
-                                titleContentColor = Color.White
+                                },
+                                colors = TopAppBarDefaults.topAppBarColors(
+                                    containerColor = Color(0xFF15192A),
+                                    titleContentColor = Color.White
+                                )
                             )
-                        )
+                        } else {
+                            TopAppBar(
+                                title = { Text("${selectedMediaItems.size} selected") },
+                                navigationIcon = {
+                                    IconButton(onClick = { selectedMediaItems = emptySet() }) {
+                                        Icon(Icons.Default.Close, contentDescription = "Clear Selection", tint = Color.White)
+                                    }
+                                },
+                                actions = {
+                                    IconButton(onClick = { showMetadataDialog = true }) {
+                                        Icon(Icons.Default.Edit, contentDescription = "Edit Metadata", tint = Color.White)
+                                    }
+                                },
+                                colors = TopAppBarDefaults.topAppBarColors(
+                                    containerColor = Color(0xFF15192A),
+                                    titleContentColor = Color.White
+                                )
+                            )
+                        }
                     },
                     bottomBar = {
                         if (!isPlayerOpen) {
@@ -210,8 +235,35 @@ fun MainContent(
                             },
                             isRefreshing = viewModel.isRefreshing.value,
                             onRefresh = { viewModel.refreshLibrary() },
-                            onDelete = { item -> viewModel.playlist.remove(item) }
+                            onDelete = { item -> viewModel.playlist.remove(item) },
+                            selectedItems = selectedMediaItems,
+                            onToggleSelection = { item ->
+                                selectedMediaItems = if (selectedMediaItems.contains(item)) {
+                                    selectedMediaItems - item
+                                } else {
+                                    selectedMediaItems + item
+                                }
+                            }
                         )
+                        
+                        if (showMetadataDialog) {
+                            com.bombest.music.ui.components.MetadataEditDialog(
+                                initialTitle = if (selectedMediaItems.size == 1) selectedMediaItems.first().mediaMetadata.title?.toString() else null,
+                                initialArtist = if (selectedMediaItems.size == 1) selectedMediaItems.first().mediaMetadata.artist?.toString() else null,
+                                initialAlbum = if (selectedMediaItems.size == 1) selectedMediaItems.first().mediaMetadata.albumTitle?.toString() else null,
+                                isBatch = selectedMediaItems.size > 1,
+                                onConfirm = { metadata ->
+                                    val trackIds = selectedMediaItems.mapNotNull { it.mediaId.toIntOrNull() }
+                                    viewModel.modifyTracks(trackIds, metadata) { success ->
+                                        if (success) {
+                                            selectedMediaItems = emptySet()
+                                            showMetadataDialog = false
+                                        }
+                                    }
+                                },
+                                onDismiss = { showMetadataDialog = false }
+                            )
+                        }
                         
                         // Handle back button for library navigation
                         BackHandler(enabled = viewModel.canNavigateUp.value) {
@@ -232,6 +284,18 @@ fun MainContent(
                         playlistViewModel.loadPlaylistTracks(id, playlist?.name ?: "")
                         currentScreen = Screen.PLAYLIST_DETAIL
                     },
+                    onPlayPlaylist = { id, _ ->
+                        scope.launch {
+                            try {
+                                val tracks = playlistViewModel.getPlaylistTracksRaw(id)
+                                if (tracks.isNotEmpty()) {
+                                    viewModel.playCustomPlaylist(tracks, 0)
+                                }
+                            } catch (e: Exception) {
+                                android.util.Log.e("MainActivity", "Failed to play playlist: ${e.message}")
+                            }
+                        }
+                    },
                     onDeletePlaylist = { id -> playlistViewModel.deletePlaylist(id) },
                     onBack = { currentScreen = Screen.LIBRARY }
                 )
@@ -246,7 +310,10 @@ fun MainContent(
                     stagedTrackIds = playlistViewModel.stagedTrackIds,
                     isLoading = playlistViewModel.isLoading.value,
                     onTrackClick = { track ->
-                        // TODO: Play track from playlist
+                        val index = playlistViewModel.currentPlaylistTracks.indexOf(track)
+                        if (index != -1) {
+                            viewModel.playCustomPlaylist(playlistViewModel.currentPlaylistTracks, index)
+                        }
                     },
                     onRemoveTrack = { trackId ->
                         selectedPlaylistId?.let { playlistViewModel.removeTrackFromPlaylist(it, trackId) }
