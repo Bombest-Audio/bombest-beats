@@ -40,14 +40,14 @@ interface PlaylistApi {
     suspend fun removeTracksFromPlaylist(@Path("id") id: Int, @Body request: AddTracksRequest): Map<String, Any>
 }
 
-data class TracksResponse(val tracks: List<Track>)
+data class TracksResponse(val items: List<Track>)
 
 data class Track(
     val id: Int,
     val title: String,
     val artist: String,
     val album: String?,
-    val duration: Double?,
+    @com.squareup.moshi.Json(name = "length") val duration: Double?,
     val path: String,
-    val album_id: Int? = null
+    @com.squareup.moshi.Json(name = "album_id") val album_id: Int? = null
 )

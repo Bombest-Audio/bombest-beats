@@ -2,6 +2,7 @@ package com.bombest.music.ui.screens
 
 import android.util.Log
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -12,6 +13,11 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -45,11 +51,16 @@ fun LibraryScreen(
     currentMediaItem: MediaItem?,
     isRefreshing: Boolean = false,
     onRefresh: () -> Unit = {},
-    onDelete: (MediaItem) -> Unit = {}
+    onDelete: (MediaItem) -> Unit = {},
+    selectedItems: Set<MediaItem> = emptySet(),
+    onToggleSelection: (MediaItem) -> Unit = {},
+    onEditMetadata: (List<MediaItem>, Map<String, String>) -> Unit = { _, _ -> }
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
+    
+    var showEditDialog by remember { mutableStateOf(false) }
     
     // Pull-to-refresh state
     var pullOffset by remember { mutableFloatStateOf(0f) }
@@ -255,14 +266,33 @@ fun LibraryScreen(
                 TrackItem(
                     item = item,
                     isPlaying = item.mediaId == currentMediaItem?.mediaId,
-                    onClick = { onTrackClick(item) },
+                    isSelected = selectedItems.contains(item),
+                    onClick = { 
+                        if (selectedItems.isNotEmpty()) {
+                            onToggleSelection(item)
+                        } else {
+                            onTrackClick(item)
+                        }
+                    },
                     onLongClick = {
-                        trackToDelete = item
-                        showDeleteDialog = true
-                        deleteError = null
+                        onToggleSelection(item)
                     }
                 )
             }
+        }
+        
+        if (showEditDialog) {
+            com.bombest.music.ui.components.MetadataEditDialog(
+                initialTitle = if (selectedItems.size == 1) selectedItems.first().mediaMetadata.title?.toString() else null,
+                initialArtist = if (selectedItems.size == 1) selectedItems.first().mediaMetadata.artist?.toString() else null,
+                initialAlbum = if (selectedItems.size == 1) selectedItems.first().mediaMetadata.albumTitle?.toString() else null,
+                isBatch = selectedItems.size > 1,
+                onConfirm = { metadata ->
+                    onEditMetadata(selectedItems.toList(), metadata)
+                    showEditDialog = false
+                },
+                onDismiss = { showEditDialog = false }
+            )
         }
         
         // Pull/Refresh indicator at top - always visible when pulling or refreshing
@@ -306,11 +336,16 @@ fun LibraryScreen(
 fun TrackItem(
     item: MediaItem, 
     isPlaying: Boolean, 
+    isSelected: Boolean = false,
     onClick: () -> Unit,
     onLongClick: () -> Unit = {}
 ) {
-    val containerColor = if (isPlaying) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.surface
-    val contentColor = if (isPlaying) MaterialTheme.colorScheme.onSecondary else MaterialTheme.colorScheme.onSurface
+    val containerColor = when {
+        isSelected -> Color(0xFFE90060).copy(alpha = 0.2f)
+        isPlaying -> MaterialTheme.colorScheme.secondary.copy(alpha = 0.1f)
+        else -> Color(0xFF1A1D2E)
+    }
+    val contentColor = Color.White
     
     Card(
         colors = CardDefaults.cardColors(containerColor = containerColor),
@@ -341,7 +376,20 @@ fun TrackItem(
                 modifier = Modifier
                     .size(56.dp)
                     .clip(androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
+                    .then(if (isSelected) Modifier.background(Color(0xFFE90060).copy(alpha = 0.4f)) else Modifier)
             )
+            
+            if (isSelected) {
+                Box(
+                    modifier = Modifier
+                        .size(56.dp)
+                        .clip(androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
+                        .background(Color(0xFFE90060).copy(alpha = 0.6f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(androidx.compose.material.icons.Icons.Default.Check, contentDescription = null, tint = Color.White)
+                }
+            }
             
             Spacer(modifier = Modifier.width(16.dp))
             

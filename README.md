@@ -110,3 +110,15 @@ bombest-beats/
 - **Download Mode**: Both platforms support offline playback via local caching.
 - **Background Playback**: WAKE_LOCK (Android) / AVAudioSession (iOS) enabled.
 
+## Key Features
+
+### 🎵 Playlist Management
+- Create, delete, and browse custom playlists.
+- Play an entire playlist from the list view or the detail screen.
+- Drag-and-drop bucket for adding tracks to playlists (Android).
+
+### 🏷️ Metadata Editing
+- Batch edit ID3 tags (Title, Artist, Album) for multiple tracks.
+- Changes are persisted to both the Beets database and the audio files.
+- Long-press tracks in the library to enter selection mode.
+

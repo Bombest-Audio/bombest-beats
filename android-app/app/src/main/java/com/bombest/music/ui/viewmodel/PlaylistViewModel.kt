@@ -7,6 +7,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.bombest.music.data.api.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
@@ -131,14 +132,18 @@ class PlaylistViewModel : ViewModel() {
         viewModelScope.launch {
             isLoading.value = true
             try {
-                val response = playlistApi.getPlaylistTracks(id)
+                val tracks = getPlaylistTracksRaw(id)
                 currentPlaylistTracks.clear()
-                currentPlaylistTracks.addAll(response.tracks)
+                currentPlaylistTracks.addAll(tracks)
             } catch (e: Exception) {
                 error.value = e.message
             }
             isLoading.value = false
         }
+    }
+    
+    suspend fun getPlaylistTracksRaw(id: Int): List<Track> = withContext(kotlinx.coroutines.Dispatchers.IO) {
+        playlistApi.getPlaylistTracks(id).items
     }
     
     fun removeTrackFromPlaylist(playlistId: Int, trackId: Int) {

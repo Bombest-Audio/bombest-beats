@@ -54,4 +54,24 @@ class MusicRepository(private val context: android.content.Context) {
              if (albumId != null) "$baseUrl/album/$albumId/art" else null
         }
     }
+
+    suspend fun modifyTracks(
+        trackIds: List<Int>, 
+        metadata: Map<String, String>, 
+        token: String
+    ): Result<com.bombest.music.data.api.ModifyTracksResponse> = withContext(Dispatchers.IO) {
+        try {
+            val response = api.modifyTracks(
+                com.bombest.music.data.api.ModifyTracksRequest(trackIds, metadata), 
+                "Bearer $token"
+            )
+            if (response.isSuccessful && response.body() != null) {
+                Result.success(response.body()!!)
+            } else {
+                Result.failure(Exception("Failed to modify tracks: ${response.code()} ${response.errorBody()?.string()}"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
 }
