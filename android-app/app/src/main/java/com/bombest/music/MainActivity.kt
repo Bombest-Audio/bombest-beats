@@ -242,7 +242,8 @@ fun MainContent(
                     playlistId = selectedPlaylistId ?: 0,
                     playlistName = playlistViewModel.currentPlaylistName.value,
                     tracks = playlistViewModel.currentPlaylistTracks,
-                    allTracks = playlistViewModel.allTracks,  // Use ViewModel's allTracks from API
+                    allTracks = playlistViewModel.allTracks,
+                    stagedTrackIds = playlistViewModel.stagedTrackIds,
                     isLoading = playlistViewModel.isLoading.value,
                     onTrackClick = { track ->
                         // TODO: Play track from playlist
@@ -250,8 +251,14 @@ fun MainContent(
                     onRemoveTrack = { trackId ->
                         selectedPlaylistId?.let { playlistViewModel.removeTrackFromPlaylist(it, trackId) }
                     },
+                    onToggleStage = { trackId ->
+                        playlistViewModel.toggleStageTrack(trackId)
+                    },
                     onAddTracks = { trackIds ->
                         selectedPlaylistId?.let { playlistViewModel.addTracksToPlaylist(it, trackIds) }
+                    },
+                    onDismiss = {
+                        playlistViewModel.clearStagedTracks()
                     },
                     onBack = { currentScreen = Screen.PLAYLISTS }
                 )

@@ -48,5 +48,6 @@ data class Track(
     val artist: String,
     val album: String?,
     val duration: Double?,
-    val path: String
+    val path: String,
+    val album_id: Int? = null
 )
