@@ -142,22 +142,108 @@ fun AccountScreen(
                 modifier = Modifier.padding(start = 8.dp, bottom = 4.dp)
             )
             
-            AccountMenuItem(
-                icon = Icons.Default.CloudDownload,
-                title = "Download All Tracks",
-                subtitle = "Sync library for offline playback",
-                onClick = {
-                    scope.launch {
-                        Toast.makeText(context, "Starting download...", Toast.LENGTH_SHORT).show()
-                        // TODO: Trigger download of all tracks
-                    }
+            // Download state
+            var isAutoSyncEnabled by remember { 
+                mutableStateOf(
+                    context.getSharedPreferences("download_prefs", android.content.Context.MODE_PRIVATE)
+                        .getBoolean("auto_sync_enabled", false)
+                )
+            }
+            var downloadProgress by remember { mutableStateOf<Pair<Int, Int>?>(null) }
+            var downloadedCount by remember { mutableIntStateOf(0) }
+            var storageUsed by remember {
+                mutableStateOf(com.bombest.music.data.DownloadManager.getInstance(context).getDownloadsSizeBytes())
+            }
+            
+            // Auto-Sync Toggle
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0xFF1A1F2E), RoundedCornerShape(12.dp))
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    Icons.Default.CloudDownload,
+                    contentDescription = null,
+                    tint = if (isAutoSyncEnabled) Color(0xFF4CAF50) else Color.Gray,
+                    modifier = Modifier.size(24.dp)
+                )
+                Spacer(Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Download All Tracks",
+                        color = Color.White,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Text(
+                        text = if (downloadProgress != null) {
+                            "Downloading ${downloadProgress!!.first}/${downloadProgress!!.second}..."
+                        } else if (isAutoSyncEnabled) {
+                            "$downloadedCount tracks synced"
+                        } else {
+                            "Sync library for offline playback"
+                        },
+                        color = Color.Gray,
+                        fontSize = 12.sp
+                    )
                 }
-            )
+                Switch(
+                    checked = isAutoSyncEnabled,
+                    onCheckedChange = { enabled ->
+                        isAutoSyncEnabled = enabled
+                        context.getSharedPreferences("download_prefs", android.content.Context.MODE_PRIVATE)
+                            .edit().putBoolean("auto_sync_enabled", enabled).apply()
+                        
+                        if (enabled) {
+                            // Start background download
+                            scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                                try {
+                                    val token = context.authDataStore.data.map { it[AuthPreferences.TOKEN_KEY] }.first()
+                                    if (token != null) {
+                                        val library = NetworkModule.api.getLibrary()
+                                        val tracks = library.items
+                                        val baseUrl = NetworkModule.getStreamBaseUrl()
+                                        
+                                        com.bombest.music.data.DownloadManager.getInstance(context)
+                                            .downloadAllTracks(
+                                                tracks = tracks,
+                                                getStreamUrl = { trackId -> "$baseUrl/stream/$trackId" },
+                                                onProgress = { downloaded, total ->
+                                                    downloadProgress = downloaded to total
+                                                }
+                                            )
+                                        
+                                        downloadProgress = null
+                                        downloadedCount = tracks.size
+                                        storageUsed = com.bombest.music.data.DownloadManager.getInstance(context).getDownloadsSizeBytes()
+                                        
+                                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                            Toast.makeText(context, "All ${tracks.size} tracks downloaded!", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                } catch (e: Exception) {
+                                    downloadProgress = null
+                                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                        Toast.makeText(context, "Download failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = Color.White,
+                        checkedTrackColor = Color(0xFF4CAF50),
+                        uncheckedThumbColor = Color.Gray,
+                        uncheckedTrackColor = Color(0xFF3A3A3A)
+                    )
+                )
+            }
             
             AccountMenuItem(
                 icon = Icons.Default.FolderOpen,
                 title = "Storage Used",
-                subtitle = formatBytes(com.bombest.music.data.DownloadManager.getInstance(context).getDownloadsSizeBytes()),
+                subtitle = formatBytes(storageUsed),
                 onClick = { }
             )
             
@@ -166,9 +252,16 @@ fun AccountScreen(
                 title = "Clear Downloads", 
                 subtitle = "Remove all downloaded tracks",
                 onClick = {
-                    scope.launch {
-                        // TODO: Clear all downloads
-                        Toast.makeText(context, "Downloads cleared", Toast.LENGTH_SHORT).show()
+                    scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                        com.bombest.music.data.DownloadManager.getInstance(context).clearAllDownloads()
+                        downloadedCount = 0
+                        storageUsed = 0L
+                        isAutoSyncEnabled = false
+                        context.getSharedPreferences("download_prefs", android.content.Context.MODE_PRIVATE)
+                            .edit().putBoolean("auto_sync_enabled", false).apply()
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                            Toast.makeText(context, "Downloads cleared", Toast.LENGTH_SHORT).show()
+                        }
                     }
                 }
             )

@@ -208,6 +208,19 @@ class DownloadManager private constructor(private val context: Context) {
     }
     
     /**
+     * Clear all downloaded tracks.
+     */
+    suspend fun clearAllDownloads() {
+        withContext(Dispatchers.IO) {
+            downloadsDir.listFiles()?.forEach { it.delete() }
+            context.downloadDataStore.edit { prefs ->
+                prefs[DOWNLOADED_TRACKS_KEY] = emptySet()
+            }
+            Log.i(TAG, "Cleared all downloads")
+        }
+    }
+    
+    /**
      * Download all tracks from library for offline playback.
      * Skips already downloaded tracks.
      */
