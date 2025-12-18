@@ -122,3 +122,28 @@ bombest-beats/
 - Changes are persisted to both the Beets database and the audio files.
 - Long-press tracks in the library to enter selection mode.
 
+### 📤 File Upload
+- Supports MP3, WAV, FLAC, M4A, OGG formats.
+- **Direct Upload (Tailscale)**: Bypass Cloudflare for large files (>30MB) to avoid 100s timeout.
+- **Standard Upload**: Via Cloudflare tunnel for smaller files.
+- Comprehensive logging for debugging upload issues (check `adb logcat | grep UploadScreen`).
+
+## Troubleshooting
+
+### Upload Issues
+
+**Error 524 (Timeout):**
+- Cloudflare has a 100-second timeout for uploads
+- Enable "Direct Upload (Tailscale)" for large files
+- Ensure Tailscale IP in UploadScreen.kt matches your server (`tailscale ip -4`)
+
+**Error 530 (Origin Unreachable):**
+- Check backend is running: `ps aux | grep upload_server.py`
+- Verify Cloudflare tunnel: `cloudflared tunnel info bombest-beats`
+- Check tunnel logs: `tail -f cloudflare.log`
+
+**Connection Refused (Tailscale):**
+- Verify correct Tailscale IP is hardcoded in `UploadScreen.kt`
+- Check server is listening on `0.0.0.0:8338`
+- Ensure phone and server are on same Tailscale network
+
