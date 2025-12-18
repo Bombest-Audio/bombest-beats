@@ -1,5 +1,5 @@
 ---
-description: C
+description: Clean Code Rules
 ---
 
 Code is clean if it can be understood easily – by everyone on the team. Clean code can be read and enhanced by a developer other than its original author. With understandability comes readability, changeability, extensibility and maintainability.

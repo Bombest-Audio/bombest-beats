@@ -5,4 +5,6 @@
  * Running on http://127.0.0.1:8338
  * Running on http://10.28.65.39:8338
 [33mPress CTRL+C to quit[0m
-127.0.0.1 - - [18/Dec/2025 11:19:06] "GET /playlists HTTP/1.1" 200 -
+127.0.0.1 - - [18/Dec/2025 11:32:02] "PUT /playlists/7/sort HTTP/1.1" 200 -
+127.0.0.1 - - [18/Dec/2025 11:32:02] "[31m[1mPOST /playlists/4/publish HTTP/1.1[0m" 422 -
+127.0.0.1 - - [18/Dec/2025 11:32:03] "GET /playlists/published HTTP/1.1" 200 -
