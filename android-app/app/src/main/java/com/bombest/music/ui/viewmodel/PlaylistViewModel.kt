@@ -23,6 +23,19 @@ class PlaylistViewModel : ViewModel() {
     val isLoading = mutableStateOf(false)
     val error = mutableStateOf<String?>(null)
     val currentPlaylistName = mutableStateOf("")
+    val stagedTrackIds = mutableStateListOf<Int>()
+    
+    fun toggleStageTrack(trackId: Int) {
+        if (stagedTrackIds.contains(trackId)) {
+            stagedTrackIds.remove(trackId)
+        } else {
+            stagedTrackIds.add(trackId)
+        }
+    }
+    
+    fun clearStagedTracks() {
+        stagedTrackIds.clear()
+    }
     
     fun initialize(context: Context) {
         val logging = HttpLoggingInterceptor().apply {
@@ -61,7 +74,8 @@ class PlaylistViewModel : ViewModel() {
                         artist = item.artist ?: "Unknown",
                         album = item.album,
                         duration = item.length,  // model.Track uses 'length' not 'duration'
-                        path = item.path ?: ""   // path is nullable in model.Track
+                        path = item.path ?: "",  // path is nullable in model.Track
+                        album_id = item.albumId
                     )
                 })
                 android.util.Log.d("PlaylistViewModel", "Loaded ${allTracks.size} library tracks")
@@ -143,6 +157,7 @@ class PlaylistViewModel : ViewModel() {
             try {
                 android.util.Log.d("PlaylistViewModel", "Adding ${trackIds.size} tracks to playlist $playlistId")
                 playlistApi.addTracksToPlaylist(playlistId, AddTracksRequest(trackIds))
+                clearStagedTracks()
                 // Reload playlist tracks to refresh the list
                 loadPlaylistTracks(playlistId, currentPlaylistName.value)
             } catch (e: Exception) {
