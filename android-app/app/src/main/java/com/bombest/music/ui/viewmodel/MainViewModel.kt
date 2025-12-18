@@ -657,17 +657,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun onFavorite() {
-        val trackId = currentMediaItem.value?.mediaId ?: return
-        val currentFavorites = favorites.value.toMutableSet()
-        if (currentFavorites.contains(trackId)) {
-            currentFavorites.remove(trackId)
-            android.util.Log.d("MainViewModel", "Removed from favorites: $trackId")
-        } else {
-            currentFavorites.add(trackId)
-            android.util.Log.d("MainViewModel", "Added to favorites: $trackId")
+    val trackId = currentMediaItem.value?.mediaId?.toIntOrNull() ?: return
+    android.util.Log.d("MainViewModel", "Toggling favorite for track: $trackId")
+    
+    // Use FavoritesManager for backend-synced favorites
+    viewModelScope.launch {
+        try {
+            com.bombest.music.data.FavoritesManager.toggleFavorite(trackId)
+            android.util.Log.d("MainViewModel", "Successfully toggled favorite for: $trackId")
+        } catch (e: Exception) {
+            android.util.Log.e("MainViewModel", "Failed to toggle favorite", e)
         }
-        favorites.value = currentFavorites
     }
+    
+    // Also update local state for immediate UI feedback (optimistic update)
+    val currentFavorites = favorites.value.toMutableSet()
+    val mediaId = currentMediaItem.value?.mediaId ?: return
+    if (currentFavorites.contains(mediaId)) {
+        currentFavorites.remove(mediaId)
+    } else {
+        currentFavorites.add(mediaId)
+    }
+    favorites.value = currentFavorites
+}
 
     fun onDownload() {
         val trackId = currentMediaItem.value?.mediaId ?: return
