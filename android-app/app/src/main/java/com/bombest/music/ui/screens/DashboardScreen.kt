@@ -86,7 +86,7 @@ fun DashboardScreen(onBack: () -> Unit) {
     
     val dashboardApi = remember {
         val logging = HttpLoggingInterceptor().apply {
-            level = HttpLoggingInterceptor.Level.BODY
+            level = HttpLoggingInterceptor.Level.BASIC
         }
         val client = OkHttpClient.Builder()
             .addInterceptor(logging)
@@ -95,7 +95,7 @@ fun DashboardScreen(onBack: () -> Unit) {
             .build()
         
         Retrofit.Builder()
-            .baseUrl("https://beats.bom.best/")
+            .baseUrl(com.bombest.music.data.NetworkModule.currentBaseUrl)
             .client(client)
             .addConverterFactory(MoshiConverterFactory.create(
                 com.squareup.moshi.Moshi.Builder()
