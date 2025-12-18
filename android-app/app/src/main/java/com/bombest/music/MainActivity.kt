@@ -44,6 +44,7 @@ import com.bombest.music.data.repository.AuthRepository
 import com.bombest.music.data.NetworkModule
 import com.bombest.music.data.FavoritesManager
 import android.widget.Toast
+import com.bombest.music.haptics.HapticGrooveEngine
 
 
 enum class Screen {
@@ -64,6 +65,9 @@ class MainActivity : ComponentActivity() {
         
         // Initialize DownloadManager
         mainViewModel.initDownloadManager(this)
+        
+        // Initialize Haptic Groove Engine
+        HapticGrooveEngine.initialize(this)
         
         WindowCompat.setDecorFitsSystemWindows(window, false)
         window.statusBarColor = android.graphics.Color.TRANSPARENT

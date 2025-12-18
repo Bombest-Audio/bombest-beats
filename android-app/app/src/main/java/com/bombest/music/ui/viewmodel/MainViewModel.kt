@@ -24,6 +24,7 @@ import com.bombest.music.data.FavoritesManager
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
+import com.bombest.music.haptics.HapticGrooveEngine
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -238,6 +239,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                      val target = newAmplitudes[i]
                      visualizerAmplitudes[i] = old + (target - old) * 0.4f 
                  }
+             }
+             
+             // Forward audio data to haptic engine
+             if (newAmplitudes.size >= 3) {
+                 // Calculate frequency band averages: low (0-20%), mid (20-60%), high (60-100%)
+                 val lowEnd = (newAmplitudes.size * 0.2).toInt()
+                 val midEnd = (newAmplitudes.size * 0.6).toInt()
+                 
+                 val low = if (lowEnd > 0) newAmplitudes.subList(0, lowEnd).average().toFloat() else 0f
+                 val mid = newAmplitudes.subList(lowEnd, midEnd).average().toFloat()
+                 val high = newAmplitudes.subList(midEnd, newAmplitudes.size).average().toFloat()
+                 val overall = newAmplitudes.average().toFloat()
+                 
+                 HapticGrooveEngine.onAmplitudeUpdate(overall, low, mid, high)
              }
         }
     }
