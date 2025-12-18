@@ -1,9 +1,9 @@
 -- Merging decision tree log ---
 manifest
-ADDED from /Users/thomasphillips/bombest-audio/bombest-beats/android-app/app/src/main/AndroidManifest.xml:2:1-58:12
-INJECTED from /Users/thomasphillips/bombest-audio/bombest-beats/android-app/app/src/main/AndroidManifest.xml:2:1-58:12
-INJECTED from /Users/thomasphillips/bombest-audio/bombest-beats/android-app/app/src/main/AndroidManifest.xml:2:1-58:12
-INJECTED from /Users/thomasphillips/bombest-audio/bombest-beats/android-app/app/src/main/AndroidManifest.xml:2:1-58:12
+ADDED from /Users/thomasphillips/bombest-audio/bombest-beats/android-app/app/src/main/AndroidManifest.xml:2:1-57:12
+INJECTED from /Users/thomasphillips/bombest-audio/bombest-beats/android-app/app/src/main/AndroidManifest.xml:2:1-57:12
+INJECTED from /Users/thomasphillips/bombest-audio/bombest-beats/android-app/app/src/main/AndroidManifest.xml:2:1-57:12
+INJECTED from /Users/thomasphillips/bombest-audio/bombest-beats/android-app/app/src/main/AndroidManifest.xml:2:1-57:12
 MERGED from [androidx.media3:media3-session:1.2.1] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/a7af8a4b15f48cb6799c7ae214038116/transformed/jetified-media3-session-1.2.1/AndroidManifest.xml:17:1-22:12
 MERGED from [androidx.media3:media3-datasource-okhttp:1.2.1] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/b45916c2202952f07b68d1638724c9e3/transformed/jetified-media3-datasource-okhttp-1.2.1/AndroidManifest.xml:17:1-22:12
 MERGED from [androidx.media3:media3-datasource:1.2.1] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/1fc1a9cbf39fc6f4da0a797e22cc3ba4/transformed/jetified-media3-datasource-1.2.1/AndroidManifest.xml:17:1-22:12
@@ -132,8 +132,8 @@ ADDED from /Users/thomasphillips/bombest-audio/bombest-beats/android-app/app/src
 	android:name
 		ADDED from /Users/thomasphillips/bombest-audio/bombest-beats/android-app/app/src/main/AndroidManifest.xml:9:22-65
 application
-ADDED from /Users/thomasphillips/bombest-audio/bombest-beats/android-app/app/src/main/AndroidManifest.xml:11:5-56:19
-INJECTED from /Users/thomasphillips/bombest-audio/bombest-beats/android-app/app/src/main/AndroidManifest.xml:11:5-56:19
+ADDED from /Users/thomasphillips/bombest-audio/bombest-beats/android-app/app/src/main/AndroidManifest.xml:11:5-55:19
+INJECTED from /Users/thomasphillips/bombest-audio/bombest-beats/android-app/app/src/main/AndroidManifest.xml:11:5-55:19
 MERGED from [androidx.credentials:credentials-play-services-auth:1.2.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/3df9abd7f0fbb697fd5bf2cff96f1b06/transformed/jetified-credentials-play-services-auth-1.2.0/AndroidManifest.xml:23:5-42:19
 MERGED from [androidx.credentials:credentials-play-services-auth:1.2.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/3df9abd7f0fbb697fd5bf2cff96f1b06/transformed/jetified-credentials-play-services-auth-1.2.0/AndroidManifest.xml:23:5-42:19
 MERGED from [com.google.android.gms:play-services-auth:20.7.0] /Users/thomasphillips/.gradle/caches/8.14.1/transforms/06d2cf5b18bb07b0c58540090b94c4fc/transformed/jetified-play-services-auth-20.7.0/AndroidManifest.xml:22:5-38:19
@@ -203,39 +203,37 @@ ADDED from /Users/thomasphillips/bombest-audio/bombest-beats/android-app/app/src
 	android:name
 		ADDED from /Users/thomasphillips/bombest-audio/bombest-beats/android-app/app/src/main/AndroidManifest.xml:30:27-74
 activity#com.bombest.music.MainActivity
-ADDED from /Users/thomasphillips/bombest-audio/bombest-beats/android-app/app/src/main/AndroidManifest.xml:34:9-38:57
+ADDED from /Users/thomasphillips/bombest-audio/bombest-beats/android-app/app/src/main/AndroidManifest.xml:34:9-37:57
 	android:exported
 		ADDED from /Users/thomasphillips/bombest-audio/bombest-beats/android-app/app/src/main/AndroidManifest.xml:36:13-37
-	android:configChanges
-		ADDED from /Users/thomasphillips/bombest-audio/bombest-beats/android-app/app/src/main/AndroidManifest.xml:37:13-87
 	android:theme
-		ADDED from /Users/thomasphillips/bombest-audio/bombest-beats/android-app/app/src/main/AndroidManifest.xml:38:13-54
+		ADDED from /Users/thomasphillips/bombest-audio/bombest-beats/android-app/app/src/main/AndroidManifest.xml:37:13-54
 	android:name
 		ADDED from /Users/thomasphillips/bombest-audio/bombest-beats/android-app/app/src/main/AndroidManifest.xml:35:13-41
 service#com.bombest.music.service.BombestMediaService
-ADDED from /Users/thomasphillips/bombest-audio/bombest-beats/android-app/app/src/main/AndroidManifest.xml:41:9-49:19
+ADDED from /Users/thomasphillips/bombest-audio/bombest-beats/android-app/app/src/main/AndroidManifest.xml:40:9-48:19
 	android:exported
-		ADDED from /Users/thomasphillips/bombest-audio/bombest-beats/android-app/app/src/main/AndroidManifest.xml:43:13-36
+		ADDED from /Users/thomasphillips/bombest-audio/bombest-beats/android-app/app/src/main/AndroidManifest.xml:42:13-36
 	android:foregroundServiceType
-		ADDED from /Users/thomasphillips/bombest-audio/bombest-beats/android-app/app/src/main/AndroidManifest.xml:44:13-58
+		ADDED from /Users/thomasphillips/bombest-audio/bombest-beats/android-app/app/src/main/AndroidManifest.xml:43:13-58
 	android:name
-		ADDED from /Users/thomasphillips/bombest-audio/bombest-beats/android-app/app/src/main/AndroidManifest.xml:42:13-56
+		ADDED from /Users/thomasphillips/bombest-audio/bombest-beats/android-app/app/src/main/AndroidManifest.xml:41:13-56
 intent-filter#action:name:android.media.browse.MediaBrowserService+action:name:androidx.media3.session.MediaSessionService
-ADDED from /Users/thomasphillips/bombest-audio/bombest-beats/android-app/app/src/main/AndroidManifest.xml:45:13-48:29
+ADDED from /Users/thomasphillips/bombest-audio/bombest-beats/android-app/app/src/main/AndroidManifest.xml:44:13-47:29
 action#androidx.media3.session.MediaSessionService
-ADDED from /Users/thomasphillips/bombest-audio/bombest-beats/android-app/app/src/main/AndroidManifest.xml:46:17-86
+ADDED from /Users/thomasphillips/bombest-audio/bombest-beats/android-app/app/src/main/AndroidManifest.xml:45:17-86
 	android:name
-		ADDED from /Users/thomasphillips/bombest-audio/bombest-beats/android-app/app/src/main/AndroidManifest.xml:46:25-83
+		ADDED from /Users/thomasphillips/bombest-audio/bombest-beats/android-app/app/src/main/AndroidManifest.xml:45:25-83
 action#android.media.browse.MediaBrowserService
-ADDED from /Users/thomasphillips/bombest-audio/bombest-beats/android-app/app/src/main/AndroidManifest.xml:47:17-83
+ADDED from /Users/thomasphillips/bombest-audio/bombest-beats/android-app/app/src/main/AndroidManifest.xml:46:17-83
 	android:name
-		ADDED from /Users/thomasphillips/bombest-audio/bombest-beats/android-app/app/src/main/AndroidManifest.xml:47:25-80
+		ADDED from /Users/thomasphillips/bombest-audio/bombest-beats/android-app/app/src/main/AndroidManifest.xml:46:25-80
 meta-data#com.google.android.gms.car.application
-ADDED from /Users/thomasphillips/bombest-audio/bombest-beats/android-app/app/src/main/AndroidManifest.xml:52:9-54:59
+ADDED from /Users/thomasphillips/bombest-audio/bombest-beats/android-app/app/src/main/AndroidManifest.xml:51:9-53:59
 	android:resource
-		ADDED from /Users/thomasphillips/bombest-audio/bombest-beats/android-app/app/src/main/AndroidManifest.xml:54:13-56
+		ADDED from /Users/thomasphillips/bombest-audio/bombest-beats/android-app/app/src/main/AndroidManifest.xml:53:13-56
 	android:name
-		ADDED from /Users/thomasphillips/bombest-audio/bombest-beats/android-app/app/src/main/AndroidManifest.xml:53:13-66
+		ADDED from /Users/thomasphillips/bombest-audio/bombest-beats/android-app/app/src/main/AndroidManifest.xml:52:13-66
 uses-sdk
 INJECTED from /Users/thomasphillips/bombest-audio/bombest-beats/android-app/app/src/main/AndroidManifest.xml reason: use-sdk injection requested
 INJECTED from /Users/thomasphillips/bombest-audio/bombest-beats/android-app/app/src/main/AndroidManifest.xml

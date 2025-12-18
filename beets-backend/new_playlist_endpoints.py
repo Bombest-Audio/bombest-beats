@@ -140,13 +140,14 @@ def search_playlist(playlist_id):
         return jsonify({'error': str(e)}), 500
 
 @app.route('/playlists/<int:playlist_id>/favorites/toggle', methods=['POST'])
-@admin_required()
+@jwt_required()
 def toggle_favorite(playlist_id):
     """Toggle favorite status for a track"""
     try:
+        from flask_jwt_extended import get_jwt_identity
+        user_id = int(get_jwt_identity())  # Get user ID from JWT token
         data = request.get_json()
         track_id = data.get('track_id')
-        user_id = data.get('user_id', 1)  # Default to admin user
         
         conn = sqlite3.connect('music/users.db')
         cursor = conn.cursor()

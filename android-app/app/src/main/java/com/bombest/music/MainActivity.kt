@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -41,6 +42,7 @@ import kotlinx.coroutines.launch
 import com.bombest.music.data.PasskeyManager
 import com.bombest.music.data.repository.AuthRepository
 import com.bombest.music.data.NetworkModule
+import com.bombest.music.data.FavoritesManager
 import android.widget.Toast
 
 
@@ -178,17 +180,6 @@ fun MainContent(
                                 titleContentColor = Color.White
                             )
                         )
-                    },
-                    bottomBar = {
-                        if (!isPlayerOpen) {
-                            PlayerBar(
-                                currentMediaItem = viewModel.currentMediaItem.value,
-                                isPlaying = viewModel.isPlaying.value,
-                                onPlayPause = viewModel::playPause,
-                                onNext = viewModel::skipNext,
-                                onClick = { isPlayerOpen = true }
-                            )
-                        }
                     }
                 ) { innerPadding ->
                     Box(modifier = Modifier.padding(innerPadding)) {
@@ -309,12 +300,21 @@ fun MainContent(
         }
         
         AnimatedVisibility(
-            visible = isPlayerOpen && currentScreen == Screen.LIBRARY,
+            visible = isPlayerOpen,
+            enter = slideInVertically(initialOffsetY = { it }),
+            exit = slideOutVertically(targetOffsetY = { it }),
+            modifier = Modifier.fillMaxSize()
+        ) {
             enter = slideInVertically(initialOffsetY = { it }),
             exit = slideOutVertically(targetOffsetY = { it }),
             modifier = Modifier.fillMaxSize()
         ) {
             viewModel.currentMediaItem.value?.let { mediaItem ->
+                // Observe FavoritesManager state reactively
+                val favoriteTrackIds by FavoritesManager.favoritedTrackIds.collectAsState()
+                val trackId = mediaItem.mediaId.toIntOrNull()
+                val isFavorite = trackId?.let { favoriteTrackIds.contains(it) } ?: viewModel.favorites.value.contains(mediaItem.mediaId)
+                
                 PlayerScreen(
                     currentMediaItem = mediaItem,
                     isPlaying = viewModel.isPlaying.value,
@@ -329,7 +329,7 @@ fun MainContent(
                     duration = viewModel.duration.value,
                     onSeek = viewModel::seekTo,
                     amplitudes = viewModel.visualizerAmplitudes,
-                    isFavorite = viewModel.favorites.value.contains(mediaItem.mediaId),
+                    isFavorite = isFavorite,
                     isDownloaded = viewModel.downloads.value.contains(mediaItem.mediaId),
                     onFavorite = viewModel::onFavorite,
                     onDownload = viewModel::onDownload,

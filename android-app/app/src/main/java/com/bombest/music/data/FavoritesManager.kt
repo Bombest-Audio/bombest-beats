@@ -44,6 +44,27 @@ object FavoritesManager {
         
         Log.d("FavoritesManager", "Toggling favorite for track $trackId (was: $wasFavorited, now: $nowFavorited)")
         
+        // #region agent log
+        try {
+            val logFile = java.io.File("/Users/thomasphillips/bombest-audio/.cursor/debug.log")
+            val logEntry = org.json.JSONObject().apply {
+                put("location", "FavoritesManager.kt:41")
+                put("message", "toggleFavorite entry")
+                put("data", org.json.JSONObject().apply {
+                    put("trackId", trackId)
+                    put("wasFavorited", wasFavorited)
+                    put("nowFavorited", nowFavorited)
+                    put("favoritesPlaylistId", favoritesPlaylistId)
+                })
+                put("timestamp", System.currentTimeMillis())
+                put("sessionId", "debug-session")
+                put("runId", "run1")
+                put("hypothesisId", "B")
+            }
+            logFile.appendText(logEntry.toString() + "\n")
+        } catch (e: Exception) {}
+        // #endregion
+        
         // Optimistic update
         val currentFavorites = _favoritedTrackIds.value.toMutableSet()
         if (nowFavorited) {
@@ -57,15 +78,98 @@ object FavoritesManager {
         try {
             val pid = playlistId ?: favoritesPlaylistId ?: run {
                 Log.e("FavoritesManager", "No favorites playlist ID set - cannot sync to backend")
+                // #region agent log
+                try {
+                    val logFile = java.io.File("/Users/thomasphillips/bombest-audio/.cursor/debug.log")
+                    val logEntry = org.json.JSONObject().apply {
+                        put("location", "FavoritesManager.kt:59")
+                        put("message", "No favorites playlist ID - cannot sync")
+                        put("data", org.json.JSONObject().apply {
+                            put("trackId", trackId)
+                        })
+                        put("timestamp", System.currentTimeMillis())
+                        put("sessionId", "debug-session")
+                        put("runId", "run1")
+                        put("hypothesisId", "B")
+                    }
+                    logFile.appendText(logEntry.toString() + "\n")
+                } catch (e: Exception) {}
+                // #endregion
                 return nowFavorited
             }
             
             Log.d("FavoritesManager", "Calling backend API: toggleFavorite(playlistId=$pid, trackId=$trackId)")
             
-            val response = playlistApi.toggleFavorite(
-                pid,
-                FavoriteToggleRequest(track_id = trackId)
-            )
+            // #region agent log
+            try {
+                val logFile = java.io.File("/Users/thomasphillips/bombest-audio/.cursor/debug.log")
+                val logEntry = org.json.JSONObject().apply {
+                    put("location", "FavoritesManager.kt:70")
+                    put("message", "Before API call")
+                    put("data", org.json.JSONObject().apply {
+                        put("playlistId", pid)
+                        put("trackId", trackId)
+                    })
+                    put("timestamp", System.currentTimeMillis())
+                    put("sessionId", "debug-session")
+                    put("runId", "run1")
+                    put("hypothesisId", "B")
+                }
+                logFile.appendText(logEntry.toString() + "\n")
+            } catch (e: Exception) {
+                Log.e("FavoritesManager", "Failed to write debug log", e)
+            }
+            // #endregion
+            
+            val response = try {
+                playlistApi.toggleFavorite(
+                    pid,
+                    FavoriteToggleRequest(track_id = trackId)
+                )
+            } catch (e: Exception) {
+                Log.e("FavoritesManager", "API call exception: ${e.message}", e)
+                // #region agent log
+                try {
+                    val logFile = java.io.File("/Users/thomasphillips/bombest-audio/.cursor/debug.log")
+                    val logEntry = org.json.JSONObject().apply {
+                        put("location", "FavoritesManager.kt:125")
+                        put("message", "API call exception")
+                        put("data", org.json.JSONObject().apply {
+                            put("error", e.message)
+                            put("errorType", e.javaClass.simpleName)
+                            put("playlistId", pid)
+                            put("trackId", trackId)
+                        })
+                        put("timestamp", System.currentTimeMillis())
+                        put("sessionId", "debug-session")
+                        put("runId", "run1")
+                        put("hypothesisId", "B")
+                    }
+                    logFile.appendText(logEntry.toString() + "\n")
+                } catch (e2: Exception) {}
+                // #endregion
+                throw e
+            }
+            
+            // #region agent log
+            try {
+                val logFile = java.io.File("/Users/thomasphillips/bombest-audio/.cursor/debug.log")
+                val logEntry = org.json.JSONObject().apply {
+                    put("location", "FavoritesManager.kt:85")
+                    put("message", "After API call")
+                    put("data", org.json.JSONObject().apply {
+                        put("success", response.success)
+                        put("favorited", response.favorited)
+                        put("trackId", trackId)
+                    })
+                    put("timestamp", System.currentTimeMillis())
+                    put("sessionId", "debug-session")
+                    put("runId", "run1")
+                    put("hypothesisId", "B")
+                }
+                logFile.appendText(logEntry.toString() + "\n")
+            } catch (e: Exception) {}
+            // #endregion
             
             if (response.success) {
                 Log.d("FavoritesManager", "Backend sync successful! Track $trackId favorited=${response.favorited}")
@@ -80,6 +184,24 @@ object FavoritesManager {
             }
         } catch (e: Exception) {
             Log.e("FavoritesManager", "Failed to sync favorite toggle for track $trackId", e)
+            // #region agent log
+            try {
+                val logFile = java.io.File("/Users/thomasphillips/bombest-audio/.cursor/debug.log")
+                val logEntry = org.json.JSONObject().apply {
+                    put("location", "FavoritesManager.kt:110")
+                    put("message", "Exception in toggleFavorite")
+                    put("data", org.json.JSONObject().apply {
+                        put("error", e.message)
+                        put("trackId", trackId)
+                    })
+                    put("timestamp", System.currentTimeMillis())
+                    put("sessionId", "debug-session")
+                    put("runId", "run1")
+                    put("hypothesisId", "B")
+                }
+                logFile.appendText(logEntry.toString() + "\n")
+            } catch (e2: Exception) {}
+            // #endregion
             // Revert on error
             _favoritedTrackIds.value = _favoritedTrackIds.value.toMutableSet().apply {
                 if (wasFavorited) add(trackId) else remove(trackId)
@@ -95,7 +217,7 @@ object FavoritesManager {
         try {
             Log.d("FavoritesManager", "Loading favorites from backend (playlist $favoritesId)")
             val response = playlistApi.getPlaylistTracks(favoritesId)
-            val favoriteIds = response.items.map { it.id }.toSet()
+            val favoriteIds = response.tracks.map { it.id }.toSet()
             _favoritedTrackIds.value = favoriteIds
             Log.d("FavoritesManager", "Loaded ${favoriteIds.size} favorites: $favoriteIds")
         } catch (e: Exception) {

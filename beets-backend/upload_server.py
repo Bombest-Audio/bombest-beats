@@ -1551,7 +1551,7 @@ def get_playlist_tracks(playlist_id):
         conn.close()
         
         if not track_ids:
-            return jsonify({'items': []})
+            return jsonify({'tracks': []})
 
         # Get track metadata from library DB
         lib_conn = sqlite3.connect(LIBRARY_DB)
@@ -1568,7 +1568,19 @@ def get_playlist_tracks(playlist_id):
         tracks_map = {row['id']: dict(row) for row in rows}
         ordered_tracks = [tracks_map[tid] for tid in track_ids if tid in tracks_map]
         
-        return jsonify({'items': ordered_tracks})
+        # Format tracks for Android API (expects 'tracks' field, not 'items')
+        formatted_tracks = []
+        for track in ordered_tracks:
+            formatted_tracks.append({
+                'id': track['id'],
+                'title': track.get('title') or track.get('title_sort', 'Unknown'),
+                'artist': track.get('artist') or track.get('artist_sort', 'Unknown Artist'),
+                'album': track.get('album') or track.get('album_sort'),
+                'duration': track.get('length', 0.0),
+                'path': track.get('path', '')
+            })
+        
+        return jsonify({'tracks': formatted_tracks})
     except Exception as e:
         print(f"Error fetching playlist tracks: {e}")
         return jsonify({'error': str(e)}), 500
@@ -1902,6 +1914,78 @@ def favorites():
         conn.commit()
         conn.close()
         return jsonify({'message': 'Removed from favorites'})
+
+@app.route('/playlists/<int:playlist_id>/favorites/toggle', methods=['POST'])
+@jwt_required()
+def toggle_favorite(playlist_id):
+    """Toggle favorite status for a track and add/remove from Favorites playlist"""
+    try:
+        user_id = int(get_jwt_identity())  # Get user ID from JWT token
+        data = request.get_json()
+        track_id = data.get('track_id')
+        
+        if not track_id:
+            return jsonify({'error': 'No track_id provided'}), 400
+        
+        conn = sqlite3.connect('music/users.db')
+        cursor = conn.cursor()
+        
+        # Ensure favorites table exists
+        cursor.execute('CREATE TABLE IF NOT EXISTS favorites (user_id INTEGER, track_id INTEGER, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(user_id, track_id))')
+        
+        # Check if already favorited
+        cursor.execute("SELECT 1 FROM favorites WHERE user_id = ? AND track_id = ?", (user_id, track_id))
+        is_favorited = cursor.fetchone() is not None
+        
+        if is_favorited:
+            # Remove from favorites
+            cursor.execute("DELETE FROM favorites WHERE user_id = ? AND track_id = ?", (user_id, track_id))
+            
+            # Remove from Favorites playlist
+            cursor.execute("""
+                SELECT id FROM playlists WHERE name = 'Favorites' AND is_system = 1 LIMIT 1
+            """)
+            fav_playlist = cursor.fetchone()
+            if fav_playlist:
+                cursor.execute("""
+                    DELETE FROM playlist_tracks 
+                    WHERE playlist_id = ? AND track_id = ?
+                """, (fav_playlist[0], track_id))
+            
+            favorited = False
+        else:
+            # Add to favorites
+            cursor.execute("""
+                INSERT INTO favorites (user_id, track_id) VALUES (?, ?)
+            """, (user_id, track_id))
+            
+            # Add to Favorites playlist
+            cursor.execute("""
+                SELECT id FROM playlists WHERE name = 'Favorites' AND is_system = 1 LIMIT 1
+            """)
+            fav_playlist = cursor.fetchone()
+            if fav_playlist:
+                cursor.execute("""
+                    SELECT MAX(position) FROM playlist_tracks WHERE playlist_id = ?
+                """, (fav_playlist[0],))
+                max_pos_result = cursor.fetchone()
+                max_pos = max_pos_result[0] if max_pos_result and max_pos_result[0] is not None else -1
+                cursor.execute("""
+                    INSERT INTO playlist_tracks (playlist_id, track_id, position)
+                    VALUES (?, ?, ?)
+                """, (fav_playlist[0], track_id, max_pos + 1))
+            
+            favorited = True
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'success': True, 'favorited': favorited})
+    except Exception as e:
+        print(f"Error toggling favorite: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
 
 
 # --- Metrics ---

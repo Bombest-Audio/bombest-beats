@@ -6,7 +6,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.bombest.music.data.api.*
+import com.bombest.music.data.FavoritesManager
+import com.bombest.music.data.AuthPreferences
+import com.bombest.music.data.authDataStore
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
@@ -16,6 +21,7 @@ import java.util.concurrent.TimeUnit
 class PlaylistViewModel : ViewModel() {
     
     private lateinit var playlistApi: PlaylistApi
+    private var authToken: String? = null
     
     val playlists = mutableStateListOf<Playlist>()
     val currentPlaylistTracks = mutableStateListOf<Track>()
@@ -25,10 +31,24 @@ class PlaylistViewModel : ViewModel() {
     val currentPlaylistName = mutableStateOf("")
     
     fun initialize(context: Context) {
+        // Load auth token synchronously during initialization
+        authToken = kotlinx.coroutines.runBlocking {
+            context.authDataStore.data.map { it[AuthPreferences.TOKEN_KEY] }.first()
+        }
+        android.util.Log.d("PlaylistViewModel", "Loaded auth token: ${if (authToken != null) "present" else "null"}")
+        
         val logging = HttpLoggingInterceptor().apply {
             level = HttpLoggingInterceptor.Level.BASIC
         }
         val client = OkHttpClient.Builder()
+            .addInterceptor { chain ->
+                val request = chain.request().newBuilder()
+                // Add auth token if available
+                if (authToken != null) {
+                    request.addHeader("Authorization", "Bearer $authToken")
+                }
+                chain.proceed(request.build())
+            }
             .addInterceptor(logging)
             .connectTimeout(10, TimeUnit.SECONDS)
             .readTimeout(10, TimeUnit.SECONDS)
@@ -47,6 +67,23 @@ class PlaylistViewModel : ViewModel() {
         playlistApi = retrofit.create(PlaylistApi::class.java)
         loadPlaylists()
         loadAllTracks()  // Load library tracks for picker
+        
+        // Initialize FavoritesManager after playlists are loaded
+        viewModelScope.launch {
+            try {
+                val response = playlistApi.getPlaylists()
+                val favoritesPlaylist = response.playlists.find { it.name == "Favorites" }
+                if (favoritesPlaylist != null) {
+                    FavoritesManager.initialize(playlistApi, favoritesPlaylist.id)
+                    FavoritesManager.loadFavorites(favoritesPlaylist.id)
+                    android.util.Log.d("PlaylistViewModel", "FavoritesManager initialized with playlist ID: ${favoritesPlaylist.id}")
+                } else {
+                    android.util.Log.e("PlaylistViewModel", "Favorites playlist not found!")
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("PlaylistViewModel", "Failed to initialize FavoritesManager: ${e.message}", e)
+            }
+        }
     }
     
     private fun loadAllTracks() {
@@ -78,6 +115,14 @@ class PlaylistViewModel : ViewModel() {
                 val response = playlistApi.getPlaylists()
                 playlists.clear()
                 playlists.addAll(response.playlists)
+                
+                // Initialize FavoritesManager if Favorites playlist found
+                val favoritesPlaylist = response.playlists.find { it.name == "Favorites" }
+                if (favoritesPlaylist != null) {
+                    FavoritesManager.initialize(playlistApi, favoritesPlaylist.id)
+                    FavoritesManager.loadFavorites(favoritesPlaylist.id)
+                    android.util.Log.d("PlaylistViewModel", "FavoritesManager initialized in loadPlaylists with ID: ${favoritesPlaylist.id}")
+                }
             } catch (e: Exception) {
                 error.value = e.message
             }
@@ -117,10 +162,14 @@ class PlaylistViewModel : ViewModel() {
         viewModelScope.launch {
             isLoading.value = true
             try {
+                android.util.Log.d("PlaylistViewModel", "Loading tracks for playlist $id ($name)")
                 val response = playlistApi.getPlaylistTracks(id)
+                android.util.Log.d("PlaylistViewModel", "Received ${response.tracks.size} tracks from API")
                 currentPlaylistTracks.clear()
                 currentPlaylistTracks.addAll(response.tracks)
+                android.util.Log.d("PlaylistViewModel", "Loaded ${currentPlaylistTracks.size} tracks into UI")
             } catch (e: Exception) {
+                android.util.Log.e("PlaylistViewModel", "Failed to load playlist tracks: ${e.message}", e)
                 error.value = e.message
             }
             isLoading.value = false
