@@ -31,7 +31,8 @@ class SplatterBurstSystem {
     fun render(
         scope: DrawScope,
         rms: Float,
-        centerX: Float,
+        peakIndices: List<Int>,
+        barWidth: Float,
         centerY: Float,
         timestamp: Long
     ) {
@@ -39,8 +40,11 @@ class SplatterBurstSystem {
         val rmsDelta = rms - previousRms
         previousRms = rms
         
-        if (rmsDelta > 0.3f && rms > 0.5f) {
-            spawnSplatterBurst(centerX, centerY, rms, timestamp)
+        // Lowered thresholds from 0.3/0.5 to 0.15/0.25
+        if (rmsDelta > 0.15f && rms > 0.25f && peakIndices.isNotEmpty()) {
+            val randomPeak = peakIndices.random()
+            val x = randomPeak * barWidth + barWidth / 2f
+            spawnSplatterBurst(x, centerY, rms, timestamp)
         }
         
         // Update and draw splatters

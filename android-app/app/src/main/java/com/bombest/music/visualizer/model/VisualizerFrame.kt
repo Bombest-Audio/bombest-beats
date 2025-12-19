@@ -21,7 +21,7 @@ data class VisualizerFrame(
         fun from(
             amplitudes: List<Float>,
             timestamp: Long = System.currentTimeMillis(),
-            peakThreshold: Float = 0.6f
+            peakThreshold: Float = 0.4f
         ): VisualizerFrame {
             val rms = if (amplitudes.isNotEmpty()) {
                 kotlin.math.sqrt(amplitudes.map { it * it }.average()).toFloat()

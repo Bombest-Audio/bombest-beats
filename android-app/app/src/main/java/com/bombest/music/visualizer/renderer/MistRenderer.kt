@@ -45,7 +45,8 @@ class MistRenderer {
                     x = peakIndex * barWidth + barWidth / 2f,
                     y = centerY - amplitudes[peakIndex] * (height * 0.4f),
                     energy = amplitudes[peakIndex],
-                    timestamp = timestamp
+                    timestamp = timestamp,
+                    centerY = centerY
                 )
             }
         }
@@ -65,7 +66,7 @@ class MistRenderer {
             // Update position
             particle.x += particle.vx
             particle.y += particle.vy
-            particle.vy += 0.1f // Slight gravity
+            particle.vy += 0.02f // Reduced gravity
             
             // Calculate alpha based on age
             val ageRatio = age.toFloat() / maxAge
@@ -88,7 +89,8 @@ class MistRenderer {
         x: Float,
         y: Float,
         energy: Float,
-        timestamp: Long
+        timestamp: Long,
+        centerY: Float
     ) {
         val count = (3 + (energy * 7).toInt()).coerceAtMost(10)
         
@@ -96,12 +98,17 @@ class MistRenderer {
             val angle = Random.nextFloat() * 2f * Math.PI.toFloat()
             val speed = 0.5f + Random.nextFloat() * 1.5f
             
+            // Randomly flip Y to spawn on both sides of center if needed, 
+            // or just center around the peak
+            val isUpperPeak = Random.nextBoolean()
+            val spawnY = if (isUpperPeak) y else centerY + (centerY - y)
+            
             mistParticles.add(
                 MistParticle(
                     x = x,
-                    y = y,
+                    y = spawnY,
                     vx = cos(angle) * speed,
-                    vy = sin(angle) * speed - 1f, // Bias upward
+                    vy = sin(angle) * speed * 0.5f, // Reduced Y spread
                     size = 1f + Random.nextFloat() * 2f,
                     color = Color.White,
                     birthTime = timestamp
