@@ -33,7 +33,7 @@ interface AuthApi {
     ): PasskeyRegisterResponse
     
     @GET("auth/passkeys")
-    suspend fun listPasskeys(@Header("Authorization") token: String): PasskeysListResponse
+    suspend fun listPasskeys(@Header("Authorization") token: String): List<PasskeyInfo>
     
     @DELETE("auth/passkey/delete/{passkeyId}")
     suspend fun deletePasskey(
@@ -49,7 +49,7 @@ interface AuthApi {
 }
 
 data class ChangePasswordRequest(val current_password: String, val new_password: String)
-data class PasskeysListResponse(val passkeys: List<PasskeyInfo>)
+// data class PasskeysListResponse removed
 data class PasskeyInfo(val id: Int, val credential_id: String, val created_at: String?)
 data class GenericResponse(val success: Boolean, val message: String? = null, val error: String? = null)
 
