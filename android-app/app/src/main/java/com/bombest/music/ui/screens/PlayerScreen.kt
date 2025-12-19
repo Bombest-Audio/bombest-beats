@@ -57,6 +57,7 @@ import com.bombest.music.ui.theme.VisualizerThemeStyle
 import com.bombest.music.ui.theme.ProgressStyle
 import com.bombest.music.ui.components.GraffitiVisualizer
 import com.bombest.music.ui.components.SprayPaintProgress
+import com.bombest.music.visualizer.GraffitiWaveformVisualizer
 import com.bombest.music.R
 import kotlin.math.atan2
 
@@ -138,15 +139,16 @@ fun PlayerScreen(
 
             Spacer(Modifier.height(32.dp))
 
-            // Waveform Visualizer Area - Multi-Wave Style
+            // Graffiti Waveform Visualizer
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(120.dp) // Taller for "Kickass" look
+                    .height(120.dp)
             ) {
-                WaveformVisualizer(
-                     modifier = Modifier.fillMaxSize(),
-                     amplitudes = amplitudes
+                GraffitiWaveformVisualizer(
+                    amplitudes = amplitudes,
+                    isPlaying = isPlaying,
+                    modifier = Modifier.fillMaxSize()
                 )
             }
 
@@ -738,6 +740,11 @@ fun WaveformVisualizer(
 ) {
     if (amplitudes.isEmpty()) return
 
+    // Create a snapshot of amplitudes to force recomposition on SnapshotStateList changes
+    val currentAmplitudes by remember(amplitudes) {
+        derivedStateOf { amplitudes.toList() }
+    }
+
     // Get current theme style
     val theme = LocalBombestTheme.current
     val defaultType = if (theme.visualizerStyle == VisualizerThemeStyle.GRAFFITI) 
@@ -764,7 +771,7 @@ fun WaveformVisualizer(
         // Graffiti mode uses a separate Composable
         if (visualizerType == VisualizerType.Graffiti) {
             GraffitiVisualizer(
-                amplitudes = amplitudes,
+                amplitudes = currentAmplitudes,
                 modifier = Modifier.fillMaxSize()
             )
         } else {
@@ -773,7 +780,7 @@ fun WaveformVisualizer(
                 val width = size.width
                 val height = size.height
                 val centerY = height / 2f
-                val count = amplitudes.size
+                val count = currentAmplitudes.size
 
             when (visualizerType) {
                 VisualizerType.SingleWave -> {
@@ -786,7 +793,7 @@ fun WaveformVisualizer(
                     
                     for (i in 0 until count) {
                          val x = (i + 1) * stepX
-                         val amp = amplitudes[i] * 4.0f // High boost for line
+                         val amp = currentAmplitudes[i] * 4.0f // High boost for line
                          val yOffset = amp * (height / 2f) * 0.8f
                          // Alternate for "jagged" oscilloscope look or smooth?
                          // Let's do smooth wave

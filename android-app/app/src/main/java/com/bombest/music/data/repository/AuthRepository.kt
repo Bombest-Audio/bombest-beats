@@ -37,10 +37,17 @@ class AuthRepository(private val context: Context, private val authApi: AuthApi)
     
     suspend fun login(username: String, password: String): Result<User> {
         return try {
+            android.util.Log.d("AuthRepository", "Attempting login for username: $username")
             val response = authApi.login(LoginRequest(username, password))
+            android.util.Log.d("AuthRepository", "Login successful for user: ${response.user.username}")
             saveAuth(response.access_token, response.user)
             Result.success(response.user)
+        } catch (e: retrofit2.HttpException) {
+            val errorBody = e.response()?.errorBody()?.string()
+            android.util.Log.e("AuthRepository", "Login failed with HTTP ${e.code()}: $errorBody")
+            Result.failure(Exception("Login failed: ${errorBody ?: e.message}"))
         } catch (e: Exception) {
+            android.util.Log.e("AuthRepository", "Login failed with exception: ${e.message}", e)
             Result.failure(e)
         }
     }

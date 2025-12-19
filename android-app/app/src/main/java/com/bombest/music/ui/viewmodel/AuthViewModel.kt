@@ -27,22 +27,8 @@ class AuthViewModel(context: Context) : ViewModel() {
     val currentUser = mutableStateOf<User?>(null)
     
     init {
-        val logging = HttpLoggingInterceptor().apply {
-            level = HttpLoggingInterceptor.Level.BODY
-        }
-        val client = OkHttpClient.Builder()
-            .addInterceptor(logging)
-            .connectTimeout(10, TimeUnit.SECONDS)
-            .readTimeout(10, TimeUnit.SECONDS)
-            .build()
-        
-        val retrofit = Retrofit.Builder()
-            .baseUrl("https://bom.best/beats/api/")
-            .client(client)
-            .addConverterFactory(MoshiConverterFactory.create())
-            .build()
-        
-        authApi = retrofit.create(AuthApi::class.java)
+        // Use NetworkModule's authApi which has proper failover support and timeouts
+        authApi = com.bombest.music.data.NetworkModule.authApi
         authRepository = AuthRepository(context, authApi)
         
         // Check login state asynchronously
