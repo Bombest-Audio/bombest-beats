@@ -61,6 +61,7 @@ fun AccountScreen(
     var showChangePassword by remember { mutableStateOf(false) }
     var showManagePasskeys by remember { mutableStateOf(false) }
     var passkeys by remember { mutableStateOf<List<PasskeyInfo>>(emptyList()) }
+    var passkeysError by remember { mutableStateOf<String?>(null) }
     var isLoadingPasskeys by remember { mutableStateOf(false) }
     
     Scaffold(
@@ -117,14 +118,16 @@ fun AccountScreen(
                     showManagePasskeys = true
                     isLoadingPasskeys = true
                     scope.launch {
+                        isLoadingPasskeys = true
+                        passkeysError = null
                         try {
                             val token = context.authDataStore.data.map { it[AuthPreferences.TOKEN_KEY] }.first()
                             if (token != null) {
-                                val response = NetworkModule.authApi.listPasskeys("Bearer $token")
-                                passkeys = response.passkeys
+                                passkeys = NetworkModule.authApi.listPasskeys("Bearer $token")
                             }
                         } catch (e: Exception) {
-                            Toast.makeText(context, "Failed to load passkeys", Toast.LENGTH_SHORT).show()
+                            passkeysError = e.message ?: "Failed to load passkeys"
+                            android.util.Log.e("AccountScreen", "Error loading passkeys", e)
                         } finally {
                             isLoadingPasskeys = false
                         }
@@ -301,6 +304,7 @@ fun AccountScreen(
         ManagePasskeysDialog(
             passkeys = passkeys,
             isLoading = isLoadingPasskeys,
+            error = passkeysError,
             onDismiss = { showManagePasskeys = false },
             onDelete = { passkeyId ->
                 scope.launch {
@@ -446,6 +450,7 @@ fun ChangePasswordDialog(
 fun ManagePasskeysDialog(
     passkeys: List<PasskeyInfo>,
     isLoading: Boolean,
+    error: String?,
     onDismiss: () -> Unit,
     onDelete: (Int) -> Unit
 ) {
@@ -464,10 +469,18 @@ fun ManagePasskeysDialog(
                         )
                     }
                     passkeys.isEmpty() -> {
-                        Text(
+                            Text(
                             text = "No passkeys registered",
                             color = Color.Gray,
                             modifier = Modifier.align(Alignment.Center)
+                        )
+                    }
+                    error != null -> {
+                        Text(
+                            text = error,
+                            color = Color.Red,
+                            modifier = Modifier.align(Alignment.Center).padding(16.dp),
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
                         )
                     }
                     else -> {
