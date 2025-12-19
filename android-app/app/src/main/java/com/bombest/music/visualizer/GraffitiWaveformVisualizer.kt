@@ -34,7 +34,7 @@ fun GraffitiWaveformVisualizer(
     modifier: Modifier = Modifier
 ) {
     // Renderers (remember to avoid recreation)
-    val smoother = remember { VisualizerSmoother(smoothingFactor = 0.3f) }
+    val smoother = remember { VisualizerSmoother(smoothingFactor = 0.5f) }
     val sprayRenderer = remember(qualityTier) { SprayStrokeRenderer(qualityTier) }
     val mistRenderer = remember { MistRenderer() }
     val splatterSystem = remember { SplatterBurstSystem() }
@@ -95,10 +95,12 @@ fun GraffitiWaveformVisualizer(
         
         // Layer 4: Splatter bursts (if quality allows)
         if (qualityTier.enableSplatter) {
+            val barWidth = width / smoothedAmplitudes.size
             splatterSystem.render(
                 scope = this,
                 rms = frame.rms,
-                centerX = width / 2f,
+                peakIndices = frame.peakIndices,
+                barWidth = barWidth,
                 centerY = height / 2f,
                 timestamp = frame.timestamp
             )
