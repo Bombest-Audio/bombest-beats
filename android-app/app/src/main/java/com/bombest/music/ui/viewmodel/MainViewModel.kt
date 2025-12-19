@@ -153,11 +153,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun updateVisualizerFromWaveform(waveform: ByteArray) {
         isVisualizerActive = true
-        // Cancel simulation if real data is coming
-        if (simulationJob?.isActive == true) {
-            simulationJob?.cancel()
-            simulationJob = null
-        }
+        // Don't cancel simulation - let it run as fallback if real-time data stops
 
         val now = System.currentTimeMillis()
         if (now - lastVisualizerUpdate < VISUALIZER_UPDATE_INTERVAL) return
@@ -188,11 +184,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun updateVisualizerState(fft: ByteArray) {
         isVisualizerActive = true
-        // If we get real data, cancel any simulation
-        if (simulationJob?.isActive == true) {
-             simulationJob?.cancel()
-             simulationJob = null
-        }
+        // Don't cancel simulation - let it run as fallback if real-time data stops
 
         val now = System.currentTimeMillis()
         if (now - lastVisualizerUpdate < VISUALIZER_UPDATE_INTERVAL) return
@@ -313,17 +305,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                          // Apply power curve for visual contrast
                          baseAmplitude = Math.pow(baseAmplitude.toDouble(), 1.5).toFloat()
                          
-                         // Center SIZE emphasis - bars at center are much taller
-                         // Edges are nearly flat (~5%), center is full height
-                         val center = displayBars / 2f
-                         val distFromCenter = kotlin.math.abs(i - center) / center
-                         // Sharp gaussian-like falloff for dramatic size difference
-                         val centerBoost = 0.05f + 0.95f * Math.pow((1.0 - distFromCenter).toDouble(), 2.5).toFloat()
-                         
                          // Add time-based pulsing (±20%)
                          val pulse = 0.8f + 0.2f * kotlin.math.sin(timeOffset + i * 0.5).toFloat()
-                         val amplitude = (baseAmplitude * pulse * centerBoost).coerceIn(0.05f, 1f)
-                         
+                         val amplitude = (baseAmplitude * pulse).coerceIn(0.05f, 1f)
+
                          amplitudes.add(amplitude)
                      }
                      

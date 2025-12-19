@@ -5,6 +5,7 @@ import com.bombest.music.data.api.AuthApi
 import retrofit2.Retrofit
 import retrofit2.converter.moshi.MoshiConverterFactory
 import okhttp3.OkHttpClient
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.logging.HttpLoggingInterceptor
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
@@ -33,20 +34,102 @@ object NetworkModule {
     private val okHttpClient = OkHttpClient.Builder()
         .addInterceptor(loggingInterceptor)
         .addInterceptor { chain ->
-            val request = chain.request()
-            try {
-                chain.proceed(request)
-            } catch (e: Exception) {
-                // On failure, try failover URL
-                if (currentUrlIndex.get() < BASE_URLS.size - 1) {
-                    android.util.Log.w("NetworkModule", "Primary failed, switching to failover: ${e.message}")
-                    currentUrlIndex.incrementAndGet()
+            val originalRequest = chain.request()
+            // Always start from primary URL for each new request
+            var currentIndex = 0
+            var lastException: Exception? = null
+            
+            // Try each URL in sequence
+            while (currentIndex < BASE_URLS.size) {
+                try {
+                    // Build request with current base URL
+                    val currentBaseUrl = BASE_URLS[currentIndex]
+                    val baseUrlParsed = currentBaseUrl.toHttpUrlOrNull()
+                    if (baseUrlParsed == null) {
+                        android.util.Log.e("NetworkModule", "Invalid base URL: $currentBaseUrl")
+                        currentIndex++
+                        continue
+                    }
+                    
+                    val originalUrl = originalRequest.url
+                    // Replace host/scheme/port but keep the path and query
+                    val newUrl = originalUrl.newBuilder()
+                        .scheme(baseUrlParsed.scheme)
+                        .host(baseUrlParsed.host)
+                        .port(baseUrlParsed.port)
+                        .build()
+                    
+                    val newRequest = originalRequest.newBuilder()
+                        .url(newUrl)
+                        .build()
+                    
+                    android.util.Log.d("NetworkModule", "Attempting request to: ${newUrl.host}${newUrl.encodedPath}")
+                    val response = chain.proceed(newRequest)
+                    
+                    // If we get a successful response or HTTP error (4xx, 5xx), don't failover
+                    // Only failover on network errors (timeout, connection refused, etc.)
+                    if (response.isSuccessful || response.code in 400..599) {
+                        return@addInterceptor response
+                    }
+                    
+                    // Unexpected response code, try next URL
+                    response.close()
+                    throw java.net.SocketTimeoutException("Unexpected response code: ${response.code}")
+                } catch (e: java.net.SocketTimeoutException) {
+                    // Network timeout - try failover
+                    lastException = e
+                    android.util.Log.w("NetworkModule", "Timeout with URL index $currentIndex (${BASE_URLS[currentIndex]}): ${e.message}")
+                    
+                    // Try next URL if available
+                    if (currentIndex < BASE_URLS.size - 1) {
+                        currentIndex++
+                        currentUrlIndex.set(currentIndex)
+                        android.util.Log.i("NetworkModule", "Switching to failover URL: ${BASE_URLS[currentIndex]}")
+                    } else {
+                        // No more URLs to try
+                        break
+                    }
+                } catch (e: java.net.ConnectException) {
+                    // Connection refused - try failover
+                    lastException = e
+                    android.util.Log.w("NetworkModule", "Connection refused with URL index $currentIndex (${BASE_URLS[currentIndex]}): ${e.message}")
+                    
+                    // Try next URL if available
+                    if (currentIndex < BASE_URLS.size - 1) {
+                        currentIndex++
+                        currentUrlIndex.set(currentIndex)
+                        android.util.Log.i("NetworkModule", "Switching to failover URL: ${BASE_URLS[currentIndex]}")
+                    } else {
+                        // No more URLs to try
+                        break
+                    }
+                } catch (e: java.io.IOException) {
+                    // Other network errors - try failover
+                    lastException = e
+                    android.util.Log.w("NetworkModule", "Network error with URL index $currentIndex (${BASE_URLS[currentIndex]}): ${e.message}")
+                    
+                    // Try next URL if available
+                    if (currentIndex < BASE_URLS.size - 1) {
+                        currentIndex++
+                        currentUrlIndex.set(currentIndex)
+                        android.util.Log.i("NetworkModule", "Switching to failover URL: ${BASE_URLS[currentIndex]}")
+                    } else {
+                        // No more URLs to try
+                        break
+                    }
+                } catch (e: Exception) {
+                    // For other exceptions (including HTTP exceptions from Retrofit), don't failover
+                    // These are likely application-level errors (401, 403, 500, etc.)
+                    android.util.Log.w("NetworkModule", "Non-network error (not failing over): ${e.javaClass.simpleName}: ${e.message}")
+                    throw e
                 }
-                throw e
             }
+            
+            // All URLs failed, throw the last exception
+            throw lastException ?: java.net.SocketTimeoutException("All servers failed")
         }
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(20, TimeUnit.SECONDS)
         .build()
 
     private val moshi = com.squareup.moshi.Moshi.Builder()
@@ -77,13 +160,27 @@ object NetworkModule {
     fun getStreamBaseUrl(): String = currentBaseUrl.dropLast(1) // remove trailing slash
     
     /**
-     * Force switch to failover URL (useful for manual testing)
+     * Check if failover is available
      */
-    fun switchToFailover() {
-        if (currentUrlIndex.get() < BASE_URLS.size - 1) {
+    fun canFailover(): Boolean {
+        return currentUrlIndex.get() < BASE_URLS.size - 1
+    }
+    
+    /**
+     * Switch to failover URL
+     */
+    fun failover() {
+        if (canFailover()) {
             currentUrlIndex.incrementAndGet()
             android.util.Log.i("NetworkModule", "Switched to failover: $currentBaseUrl")
         }
+    }
+    
+    /**
+     * Force switch to failover URL (useful for manual testing)
+     */
+    fun switchToFailover() {
+        failover()
     }
     
     /**
