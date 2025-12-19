@@ -63,7 +63,21 @@ fun AccountScreen(
     var passkeys by remember { mutableStateOf<List<PasskeyInfo>>(emptyList()) }
     var passkeysError by remember { mutableStateOf<String?>(null) }
     var isLoadingPasskeys by remember { mutableStateOf(false) }
-    
+    var showClearDownloadsConfirm by remember { mutableStateOf(false) }
+
+    // Download state
+    var isAutoSyncEnabled by remember {
+        mutableStateOf(
+            context.getSharedPreferences("download_prefs", android.content.Context.MODE_PRIVATE)
+                .getBoolean("auto_sync_enabled", false)
+        )
+    }
+    var downloadProgress by remember { mutableStateOf<Pair<Int, Int>?>(null) }
+    var downloadedCount by remember { mutableIntStateOf(0) }
+    var storageUsed by remember {
+        mutableStateOf(com.bombest.music.data.DownloadManager.getInstance(context).getDownloadsSizeBytes())
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -145,19 +159,6 @@ fun AccountScreen(
                 modifier = Modifier.padding(start = 8.dp, bottom = 4.dp)
             )
             
-            // Download state
-            var isAutoSyncEnabled by remember { 
-                mutableStateOf(
-                    context.getSharedPreferences("download_prefs", android.content.Context.MODE_PRIVATE)
-                        .getBoolean("auto_sync_enabled", false)
-                )
-            }
-            var downloadProgress by remember { mutableStateOf<Pair<Int, Int>?>(null) }
-            var downloadedCount by remember { mutableIntStateOf(0) }
-            var storageUsed by remember {
-                mutableStateOf(com.bombest.music.data.DownloadManager.getInstance(context).getDownloadsSizeBytes())
-            }
-            
             // Auto-Sync Toggle
             Row(
                 modifier = Modifier
@@ -214,6 +215,8 @@ fun AccountScreen(
                                                 getStreamUrl = { trackId -> "$baseUrl/stream/$trackId" },
                                                 onProgress = { downloaded, total ->
                                                     downloadProgress = downloaded to total
+                                                    downloadedCount = downloaded
+                                                    storageUsed = com.bombest.music.data.DownloadManager.getInstance(context).getDownloadsSizeBytes()
                                                 }
                                             )
                                         
@@ -254,7 +257,25 @@ fun AccountScreen(
                 icon = Icons.Default.DeleteForever,
                 title = "Clear Downloads", 
                 subtitle = "Remove all downloaded tracks",
-                onClick = {
+                onClick = { showClearDownloadsConfirm = true }
+            )
+        }
+    }
+
+    // Clear Downloads Confirmation Dialog
+    if (showClearDownloadsConfirm) {
+        AlertDialog(
+            onDismissRequest = { showClearDownloadsConfirm = false },
+            title = { Text("Clear All Downloads?", color = Color.White) },
+            text = {
+                Text(
+                    "This will remove all downloaded tracks from your device. You will need to download them again for offline playback.",
+                    color = Color.White.copy(alpha = 0.8f)
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showClearDownloadsConfirm = false
                     scope.launch(kotlinx.coroutines.Dispatchers.IO) {
                         com.bombest.music.data.DownloadManager.getInstance(context).clearAllDownloads()
                         downloadedCount = 0
@@ -266,9 +287,17 @@ fun AccountScreen(
                             Toast.makeText(context, "Downloads cleared", Toast.LENGTH_SHORT).show()
                         }
                     }
+                }) {
+                    Text("Clear All", color = Color(0xFFE90060))
                 }
-            )
-        }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearDownloadsConfirm = false }) {
+                    Text("Cancel", color = Color.Gray)
+                }
+            },
+            containerColor = Color(0xFF1A1A2E)
+        )
     }
     
     // Change Password Dialog
