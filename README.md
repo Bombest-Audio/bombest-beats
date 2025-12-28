@@ -38,8 +38,8 @@ A cross-platform music streaming application with Android, iOS, and web clients 
 
 | Component | Value |
 |-----------|-------|
-| Primary URL | `https://beats.bom.best` |
-| Failover URL | `https://beats-aws.bom.best` |
+| Primary URL | `https://bom.best/api/` |
+| Failover URL | `https://beats-aws.bom.best/api/` |
 | EC2 Instance | `i-03ac11ce0a84a2625` (44.249.110.172) |
 | S3 Bucket | `s3://bombest-beats-music` |
 | Docker Image | `thomasphillips3/bombest-beats:latest` |
@@ -87,6 +87,16 @@ bombest-beats/
 ├── deploy-ec2.sh         # AWS EC2 deployment
 ├── setup-s3.sh           # S3 bucket & music sync
 └── cloudflared-config.yml
+
+## Client Connection (Static Endpoints)
+
+- API base (primary): `https://bom.best/api/`
+- API base (failover): `https://beats-aws.bom.best/api/`
+- Cloudflare tunnel: `4a638fa7-cbe1-453c-b360-95c56d17eaca` -> `http://localhost:5002`
+- DNS hostname served via Cloudflare: `bom.best`
+- Backend health (direct): `http://localhost:5002/health`
+
+These endpoints are stable; mobile and web clients should target the API bases above and can safely hardcode them. If credentials rotate, only `/home/thomas/.cloudflared/4a638fa7-cbe1-453c-b360-95c56d17eaca.json` needs regeneration—URLs stay the same.
 ```
 
 ## Theme System
