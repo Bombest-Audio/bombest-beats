@@ -26,5 +26,8 @@ beets-backend/music/
 beets-backend/uploads/
 beets-backend/waveforms/
 
-# OS specific
+# macOS specific
 .DS_Store
+
+# Local credentials and keys
+.local/
