@@ -26,6 +26,14 @@ beets-backend/music/
 beets-backend/uploads/
 beets-backend/waveforms/
 
+# Audio files (too large for git)
+*.wav
+*.mp3
+*.m4a
+*.flac
+*.aac
+*.ogg
+
 # macOS specific
 .DS_Store
 
