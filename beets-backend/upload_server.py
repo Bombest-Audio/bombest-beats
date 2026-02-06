@@ -4,6 +4,7 @@ import re
 import json
 import subprocess
 import sqlite3
+import traceback
 import wave
 import struct
 from flask import Flask, request, jsonify, send_file
@@ -633,32 +634,64 @@ def batch_delete_tracks():
     except Exception as e:
         return jsonify({'error': f'Failed to batch delete tracks: {str(e)}'}), 500
 
+def _decode_val(val):
+    """Decode bytes to str for JSON; leave other types as-is."""
+    if isinstance(val, bytes):
+        return val.decode('utf-8', errors='ignore')
+    return val
+
+
+def _path_to_s3_key(path):
+    """Normalize DB path to a relative path matching S3 key (e.g. music/Artist/Album/track.mp3)."""
+    if not path:
+        return None
+    p = _decode_val(path) if isinstance(path, bytes) else path
+    if not p:
+        return None
+    # If absolute, make relative to CWD so app can match to S3 key
+    try:
+        rel = os.path.relpath(p, start=os.getcwd())
+    except ValueError:
+        rel = p
+    # Normalize: no leading slash, forward slashes
+    rel = rel.replace('\\', '/').lstrip('/')
+    return rel if not rel.startswith('..') else None
+
+
 @app.route('/library', methods=['GET'])
 def get_library():
-    """Get all tracks from the library directly from SQLite"""
+    """Get all tracks from the library. App-friendly shape: id, title, artist, album, path, stream_url.
+    path is relative (S3-key style) so the app can match S3 keys to backend track id."""
     try:
         conn = sqlite3.connect(LIBRARY_DB)
-        conn.row_factory = sqlite3.Row  # Access columns by name
+        conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
-        
-        cursor.execute("SELECT * FROM items ORDER BY track ASC")
-        rows = cursor.fetchall()
-        
+        try:
+            cursor.execute(
+                "SELECT id, title, artist, album, album_id, path FROM items ORDER BY track ASC, id ASC"
+            )
+            rows = cursor.fetchall()
+        except sqlite3.OperationalError as e:
+            if 'no such table' in str(e).lower():
+                conn.close()
+                return jsonify({'items': []}), 200
+            raise
+        conn.close()
+
         items = []
         for row in rows:
-            item = dict(row)
-            
-            # Handle bytes (like path) for JSON serialization
-            for key, value in item.items():
-                if isinstance(value, bytes):
-                    item[key] = value.decode('utf-8', errors='ignore')
-            
-            # Add art URL structure (pointing to beets API for now, or we can serve it too)
-            # Beets API is at port 8337 usually
-            item['album_id'] = item.get('album_id')
-            items.append(item)
-            
-        conn.close()
+            item_id = row['id']
+            raw_path = row['path']
+            path_key = _path_to_s3_key(raw_path)
+            items.append({
+                'id': item_id,
+                'title': _decode_val(row['title']) or 'Unknown',
+                'artist': _decode_val(row['artist']) or 'Unknown Artist',
+                'album': _decode_val(row['album']) or '',
+                'album_id': row['album_id'],
+                'path': path_key,
+                'stream_url': f'/stream/{item_id}',
+            })
         return jsonify({'items': items}), 200
     except Exception as e:
         return jsonify({'error': f'Failed to fetch library: {str(e)}'}), 500
@@ -927,20 +960,33 @@ def delete_comment(comment_id):
     conn.close()
     return jsonify({'message': 'Comment deleted'}), 200
 
+def _ensure_users_db():
+    """Create users.db and tables if missing (e.g. first run or old image)."""
+    from init_db import init_db
+    init_db()
+
+
 @app.route('/auth/register', methods=['POST'])
 def register():
-    data = request.get_json()
+    data = request.get_json(force=True, silent=True) or {}
     username = data.get('username')
     password = data.get('password')
     invite_code = data.get('invite_code')
-    
-
 
     if not username or not password or not invite_code:
         return jsonify({'error': 'Missing required fields'}), 400
 
     conn = sqlite3.connect('music/users.db')
     cursor = conn.cursor()
+
+    # If users table is missing (old image or first deploy), create it now
+    try:
+        cursor.execute('SELECT 1 FROM users LIMIT 1')
+    except sqlite3.OperationalError:
+        conn.close()
+        _ensure_users_db()
+        conn = sqlite3.connect('music/users.db')
+        cursor = conn.cursor()
 
     # Check invite code (for now, simplistic check or check against used codes if we table them)
     # Since we don't have an invites table yet, we'll just check if the code exists on a user who has it? 
@@ -1004,6 +1050,7 @@ def register():
         }), 201
         
     except Exception as e:
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
     finally:
         conn.close()
@@ -2285,5 +2332,7 @@ def get_dashboard_metrics():
     })
 
 if __name__ == '__main__':
-    # Initialize DB on start if needed (optional since we have init_db script)
+    # Ensure users.db and tables exist (required for /auth/register, /auth/login, etc.)
+    from init_db import init_db
+    init_db()
     app.run(host='0.0.0.0', port=8338)
