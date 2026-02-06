@@ -14,6 +14,11 @@
     <style name="NotificationStyle" parent="android:TextAppearance.Material.Notification">
         <item name="android:textColor">@color/graffiti_chalk</item>
     </style>
+
+    <!-- SearchView theme for library search -->
+    <style name="SearchView" parent="Widget.AppCompat.Light.SearchView">
+        <item name="android:textColor">@color/graffiti_chalk</item>
+    </style>
     
     <!-- Splash Screen Theme - shows immediately on cold start with animation -->
     <style name="Theme.BombestBeats.Splash" parent="Theme.SplashScreen">

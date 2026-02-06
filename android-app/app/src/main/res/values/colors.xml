@@ -20,4 +20,5 @@
     <color name="colorPrimary">#E90060</color>
     <color name="colorPrimaryDark">#0B0E23</color>
     <color name="colorAccent">#FF6B35</color>
+    <color name="colorSurface">#121730</color>
 </resources>
