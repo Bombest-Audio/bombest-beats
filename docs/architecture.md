@@ -147,6 +147,24 @@ REACT_APP_API_BASE=http://35.86.235.85:8338 npm start
 
 Then open [http://localhost:3000](http://localhost:3000) and log in (admin for Upload). To use a different backend, set `REACT_APP_API_BASE` to that URL (no trailing slash). No code changes are required.
 
+### On EC2: make a user admin
+
+Admin and DB changes are done on the EC2 instance, not locally. To give a user admin role (so they can upload and use admin-only features):
+
+1. SSH (or SSM) into the instance.
+2. From the repo root (or copy the script onto the instance), run:
+   ```bash
+   chmod +x scripts/ec2-make-admin.sh
+   ./scripts/ec2-make-admin.sh thomas
+   ```
+   Use another username as the argument if needed. The script runs `docker exec` against the `bombest-beats` container and updates `users.db` at `/app/music/users.db`.
+3. That user logs out and logs back in so their token gets the new role.
+
+To run the update without the script:
+   ```bash
+   sudo docker exec bombest-beats python3 -c "import sqlite3; c=sqlite3.connect('/app/music/users.db'); r=c.cursor(); r.execute(\"UPDATE users SET role = 'admin' WHERE username = ?\", ('thomas',)); c.commit(); c.close(); print(r.rowcount)"
+   ```
+
 ### 7. Future deploys
 
 - From your machine: `./deploy-aws.sh` (build + push new image).
