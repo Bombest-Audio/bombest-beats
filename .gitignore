@@ -40,3 +40,6 @@ beets-backend/waveforms/
 
 # Local credentials and keys
 .local/
+
+# Plan files (Cursor/agent)
+*.plan.md
