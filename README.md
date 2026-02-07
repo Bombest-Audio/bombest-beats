@@ -42,8 +42,10 @@ A cross-platform music streaming application with Android, iOS, and web clients 
 | Failover URL | `https://beats-aws.bom.best/api/` |
 | EC2 Instance | `i-03ac11ce0a84a2625` (44.249.110.172) |
 | S3 Bucket | `s3://bombest-beats-music` |
-| Docker Image | `thomasphillips3/bombest-beats:latest` |
+| Docker Image | `tomdabomb2u/bombest-beats:latest` |
 | Tunnel ID | `4a638fa7-cbe1-453c-b360-95c56d17eaca` |
+
+Full EC2, S3, and admin setup: see [docs/architecture.md](docs/architecture.md).
 
 ## Quick Start
 
@@ -58,11 +60,8 @@ cloudflared tunnel --config cloudflared-config.yml run bombest-beats
 ```
 
 ### Deploy to AWS
-```bash
-./deploy-aws.sh  # Build & push Docker image
-./deploy-ec2.sh  # Launch EC2 instance
-./setup-s3.sh    # Sync music to S3
-```
+- **Primary:** `./deploy-to-ec2.sh [REGION]` — build image, push to Docker Hub, update container on EC2 (requires existing EC2 instance with tag `Name=bombest-beats`).
+- **First-time:** run `./deploy-aws.sh`, then create EC2 via `./setup-ec2-aws-cli.sh`; see [docs/architecture.md](docs/architecture.md).
 
 ### Android
 ```bash
@@ -83,10 +82,19 @@ bombest-beats/
 ├── ios-app/              # iOS (SwiftUI)
 ├── beets-backend/        # Python/Flask backend + Dockerfile
 ├── music-frontend/       # React web app
+├── scripts/              # e.g. ec2-make-admin.sh
+├── deploy-to-ec2.sh      # One-command deploy (build, push, update EC2)
 ├── deploy-aws.sh         # Docker Hub push script
-├── deploy-ec2.sh         # AWS EC2 deployment
+├── deploy-container-to-ec2.sh
+├── setup-ec2-aws-cli.sh
 ├── setup-s3.sh           # S3 bucket & music sync
+├── docs/architecture.md
 └── cloudflared-config.yml
+```
+
+## Documentation
+
+Detailed deployment, S3 sync, EC2 admin, and frontend-with-EC2: [docs/architecture.md](docs/architecture.md).
 
 ## Client Connection (Static Endpoints)
 
@@ -97,7 +105,6 @@ bombest-beats/
 - Backend health (direct): `http://localhost:5002/health`
 
 These endpoints are stable; mobile and web clients should target the API bases above and can safely hardcode them. If credentials rotate, only `/home/thomas/.cloudflared/4a638fa7-cbe1-453c-b360-95c56d17eaca.json` needs regeneration—URLs stay the same.
-```
 
 ## Theme System
 
