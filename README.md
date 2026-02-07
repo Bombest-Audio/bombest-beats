@@ -102,7 +102,7 @@ Detailed deployment, S3 sync, EC2 admin, and frontend-with-EC2: [docs/architectu
 - DNS hostname served via Cloudflare: `bom.best`
 - Backend health (direct): `http://localhost:5002/health`
 
-These endpoints are stable; mobile and web clients should target the API bases above and can safely hardcode them. Tunnel IDs, credential files, and other infrastructure-specific details are managed via deployment configuration and internal documentation and may change without affecting these public URLs.
+These endpoints are stable; mobile and web clients can use them as defaults. Clients may optionally override the API base via configuration (e.g. `REACT_APP_API_BASE`) for local or dev testing. Tunnel IDs, credential files, and other infrastructure-specific details are managed via deployment configuration and internal documentation and may change without affecting these public URLs.
 
 ## Theme System
 
@@ -118,6 +118,16 @@ These endpoints are stable; mobile and web clients should target the API bases a
 | EC2 t3.micro | ~$8/mo (or free tier) |
 | S3 (1.3GB) | ~$0.03/mo |
 | **Total** | **~$8/mo** |
+
+## Pre-merge checks
+
+Comment on a PR to run tests (only members/owners/collaborators can trigger). After the first run, add the "Pre-merge tests" status check to branch protection for `main` in **Settings → Branches**.
+
+- **🚀** — Run all tests (Android, backend, frontend) and merge into **main** on success (PR must target `main`).
+- **`:run-tests:`** — Run all tests without merging (any PR).
+- **`:run-test: android`** — Run only the Android build.
+- **`:run-test: frontend`** — Run only the frontend build.
+- **`:run-test: backend`** — Run only the backend sanity check.
 
 ## Development Notes
 

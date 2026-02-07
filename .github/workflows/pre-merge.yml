@@ -1,0 +1,123 @@
+# Pre-merge tests: comment 🚀 to run all and merge; :run-tests: to run all; :run-test: android|frontend|backend to run one suite.
+name: Pre-merge tests
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  test:
+    name: Pre-merge tests
+    if: |
+      github.event.issue.pull_request != '' &&
+      (contains(github.event.comment.body, '🚀') || contains(github.event.comment.body, ':run-tests:') || contains(github.event.comment.body, ':run-test:')) &&
+      (github.event.comment.author_association == 'MEMBER' || github.event.comment.author_association == 'OWNER' || github.event.comment.author_association == 'COLLABORATOR')
+    runs-on: ubuntu-latest
+    outputs:
+      run_android: ${{ steps.parse.outputs.run_android }}
+      run_backend: ${{ steps.parse.outputs.run_backend }}
+      run_frontend: ${{ steps.parse.outputs.run_frontend }}
+      merge_requested: ${{ steps.parse.outputs.merge_requested }}
+    steps:
+      - name: Parse comment
+        id: parse
+        env:
+          BODY: ${{ github.event.comment.body }}
+        run: |
+          BODY=$(echo "$BODY" | tr '\n' ' ' | tr -s ' ' | tr '[:upper:]' '[:lower:]')
+          RUN_ANDROID=false
+          RUN_BACKEND=false
+          RUN_FRONTEND=false
+          MERGE_REQUESTED=false
+
+          if [[ "$BODY" == *"🚀"* ]]; then
+            RUN_ANDROID=true
+            RUN_BACKEND=true
+            RUN_FRONTEND=true
+            MERGE_REQUESTED=true
+          elif [[ "$BODY" == *":run-tests:"* ]]; then
+            RUN_ANDROID=true
+            RUN_BACKEND=true
+            RUN_FRONTEND=true
+          elif [[ "$BODY" == *":run-test:"* ]]; then
+            TYPE=$(echo "$BODY" | sed -n 's/.*:run-test:[[:space:]]*\([a-zA-Z]*\).*/\1/p' | tr '[:upper:]' '[:lower:]')
+            case "$TYPE" in
+              android)  RUN_ANDROID=true ;;
+              frontend) RUN_FRONTEND=true ;;
+              backend)  RUN_BACKEND=true ;;
+              *)        RUN_ANDROID=true; RUN_BACKEND=true; RUN_FRONTEND=true ;;
+            esac
+          fi
+
+          echo "run_android=$RUN_ANDROID" >> "$GITHUB_OUTPUT"
+          echo "run_backend=$RUN_BACKEND" >> "$GITHUB_OUTPUT"
+          echo "run_frontend=$RUN_FRONTEND" >> "$GITHUB_OUTPUT"
+          echo "merge_requested=$MERGE_REQUESTED" >> "$GITHUB_OUTPUT"
+
+      - name: Check PR targets main
+        if: steps.parse.outputs.merge_requested == 'true'
+        run: |
+          BASE=$(gh pr view ${{ github.event.issue.number }} --json baseRefName -q .baseRefName)
+          if [ "$BASE" != "main" ]; then
+            echo "PR targets $BASE; pre-merge only runs for PRs targeting main"
+            exit 1
+          fi
+
+      - name: Checkout PR head
+        uses: actions/checkout@v4
+        with:
+          ref: refs/pull/${{ github.event.issue.number }}/head
+
+      - name: Set up JDK 17
+        if: steps.parse.outputs.run_android == 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Android build
+        if: steps.parse.outputs.run_android == 'true'
+        run: cd android-app && ./gradlew assembleDebug --no-daemon
+
+      - name: Set up Python
+        if: steps.parse.outputs.run_backend == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Backend sanity check
+        if: steps.parse.outputs.run_backend == 'true'
+        run: |
+          cd beets-backend
+          pip install -r requirements.txt -q
+          python -c "import upload_server; print('OK')"
+
+      - name: Set up Node.js
+        if: steps.parse.outputs.run_frontend == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: music-frontend/package-lock.json
+
+      - name: Frontend build
+        if: steps.parse.outputs.run_frontend == 'true'
+        run: |
+          cd music-frontend
+          npm ci
+          NODE_OPTIONS=--openssl-legacy-provider npm run build
+
+  merge:
+    name: Merge PR
+    needs: test
+    if: success() && needs.test.outputs.merge_requested == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Merge PR into main
+        run: gh pr merge ${{ github.event.issue.number }} --merge
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

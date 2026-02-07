@@ -40,7 +40,7 @@ android {
         viewBinding = true
     }
     composeOptions {
-        kotlinCompilerExtensionVersion = "1.5.8"
+        kotlinCompilerExtensionVersion = "1.5.10"
     }
     packaging {
         resources {
@@ -56,8 +56,8 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
     implementation("androidx.activity:activity-compose:1.8.2")
 
-    // Compose
-    implementation(platform("androidx.compose:compose-bom:2023.08.00"))
+    // Compose (BOM and compiler aligned for Kotlin 1.9)
+    implementation(platform("androidx.compose:compose-bom:2024.02.00"))
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
@@ -77,16 +77,17 @@ dependencies {
     implementation("com.squareup.retrofit2:retrofit:2.9.0")
     implementation("com.squareup.retrofit2:converter-moshi:2.9.0")
     implementation("com.squareup.moshi:moshi-kotlin:1.15.0")
-    implementation("org.jetbrains.kotlin:kotlin-reflect:1.9.22")
+    implementation(kotlin("reflect"))
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
 
-    // Media3 (ExoPlayer)
-    implementation("androidx.media3:media3-exoplayer:1.2.0")
-    implementation("androidx.media3:media3-ui:1.2.0")
-    implementation("androidx.media3:media3-common:1.2.0")
-    implementation("androidx.media3:media3-session:1.2.0")
-    implementation("androidx.media3:media3-datasource-okhttp:1.2.0")
+    // Media3 (ExoPlayer) — BOM keeps versions aligned
+    implementation(platform("androidx.media3:media3-bom:1.2.0"))
+    implementation("androidx.media3:media3-exoplayer")
+    implementation("androidx.media3:media3-ui")
+    implementation("androidx.media3:media3-common")
+    implementation("androidx.media3:media3-session")
+    implementation("androidx.media3:media3-datasource-okhttp")
 
     // UI / compatibility
     implementation("androidx.appcompat:appcompat:1.6.1")
@@ -104,7 +105,7 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.5.1")
-    androidTestImplementation(platform("androidx.compose:compose-bom:2023.08.00"))
+    androidTestImplementation(platform("androidx.compose:compose-bom:2024.02.00"))
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
