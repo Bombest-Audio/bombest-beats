@@ -109,7 +109,7 @@ fun HapticsSettingsCard(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        HapticPatternLibrary.Intensity.values().forEach { level ->
+                        HapticPatternLibrary.Intensity.entries.forEach { level ->
                             FilterChip(
                                 selected = intensity == level,
                                 onClick = {
@@ -119,7 +119,7 @@ fun HapticsSettingsCard(
                                 },
                                 label = {
                                     Text(
-                                        text = level.name.lowercase().replaceFirstChar { c -> c.uppercase() },
+                                        text = level.name.lowercase().replaceFirstChar { it.uppercase() },
                                         fontSize = 12.sp
                                     )
                                 },

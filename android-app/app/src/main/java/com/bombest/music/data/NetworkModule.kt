@@ -12,14 +12,14 @@ import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Network configuration with automatic failover support.
- * Primary: EC2 instance (direct); then beats.bom.best (Home via Tunnel); then beats-aws.bom.best (AWS via Cloudflare).
+ * Primary: beats.bom.best (Home server via Tunnel)
+ * Failover: beats-aws.bom.best (AWS EC2)
  */
 object NetworkModule {
-    // Server URLs with failover support (tried in order)
+    // Server URLs with failover support
     private val BASE_URLS = listOf(
-        "http://35.86.235.85:8338/",   // EC2 backend (current instance)
-        "https://beats.bom.best/",      // Home server via Tunnel
-        "https://beats-aws.bom.best/"   // AWS EC2 via Cloudflare (when configured)
+        "https://beats.bom.best/",      // Primary (Home via Tunnel)
+        "https://beats-aws.bom.best/"   // Failover (AWS EC2)
     )
     
     private val currentUrlIndex = AtomicInteger(0)

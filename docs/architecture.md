@@ -4,7 +4,7 @@ This document is the source of truth for deployment, S3, EC2, and making users a
 
 ## High-Level Flow
 - Source of truth: Beets `music/library.db` and files under `beets-backend/music/` on the server.
-- Sync: `sync-to-s3.sh` mirrors the music directory to `s3://bombest-beats-music/music/`. Run it after changing metadata (e.g. from the app’s Edit metadata) so S3 stays in sync.
+- Sync: `sync-to-s3.sh` mirrors the music directory to `s3://bombest-beats-music/music/`. Run it after changing metadata (e.g. from the app's Edit metadata) so S3 stays in sync.
 - Storage: S3 bucket `bombest-beats-music` (private; Block Public Access; SSE-S3; Versioning on).
 - Client: Android app lists tracks from backend GET `/library` and streams via backend `/stream/<id>` (redirect to S3 or local file).
 
