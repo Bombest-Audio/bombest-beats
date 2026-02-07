@@ -1,5 +1,7 @@
 # Architecture Overview
 
+This document is the source of truth for deployment, S3, EC2, and making users admin.
+
 ## High-Level Flow
 - Source of truth: Beets `music/library.db` and files under `beets-backend/music/` on the server.
 - Sync: `sync-to-s3.sh` mirrors the music directory to `s3://bombest-beats-music/music/`. Run it after changing metadata (e.g. from the app’s Edit metadata) so S3 stays in sync.
