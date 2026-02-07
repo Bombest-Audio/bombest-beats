@@ -1,0 +1,22 @@
+<vector android:height="24dp" android:width="24dp"
+    android:viewportHeight="24" android:viewportWidth="24"
+    xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Bomb body (circle) - emoji style -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M12,18C16.42,18 20,14.42 20,10C20,5.58 16.42,2 12,2C7.58,2 4,5.58 4,10C4,14.42 7.58,18 12,18Z"/>
+    <!-- Fuse (thick line going up and left) -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M12,2L11,1L10,0L9,0.5L8,1L7,0.5L7,1.5L8,2L9,1.5L10,2L11,1.5L12,2Z"/>
+    <!-- Spark at end of fuse (small circles using paths) -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M7,0.5m-0.8,0a0.8,0.8 0,1 1,1.6 0a0.8,0.8 0,1 1,-1.6 0"/>
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M6.5,1m-0.5,0a0.5,0.5 0,1 1,1 0a0.5,0.5 0,1 1,-1 0"/>
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M7.5,1m-0.5,0a0.5,0.5 0,1 1,1 0a0.5,0.5 0,1 1,-1 0"/>
+</vector>

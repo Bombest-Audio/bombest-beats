@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Base: deep navy wall -->
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="#0B0E23"/>
+        </shape>
+    </item>
+
+    <!-- Brand gradient glow (diagonal) -->
+    <item>
+        <shape android:shape="rectangle">
+            <gradient
+                android:type="linear"
+                android:angle="135"
+                android:startColor="#40FF6B35"
+                android:centerColor="#30FF4A7C"
+                android:endColor="#308B5CF6"/>
+        </shape>
+    </item>
+
+    <!-- Subtle grain overlay -->
+    <item>
+        <bitmap
+            android:src="@drawable/spray_grain"
+            android:tileMode="repeat"
+            android:alpha="0.18"
+            android:gravity="fill" />
+    </item>
+
+    <!-- Vignette to pull focus to the center -->
+    <item>
+        <shape android:shape="rectangle">
+            <gradient
+                android:type="radial"
+                android:gradientRadius="600dp"
+                android:centerX="50%"
+                android:centerY="45%"
+                android:startColor="#00000000"
+                android:endColor="#B8000000"/>
+        </shape>
+    </item>
+
+    <!-- The bomb mark -->
+    <item
+        android:gravity="center"
+        android:drawable="@drawable/graffitti_bomb"/>
+</layer-list>

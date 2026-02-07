@@ -1,0 +1,160 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="16dp"
+    android:background="#E6000000">
+
+    <!-- Spotify-style: Album artwork as background with blur effect -->
+    <!-- Title and Artist at top -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:gravity="start">
+
+        <TextView
+            android:id="@+id/notification_big_title"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="#FFFFFF"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:text="Track Title" />
+
+        <TextView
+            android:id="@+id/notification_big_artist"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:textColor="#B3FFFFFF"
+            android:textSize="14sp"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:text="Artist Name" />
+    </LinearLayout>
+    
+    <!-- Album Artwork (Background style) -->
+    <ImageView
+        android:id="@+id/notification_big_album_art"
+        android:layout_width="match_parent"
+        android:layout_height="200dp"
+        android:layout_marginTop="12dp"
+        android:scaleType="centerCrop"
+        android:contentDescription="Album artwork" />
+
+    <!-- Progress Section with Squiggly Progress Bar -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:orientation="vertical">
+
+        <!-- Squiggly Progress Bar (Spotify-style) -->
+        <ProgressBar
+            android:id="@+id/notification_big_progress"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="4dp"
+            android:progressDrawable="@drawable/graffiti_squiggly_progress"
+            android:max="100"
+            android:progress="0" />
+
+        <!-- Time Display -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/notification_big_time_elapsed"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:textColor="#B3FFFFFF"
+                android:textSize="12sp"
+                android:text="0:00" />
+
+            <TextView
+                android:id="@+id/notification_big_time_total"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="#B3FFFFFF"
+                android:textSize="12sp"
+                android:text="0:00" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- Control Buttons - Spotify Style: Previous, Play/Pause, Next, Shuffle, Add -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <!-- Previous Button -->
+        <ImageButton
+            android:id="@+id/notification_big_prev"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@drawable/ic_previous_graffiti"
+            android:contentDescription="Previous"
+            android:padding="8dp"
+            android:tint="#FFFFFF" />
+
+        <!-- Large Play/Pause Button (Spotify style) -->
+        <ImageButton
+            android:id="@+id/notification_big_play_pause"
+            android:layout_width="56dp"
+            android:layout_height="56dp"
+            android:layout_marginStart="8dp"
+            android:layout_marginEnd="8dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@drawable/ic_play_graffiti"
+            android:contentDescription="Play/Pause"
+            android:padding="12dp"
+            android:tint="#FFFFFF" />
+
+        <!-- Next Button -->
+        <ImageButton
+            android:id="@+id/notification_big_next"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@drawable/ic_next_graffiti"
+            android:contentDescription="Next"
+            android:padding="8dp"
+            android:tint="#FFFFFF" />
+
+        <!-- Shuffle Button -->
+        <ImageButton
+            android:id="@+id/notification_big_shuffle"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_marginStart="16dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@drawable/ic_round_shuffle_24"
+            android:contentDescription="Shuffle"
+            android:padding="8dp"
+            android:tint="#FFFFFF" />
+
+        <!-- Add Button -->
+        <ImageButton
+            android:id="@+id/notification_big_add"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_marginStart="8dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@drawable/ic_baseline_add_circle_outline_24"
+            android:contentDescription="Add"
+            android:padding="8dp"
+            android:tint="#FFFFFF" />
+    </LinearLayout>
+
+</LinearLayout>

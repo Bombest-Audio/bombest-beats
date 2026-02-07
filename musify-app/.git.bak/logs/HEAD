@@ -1,0 +1,6 @@
+0000000000000000000000000000000000000000 709f591a246aca77f437720748bffd98501bc9b2 Thomas Phillips <thomasphillips3@gmail.com> 1768156576 -0800	clone: from https://github.com/technophilist/Musify.git
+709f591a246aca77f437720748bffd98501bc9b2 1a318f3d6206a1803663df44ebf20b9dc616894f Thomas Phillips <thomasphillips3@gmail.com> 1768174011 -0800	commit: Rebrand from Musify to Bombest Beats
+1a318f3d6206a1803663df44ebf20b9dc616894f c328d55bcbb4cbf03c48fdf2d45e480c842ef746 Thomas Phillips <thomasphillips3@gmail.com> 1768182870 -0800	commit: Fix time formatting and keep full screen player visible during track switching
+c328d55bcbb4cbf03c48fdf2d45e480c842ef746 2e710f09ec28ecac3c8a21141c04d8964cd63b70 Thomas Phillips <thomasphillips3@gmail.com> 1768807957 -0800	commit: Implement enhanced playback controls, visualizer, and Spotify-style features
+2e710f09ec28ecac3c8a21141c04d8964cd63b70 838b30813155653cff6d4405d05100c35e8ae045 Thomas Phillips <thomasphillips3@gmail.com> 1768956767 -0800	commit: Add download functionality, fix notification sound, combine timer display, and improve UI layout
+838b30813155653cff6d4405d05100c35e8ae045 c8903489ade2163a320c719a0c58bd48d16c24b3 Thomas Phillips <thomasphillips3@gmail.com> 1768959226 -0800	commit: Fix progress reset between tracks, update notification icon to bomb, and refine spray paint effect

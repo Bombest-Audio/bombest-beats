@@ -1,0 +1,162 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+    id 'kotlin-kapt'
+    id 'dagger.hilt.android.plugin'
+}
+
+android {
+    namespace "com.bombest.musify"
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.bombest.musify"
+        minSdk 23
+        targetSdk 33
+        versionCode 1
+        versionName "1.0"
+
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        vectorDrawables {
+            useSupportLibrary true
+        }
+        // S3 configuration (used only if backend is not the catalog source)
+        buildConfigField "String", "S3_BUCKET_NAME", "\"bombest-beats-music\""
+        buildConfigField "String", "S3_REGION", "\"us-west-2\""
+        buildConfigField "String", "S3_PREFIX", "\"music/\""
+        // Backend library API (single source of truth for catalog when set)
+        buildConfigField "String", "BACKEND_BASE_URL", "\"https://beats.bom.best\""
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+    compileOptions {
+        // To enable the use of java.time api's with minSdk < 26
+        coreLibraryDesugaringEnabled true
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    kotlinOptions {
+        jvmTarget = '17'
+        freeCompilerArgs += [
+            '-opt-in=androidx.compose.animation.ExperimentalAnimationApi',
+            '-opt-in=androidx.compose.material.ExperimentalMaterialApi',
+            '-opt-in=androidx.media3.common.util.UnstableApi',
+            '-Xsuppress-version-warnings'
+        ]
+    }
+    buildFeatures {
+        compose true
+        buildConfig true
+    }
+    composeOptions {
+        kotlinCompilerExtensionVersion '1.4.3'
+    }
+    packagingOptions {
+        resources {
+            excludes += '/META-INF/{AL2.0,LGPL2.1}'
+        }
+    }
+    testOptions {
+        unitTests {
+            includeAndroidResources = true
+        }
+    }
+}
+
+dependencies {
+    // core
+    implementation 'androidx.core:core-ktx:1.12.0'
+    implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.7.0'
+
+    // java.time support for api's < Android O
+    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:1.1.5'
+
+    // compose
+    def composeBom = platform('androidx.compose:compose-bom:2022.10.00')
+    implementation composeBom
+    androidTestImplementation composeBom
+
+    implementation "androidx.compose.ui:ui"
+    implementation "androidx.compose.material:material"
+    implementation "androidx.compose.ui:ui-tooling-preview"
+    debugImplementation "androidx.compose.ui:ui-tooling"
+    debugImplementation "androidx.compose.ui:ui-test-manifest"
+    implementation 'androidx.activity:activity-compose:1.8.2'
+    implementation "androidx.navigation:navigation-compose:2.7.6"
+
+    //accompanist
+    implementation "com.google.accompanist:accompanist-placeholder-material:0.13.0"
+
+    // image handling
+    implementation "io.coil-kt:coil-compose:2.4.0"
+    // lottie compose
+    implementation "com.airbnb.android:lottie-compose:6.1.0"
+
+    // testing
+    testImplementation 'junit:junit:4.13.2'
+    androidTestImplementation 'androidx.test.ext:junit:1.1.5'
+    androidTestImplementation 'androidx.test.espresso:espresso-core:3.5.1'
+    //noinspection GradleDependency
+    androidTestImplementation "androidx.compose.ui:ui-test-junit4:$compose_version"
+    testImplementation "org.robolectric:robolectric:4.8.1"
+    testImplementation "org.jetbrains.kotlinx:kotlinx-coroutines-test:1.6.1"
+    testImplementation 'org.mockito:mockito-core:3.9.0'
+    testImplementation "org.mockito.kotlin:mockito-kotlin:3.2.0"
+
+    // retrofit (keeping for potential future use, but not for Spotify API)
+    implementation 'com.squareup.retrofit2:retrofit:2.9.0'
+    implementation 'com.squareup.retrofit2:converter-jackson:2.9.0'
+    // Jackson support for kotlin types
+    implementation 'com.fasterxml.jackson.module:jackson-module-kotlin:2.13.2'
+    
+    // OkHttp for S3 HTTP requests
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+    
+    // WindowManager for foldable device support
+    implementation 'androidx.window:window:1.2.0'
+    implementation 'androidx.window:window-java:1.2.0'
+    
+    // XML parsing for S3 ListObjects response
+    implementation 'org.simpleframework:simple-xml:2.7.1'
+    
+    // Room database for local playlists
+    def room_version = "2.6.1"
+    implementation "androidx.room:room-runtime:$room_version"
+    implementation "androidx.room:room-ktx:$room_version"
+    kapt "androidx.room:room-compiler:$room_version"
+
+    // hilt
+    implementation "com.google.dagger:hilt-android:2.48"
+    implementation 'androidx.hilt:hilt-navigation-compose:1.1.0'
+    kapt "com.google.dagger:hilt-compiler:2.44"
+
+    // Media3
+    implementation 'androidx.media3:media3-exoplayer:1.2.0'
+    implementation 'androidx.media3:media3-ui:1.2.0'
+    implementation 'androidx.media3:media3-session:1.2.0'
+    implementation 'androidx.media3:media3-common:1.2.0'
+    
+    // Media library for MediaStyle notifications
+    implementation 'androidx.media:media:1.7.0'
+    
+    // Audio visualizer
+    implementation 'com.github.GautamChibde:android-audio-visualizer:2.2.0'
+
+    // paging
+    implementation "androidx.paging:paging-runtime:3.1.1"
+    implementation "androidx.paging:paging-compose:1.0.0-alpha15"
+
+    // color extraction
+    implementation 'androidx.palette:palette-ktx:1.0.0'
+
+    // mdc components for view
+    // This dependency is not needed once the min lines param
+    // for Text composable becomes available in compose
+    // This parameter is needed in the home screen
+    implementation 'com.google.android.material:material:1.11.0'
+}

@@ -1,0 +1,7 @@
+Fix progress reset between tracks, update notification icon to bomb, and refine spray paint effect
+
+- Add key() modifier to GraffitiCircularProgress to reset state when track changes
+- Add LaunchedEffect to reset drag state when progress resets to 0
+- Change notification small icon from launcher foreground to bomb emoji icon
+- Make spray paint effect more transparent (alpha 0.25-0.4 instead of 0.75-1.0)
+- Reduce spray paint radius by 67% for tighter, more subtle effect
