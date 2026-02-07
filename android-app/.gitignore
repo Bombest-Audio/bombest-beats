@@ -25,3 +25,85 @@ hs_err_pid*
 # Java heap dump files
 *.hprof
 java_pid*.hprof
+
+# ------------------------------
+# Android / Gradle build outputs
+# ------------------------------
+
+# Gradle
+.gradle/
+build/
+**/build/
+
+# Local Gradle and Android configuration
+local.properties
+.gradletasknamecache
+
+# Android build outputs
+*.apk
+*.ap_
+*.aab
+*.abb
+
+# NDK / native builds
+.externalNativeBuild/
+.cxx/
+
+# Captured screenshots from Android Studio
+captures/
+
+# Signing and profiling artifacts
+*.keystore
+*.jks
+*.keystore.old
+*.jks.old
+
+# ------------------------------
+# IntelliJ IDEA / Android Studio
+# ------------------------------
+
+.idea/
+.idea/**/workspace.xml
+.idea/**/tasks.xml
+.idea/**/dictionaries
+.idea/**/libraries
+.idea/**/shelf
+.idea/**/gradle.xml
+.idea/**/assetWizardSettings.xml
+.idea/**/usage.statistics.xml
+.idea/**/dataSources/
+.idea/**/dataSources.ids
+.idea/**/dataSources.local.xml
+.idea/**/sqlDataSources.xml
+.idea/**/dynamic.xml
+.idea/**/uiDesigner.xml
+.idea/**/dbnavigator.xml
+
+# IntelliJ project files
+*.iml
+*.ipr
+*.iws
+out/
+
+# ------------------------------
+# OS / editor specific
+# ------------------------------
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+*~
+
+# Editors
+.vscode/
+*.swp
+*.swo

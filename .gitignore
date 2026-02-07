@@ -6,6 +6,7 @@ beets-backend/*.log
 .gradle/
 **/build/
 *.iml
+.idea/
 android-app/.idea/
 .idea/local.properties
 .idea/caches/

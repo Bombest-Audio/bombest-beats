@@ -40,12 +40,10 @@ A cross-platform music streaming application with Android, iOS, and web clients 
 |-----------|-------|
 | Primary URL | `https://bom.best/api/` |
 | Failover URL | `https://beats-aws.bom.best/api/` |
-| EC2 Instance | `i-03ac11ce0a84a2625` (44.249.110.172) |
 | S3 Bucket | `s3://bombest-beats-music` |
 | Docker Image | `tomdabomb2u/bombest-beats:latest` |
-| Tunnel ID | `4a638fa7-cbe1-453c-b360-95c56d17eaca` |
 
-Full EC2, S3, and admin setup: see [docs/architecture.md](docs/architecture.md).
+Full EC2, S3, tunnel, and admin setup: see [docs/architecture.md](docs/architecture.md).
 
 ## Quick Start
 
@@ -100,11 +98,11 @@ Detailed deployment, S3 sync, EC2 admin, and frontend-with-EC2: [docs/architectu
 
 - API base (primary): `https://bom.best/api/`
 - API base (failover): `https://beats-aws.bom.best/api/`
-- Cloudflare tunnel: `4a638fa7-cbe1-453c-b360-95c56d17eaca` -> `http://localhost:5002`
+- Cloudflare tunnel: configured via Cloudflare Zero Trust to route external traffic to the backend (see [docs/architecture.md](docs/architecture.md) for deployment details)
 - DNS hostname served via Cloudflare: `bom.best`
 - Backend health (direct): `http://localhost:5002/health`
 
-These endpoints are stable; mobile and web clients should target the API bases above and can safely hardcode them. If credentials rotate, only `/home/thomas/.cloudflared/4a638fa7-cbe1-453c-b360-95c56d17eaca.json` needs regeneration—URLs stay the same.
+These endpoints are stable; mobile and web clients should target the API bases above and can safely hardcode them. Tunnel IDs, credential files, and other infrastructure-specific details are managed via deployment configuration and internal documentation and may change without affecting these public URLs.
 
 ## Theme System
 

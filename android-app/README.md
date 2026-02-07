@@ -1,6 +1,6 @@
 # Bombest Beats (MusicPlayer Integration)
 
-This branch replaces the original Android client with the MusicPlayer codebase and wires it to the Bombest Beats backend.
+This Android app is based on the MusicPlayer codebase and is wired to the Bombest Beats backend. It replaces the original Bombest Beats Android client.
 
 ## Backend targets
 - Primary: `https://bom.best/api/`
