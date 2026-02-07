@@ -694,6 +694,8 @@ def get_library():
             })
         return jsonify({'items': items}), 200
     except Exception as e:
+        if 'no such table' in str(e).lower() or 'no such column' in str(e).lower():
+            return jsonify({'items': []}), 200
         return jsonify({'error': f'Failed to fetch library: {str(e)}'}), 500
 
 @app.route('/tracks/<int:track_id>/loops', methods=['GET'])
@@ -1126,12 +1128,38 @@ RP_ORIGIN_WEB = "https://beats.bom.best"
 # SHA256: 2C:A4:5B:A8:27:2C:C9:57:F9:AC:0D:DA:85:D5:F1:CF:D9:DF:F8:49:34:C8:58:52:4B:C4:34:5B:30:99:36:E8
 # Convert hex to bytes then base64url
 import base64
+from urllib.parse import urlparse
 _android_sha256_hex = "2CA45BA8272CC957F9AC0DDA85D5F1CFD9DFF84934C858524BC4345B309936E8"
 _android_sha256_bytes = bytes.fromhex(_android_sha256_hex)
 RP_ORIGIN_ANDROID = "android:apk-key-hash:" + base64.urlsafe_b64encode(_android_sha256_bytes).decode().rstrip('=')
 RP_ORIGINS = [RP_ORIGIN_WEB, RP_ORIGIN_ANDROID]
 
+def _get_rp_id_and_origin():
+    """Derive rp_id and origin from request so passkeys work from localhost or production."""
+    origin = request.origin or request.headers.get('Referer') or ''
+    if not origin or origin == 'null':
+        return RP_ID, RP_ORIGINS
+    try:
+        parsed = urlparse(origin)
+        host = (parsed.hostname or '').lower() or RP_ID
+        if host in ('localhost', '127.0.0.1'):
+            rp_id = 'localhost'
+            request_origin = origin.rstrip('/')
+            origins = [request_origin] + [o for o in RP_ORIGINS if o != request_origin]
+            return rp_id, origins
+        # Production or EC2 host
+        rp_id = host
+        request_origin = f"{parsed.scheme or 'https'}://{host}" + (f":{parsed.port}" if parsed.port and parsed.port not in (80, 443) else '')
+        if request_origin not in RP_ORIGINS:
+            origins = [request_origin] + list(RP_ORIGINS)
+        else:
+            origins = list(RP_ORIGINS)
+        return rp_id, origins
+    except Exception:
+        return RP_ID, RP_ORIGINS
+
 # Store challenges temporarily (in production, use Redis or similar)
+# Values: { key: {'challenge': bytes, 'rp_id': str, 'origins': list} }
 passkey_challenges = {}
 
 def init_passkey_table():
@@ -1180,8 +1208,9 @@ def passkey_register_options():
         for row in existing_creds
     ]
     
+    rp_id, origins = _get_rp_id_and_origin()
     options = generate_registration_options(
-        rp_id=RP_ID,
+        rp_id=rp_id,
         rp_name=RP_NAME,
         user_id=str(user['id']).encode(),
         user_name=user['username'],
@@ -1193,8 +1222,8 @@ def passkey_register_options():
         ),
     )
     
-    # Store challenge for verification
-    passkey_challenges[str(user['id'])] = options.challenge
+    # Store challenge and rp context for verification
+    passkey_challenges[str(user['id'])] = {'challenge': options.challenge, 'rp_id': rp_id, 'origins': origins}
     
     return options_to_json(options)
 
@@ -1205,16 +1234,19 @@ def passkey_register_verify():
     current_user_id = get_jwt_identity()
     data = request.get_json()
     
-    challenge = passkey_challenges.get(current_user_id)
-    if not challenge:
+    stored = passkey_challenges.get(current_user_id)
+    if not stored:
         return jsonify({'error': 'No pending registration'}), 400
+    challenge = stored.get('challenge') if isinstance(stored, dict) else stored
+    rp_id = stored.get('rp_id', RP_ID) if isinstance(stored, dict) else RP_ID
+    origins = stored.get('origins', RP_ORIGINS) if isinstance(stored, dict) else RP_ORIGINS
     
     try:
         verification = verify_registration_response(
             credential=data,
             expected_challenge=challenge,
-            expected_rp_id=RP_ID,
-            expected_origin=RP_ORIGINS,
+            expected_rp_id=rp_id,
+            expected_origin=origins,
         )
         
         # Store the credential
@@ -1237,6 +1269,8 @@ def passkey_register_verify():
         
         return jsonify({'success': True, 'message': 'Passkey registered successfully'})
     except Exception as e:
+        if current_user_id in passkey_challenges:
+            del passkey_challenges[current_user_id]
         return jsonify({'error': str(e)}), 400
 
 @app.route('/auth/passkey/login/options', methods=['POST'])
@@ -1272,16 +1306,17 @@ def passkey_login_options():
         for row in creds
     ]
     
+    rp_id, origins = _get_rp_id_and_origin()
     options = generate_authentication_options(
-        rp_id=RP_ID,
+        rp_id=rp_id,
         allow_credentials=allow_credentials if username else None,  # None = discoverable
         user_verification=UserVerificationRequirement.PREFERRED,
     )
     
-    # Store challenge (keyed by a random ID for login)
+    # Store challenge and rp context (keyed by a random ID for login)
     import secrets
     login_id = secrets.token_urlsafe(16)
-    passkey_challenges[login_id] = options.challenge
+    passkey_challenges[login_id] = {'challenge': options.challenge, 'rp_id': rp_id, 'origins': origins}
     
     response = json.loads(options_to_json(options))
     response['loginId'] = login_id
@@ -1293,9 +1328,12 @@ def passkey_login_verify():
     data = request.get_json()
     login_id = data.get('loginId')
     
-    challenge = passkey_challenges.get(login_id)
-    if not challenge:
+    stored = passkey_challenges.get(login_id)
+    if not stored:
         return jsonify({'error': 'No pending login'}), 400
+    challenge = stored.get('challenge') if isinstance(stored, dict) else stored
+    rp_id = stored.get('rp_id', RP_ID) if isinstance(stored, dict) else RP_ID
+    origins = stored.get('origins', RP_ORIGINS) if isinstance(stored, dict) else RP_ORIGINS
     
     # Find the credential
     credential_id = data.get('id')
@@ -1321,8 +1359,8 @@ def passkey_login_verify():
         verification = verify_authentication_response(
             credential=data,
             expected_challenge=challenge,
-            expected_rp_id=RP_ID,
-            expected_origin=RP_ORIGINS,
+            expected_rp_id=rp_id,
+            expected_origin=origins,
             credential_public_key=base64url_to_bytes(cred['public_key']),
             credential_current_sign_count=cred['sign_count'],
         )
@@ -1350,6 +1388,8 @@ def passkey_login_verify():
         })
     except Exception as e:
         conn.close()
+        if login_id in passkey_challenges:
+            del passkey_challenges[login_id]
         return jsonify({'error': str(e)}), 401
 
 @app.route('/auth/passkey/list', methods=['GET'])
