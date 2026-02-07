@@ -1,0 +1,9 @@
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "graffitti-bomb.png"
+  min_sdk_android: 21
+  adaptive_icon_background: "#242832"
+  adaptive_icon_foreground: "graffitti-bomb.png"
+  adaptive_icon_foreground_inset: 16
+  remove_alpha_ios: true

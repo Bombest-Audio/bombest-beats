@@ -1,0 +1,8 @@
+{
+  "name": "Bombest Beats S3",
+  "description": "S3-based music source for Bombest Beats",
+  "version": "0.1.0",
+  "entryPoint": "package:spotube/plugins/s3_bombest/lib/s3_bombest_plugin.dart"
+}
+
+
