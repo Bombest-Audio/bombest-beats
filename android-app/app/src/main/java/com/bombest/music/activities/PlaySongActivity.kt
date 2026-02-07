@@ -7,6 +7,7 @@ import android.media.MediaPlayer.OnCompletionListener
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
+import android.os.Looper
 import android.view.MenuItem
 import android.view.View
 import android.view.WindowManager
@@ -27,7 +28,7 @@ class PlaySongActivity : AppCompatActivity(), OnSeekBarChangeListener, OnComplet
     lateinit var mediaPlayer: MediaPlayer
     lateinit var songTimer: SongTimer
     lateinit var songTitle: String
-    var handler = Handler()
+    var handler = Handler(Looper.getMainLooper())
     var seekForwardTime = 5000
     var seekBackwardTime = 5000
     var currentSongIndex = 0
@@ -261,6 +262,7 @@ class PlaySongActivity : AppCompatActivity(), OnSeekBarChangeListener, OnComplet
     }
 
     public override fun onDestroy() {
+        handler.removeCallbacks(runnable)
         super.onDestroy()
         mediaPlayer.release()
     }

@@ -81,13 +81,12 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
 
-    // Media3 (ExoPlayer) — BOM keeps versions aligned
-    implementation(platform("androidx.media3:media3-bom:1.2.0"))
-    implementation("androidx.media3:media3-exoplayer")
-    implementation("androidx.media3:media3-ui")
-    implementation("androidx.media3:media3-common")
-    implementation("androidx.media3:media3-session")
-    implementation("androidx.media3:media3-datasource-okhttp")
+    // Media3 (ExoPlayer) — explicit versions (BOM resolution can fail in some envs)
+    implementation("androidx.media3:media3-exoplayer:1.2.1")
+    implementation("androidx.media3:media3-ui:1.2.1")
+    implementation("androidx.media3:media3-common:1.2.1")
+    implementation("androidx.media3:media3-session:1.2.1")
+    implementation("androidx.media3:media3-datasource-okhttp:1.2.1")
 
     // UI / compatibility
     implementation("androidx.appcompat:appcompat:1.6.1")
