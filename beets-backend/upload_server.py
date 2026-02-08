@@ -4,6 +4,7 @@ import re
 import json
 import subprocess
 import sqlite3
+import traceback
 import wave
 import struct
 from flask import Flask, request, jsonify, send_file
@@ -633,34 +634,68 @@ def batch_delete_tracks():
     except Exception as e:
         return jsonify({'error': f'Failed to batch delete tracks: {str(e)}'}), 500
 
+def _decode_val(val):
+    """Decode bytes to str for JSON; leave other types as-is."""
+    if isinstance(val, bytes):
+        return val.decode('utf-8', errors='ignore')
+    return val
+
+
+def _path_to_s3_key(path):
+    """Normalize DB path to a relative path matching S3 key (e.g. music/Artist/Album/track.mp3)."""
+    if not path:
+        return None
+    p = _decode_val(path) if isinstance(path, bytes) else path
+    if not p:
+        return None
+    # If absolute, make relative to CWD so app can match to S3 key
+    try:
+        rel = os.path.relpath(p, start=os.getcwd())
+    except ValueError:
+        rel = p
+    # Normalize: no leading slash, forward slashes
+    rel = rel.replace('\\', '/').lstrip('/')
+    return rel if not rel.startswith('..') else None
+
+
 @app.route('/library', methods=['GET'])
 def get_library():
-    """Get all tracks from the library directly from SQLite"""
+    """Get all tracks from the library. App-friendly shape: id, title, artist, album, path, stream_url.
+    path is relative (S3-key style) so the app can match S3 keys to backend track id."""
     try:
         conn = sqlite3.connect(LIBRARY_DB)
-        conn.row_factory = sqlite3.Row  # Access columns by name
+        conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
-        
-        cursor.execute("SELECT * FROM items ORDER BY track ASC")
-        rows = cursor.fetchall()
-        
+        try:
+            cursor.execute(
+                "SELECT id, title, artist, album, album_id, path FROM items ORDER BY track ASC, id ASC"
+            )
+            rows = cursor.fetchall()
+        except sqlite3.OperationalError as e:
+            if 'no such table' in str(e).lower():
+                conn.close()
+                return jsonify({'items': []}), 200
+            raise
+        conn.close()
+
         items = []
         for row in rows:
-            item = dict(row)
-            
-            # Handle bytes (like path) for JSON serialization
-            for key, value in item.items():
-                if isinstance(value, bytes):
-                    item[key] = value.decode('utf-8', errors='ignore')
-            
-            # Add art URL structure (pointing to beets API for now, or we can serve it too)
-            # Beets API is at port 8337 usually
-            item['album_id'] = item.get('album_id')
-            items.append(item)
-            
-        conn.close()
+            item_id = row['id']
+            raw_path = row['path']
+            path_key = _path_to_s3_key(raw_path)
+            items.append({
+                'id': item_id,
+                'title': _decode_val(row['title']) or 'Unknown',
+                'artist': _decode_val(row['artist']) or 'Unknown Artist',
+                'album': _decode_val(row['album']) or '',
+                'album_id': row['album_id'],
+                'path': path_key,
+                'stream_url': f'/stream/{item_id}',
+            })
         return jsonify({'items': items}), 200
     except Exception as e:
+        if 'no such table' in str(e).lower() or 'no such column' in str(e).lower():
+            return jsonify({'items': []}), 200
         return jsonify({'error': f'Failed to fetch library: {str(e)}'}), 500
 
 @app.route('/tracks/<int:track_id>/loops', methods=['GET'])
@@ -927,20 +962,33 @@ def delete_comment(comment_id):
     conn.close()
     return jsonify({'message': 'Comment deleted'}), 200
 
+def _ensure_users_db():
+    """Create users.db and tables if missing (e.g. first run or old image)."""
+    from init_db import init_db
+    init_db()
+
+
 @app.route('/auth/register', methods=['POST'])
 def register():
-    data = request.get_json()
+    data = request.get_json(force=True, silent=True) or {}
     username = data.get('username')
     password = data.get('password')
     invite_code = data.get('invite_code')
-    
-
 
     if not username or not password or not invite_code:
         return jsonify({'error': 'Missing required fields'}), 400
 
     conn = sqlite3.connect('music/users.db')
     cursor = conn.cursor()
+
+    # If users table is missing (old image or first deploy), create it now
+    try:
+        cursor.execute('SELECT 1 FROM users LIMIT 1')
+    except sqlite3.OperationalError:
+        conn.close()
+        _ensure_users_db()
+        conn = sqlite3.connect('music/users.db')
+        cursor = conn.cursor()
 
     # Check invite code (for now, simplistic check or check against used codes if we table them)
     # Since we don't have an invites table yet, we'll just check if the code exists on a user who has it? 
@@ -1004,6 +1052,7 @@ def register():
         }), 201
         
     except Exception as e:
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
     finally:
         conn.close()
@@ -1079,12 +1128,38 @@ RP_ORIGIN_WEB = "https://beats.bom.best"
 # SHA256: 2C:A4:5B:A8:27:2C:C9:57:F9:AC:0D:DA:85:D5:F1:CF:D9:DF:F8:49:34:C8:58:52:4B:C4:34:5B:30:99:36:E8
 # Convert hex to bytes then base64url
 import base64
+from urllib.parse import urlparse
 _android_sha256_hex = "2CA45BA8272CC957F9AC0DDA85D5F1CFD9DFF84934C858524BC4345B309936E8"
 _android_sha256_bytes = bytes.fromhex(_android_sha256_hex)
 RP_ORIGIN_ANDROID = "android:apk-key-hash:" + base64.urlsafe_b64encode(_android_sha256_bytes).decode().rstrip('=')
 RP_ORIGINS = [RP_ORIGIN_WEB, RP_ORIGIN_ANDROID]
 
+def _get_rp_id_and_origin():
+    """Derive rp_id and origin from request so passkeys work from localhost or production."""
+    origin = request.origin or request.headers.get('Referer') or ''
+    if not origin or origin == 'null':
+        return RP_ID, RP_ORIGINS
+    try:
+        parsed = urlparse(origin)
+        host = (parsed.hostname or '').lower() or RP_ID
+        if host in ('localhost', '127.0.0.1'):
+            rp_id = 'localhost'
+            request_origin = origin.rstrip('/')
+            origins = [request_origin] + [o for o in RP_ORIGINS if o != request_origin]
+            return rp_id, origins
+        # Production or EC2 host
+        rp_id = host
+        request_origin = f"{parsed.scheme or 'https'}://{host}" + (f":{parsed.port}" if parsed.port and parsed.port not in (80, 443) else '')
+        if request_origin not in RP_ORIGINS:
+            origins = [request_origin] + list(RP_ORIGINS)
+        else:
+            origins = list(RP_ORIGINS)
+        return rp_id, origins
+    except Exception:
+        return RP_ID, RP_ORIGINS
+
 # Store challenges temporarily (in production, use Redis or similar)
+# Values: { key: {'challenge': bytes, 'rp_id': str, 'origins': list} }
 passkey_challenges = {}
 
 def init_passkey_table():
@@ -1133,8 +1208,9 @@ def passkey_register_options():
         for row in existing_creds
     ]
     
+    rp_id, origins = _get_rp_id_and_origin()
     options = generate_registration_options(
-        rp_id=RP_ID,
+        rp_id=rp_id,
         rp_name=RP_NAME,
         user_id=str(user['id']).encode(),
         user_name=user['username'],
@@ -1146,8 +1222,8 @@ def passkey_register_options():
         ),
     )
     
-    # Store challenge for verification
-    passkey_challenges[str(user['id'])] = options.challenge
+    # Store challenge and rp context for verification
+    passkey_challenges[str(user['id'])] = {'challenge': options.challenge, 'rp_id': rp_id, 'origins': origins}
     
     return options_to_json(options)
 
@@ -1158,16 +1234,19 @@ def passkey_register_verify():
     current_user_id = get_jwt_identity()
     data = request.get_json()
     
-    challenge = passkey_challenges.get(current_user_id)
-    if not challenge:
+    stored = passkey_challenges.get(current_user_id)
+    if not stored:
         return jsonify({'error': 'No pending registration'}), 400
+    challenge = stored.get('challenge') if isinstance(stored, dict) else stored
+    rp_id = stored.get('rp_id', RP_ID) if isinstance(stored, dict) else RP_ID
+    origins = stored.get('origins', RP_ORIGINS) if isinstance(stored, dict) else RP_ORIGINS
     
     try:
         verification = verify_registration_response(
             credential=data,
             expected_challenge=challenge,
-            expected_rp_id=RP_ID,
-            expected_origin=RP_ORIGINS,
+            expected_rp_id=rp_id,
+            expected_origin=origins,
         )
         
         # Store the credential
@@ -1190,6 +1269,8 @@ def passkey_register_verify():
         
         return jsonify({'success': True, 'message': 'Passkey registered successfully'})
     except Exception as e:
+        if current_user_id in passkey_challenges:
+            del passkey_challenges[current_user_id]
         return jsonify({'error': str(e)}), 400
 
 @app.route('/auth/passkey/login/options', methods=['POST'])
@@ -1225,16 +1306,17 @@ def passkey_login_options():
         for row in creds
     ]
     
+    rp_id, origins = _get_rp_id_and_origin()
     options = generate_authentication_options(
-        rp_id=RP_ID,
+        rp_id=rp_id,
         allow_credentials=allow_credentials if username else None,  # None = discoverable
         user_verification=UserVerificationRequirement.PREFERRED,
     )
     
-    # Store challenge (keyed by a random ID for login)
+    # Store challenge and rp context (keyed by a random ID for login)
     import secrets
     login_id = secrets.token_urlsafe(16)
-    passkey_challenges[login_id] = options.challenge
+    passkey_challenges[login_id] = {'challenge': options.challenge, 'rp_id': rp_id, 'origins': origins}
     
     response = json.loads(options_to_json(options))
     response['loginId'] = login_id
@@ -1246,9 +1328,12 @@ def passkey_login_verify():
     data = request.get_json()
     login_id = data.get('loginId')
     
-    challenge = passkey_challenges.get(login_id)
-    if not challenge:
+    stored = passkey_challenges.get(login_id)
+    if not stored:
         return jsonify({'error': 'No pending login'}), 400
+    challenge = stored.get('challenge') if isinstance(stored, dict) else stored
+    rp_id = stored.get('rp_id', RP_ID) if isinstance(stored, dict) else RP_ID
+    origins = stored.get('origins', RP_ORIGINS) if isinstance(stored, dict) else RP_ORIGINS
     
     # Find the credential
     credential_id = data.get('id')
@@ -1274,8 +1359,8 @@ def passkey_login_verify():
         verification = verify_authentication_response(
             credential=data,
             expected_challenge=challenge,
-            expected_rp_id=RP_ID,
-            expected_origin=RP_ORIGINS,
+            expected_rp_id=rp_id,
+            expected_origin=origins,
             credential_public_key=base64url_to_bytes(cred['public_key']),
             credential_current_sign_count=cred['sign_count'],
         )
@@ -1303,6 +1388,8 @@ def passkey_login_verify():
         })
     except Exception as e:
         conn.close()
+        if login_id in passkey_challenges:
+            del passkey_challenges[login_id]
         return jsonify({'error': str(e)}), 401
 
 @app.route('/auth/passkey/list', methods=['GET'])
@@ -2285,5 +2372,7 @@ def get_dashboard_metrics():
     })
 
 if __name__ == '__main__':
-    # Initialize DB on start if needed (optional since we have init_db script)
+    # Ensure users.db and tables exist (required for /auth/register, /auth/login, etc.)
+    from init_db import init_db
+    init_db()
     app.run(host='0.0.0.0', port=8338)

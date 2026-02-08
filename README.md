@@ -40,10 +40,10 @@ A cross-platform music streaming application with Android, iOS, and web clients 
 |-----------|-------|
 | Primary URL | `https://bom.best/api/` |
 | Failover URL | `https://beats-aws.bom.best/api/` |
-| EC2 Instance | `i-03ac11ce0a84a2625` (44.249.110.172) |
 | S3 Bucket | `s3://bombest-beats-music` |
-| Docker Image | `thomasphillips3/bombest-beats:latest` |
-| Tunnel ID | `4a638fa7-cbe1-453c-b360-95c56d17eaca` |
+| Docker Image | `tomdabomb2u/bombest-beats:latest` |
+
+Full EC2, S3, tunnel, and admin setup: see [docs/architecture.md](docs/architecture.md).
 
 ## Quick Start
 
@@ -58,11 +58,8 @@ cloudflared tunnel --config cloudflared-config.yml run bombest-beats
 ```
 
 ### Deploy to AWS
-```bash
-./deploy-aws.sh  # Build & push Docker image
-./deploy-ec2.sh  # Launch EC2 instance
-./setup-s3.sh    # Sync music to S3
-```
+- **Primary:** `./deploy-to-ec2.sh [REGION]` — build image, push to Docker Hub, update container on EC2 (requires existing EC2 instance with tag `Name=bombest-beats`).
+- **First-time:** run `./deploy-aws.sh`, then create EC2 via `./setup-ec2-aws-cli.sh`; see [docs/architecture.md](docs/architecture.md).
 
 ### Android
 ```bash
@@ -83,21 +80,29 @@ bombest-beats/
 ├── ios-app/              # iOS (SwiftUI)
 ├── beets-backend/        # Python/Flask backend + Dockerfile
 ├── music-frontend/       # React web app
+├── scripts/              # e.g. ec2-make-admin.sh
+├── deploy-to-ec2.sh      # One-command deploy (build, push, update EC2)
 ├── deploy-aws.sh         # Docker Hub push script
-├── deploy-ec2.sh         # AWS EC2 deployment
+├── deploy-container-to-ec2.sh
+├── setup-ec2-aws-cli.sh
 ├── setup-s3.sh           # S3 bucket & music sync
+├── docs/architecture.md
 └── cloudflared-config.yml
+```
+
+## Documentation
+
+Detailed deployment, S3 sync, EC2 admin, and frontend-with-EC2: [docs/architecture.md](docs/architecture.md).
 
 ## Client Connection (Static Endpoints)
 
 - API base (primary): `https://bom.best/api/`
 - API base (failover): `https://beats-aws.bom.best/api/`
-- Cloudflare tunnel: `4a638fa7-cbe1-453c-b360-95c56d17eaca` -> `http://localhost:5002`
+- Cloudflare tunnel: configured via Cloudflare Zero Trust to route external traffic to the backend (see [docs/architecture.md](docs/architecture.md) for deployment details)
 - DNS hostname served via Cloudflare: `bom.best`
 - Backend health (direct): `http://localhost:5002/health`
 
-These endpoints are stable; mobile and web clients should target the API bases above and can safely hardcode them. If credentials rotate, only `/home/thomas/.cloudflared/4a638fa7-cbe1-453c-b360-95c56d17eaca.json` needs regeneration—URLs stay the same.
-```
+These endpoints are stable; mobile and web clients can use them as defaults. Clients may optionally override the API base via configuration (e.g. `REACT_APP_API_BASE`) for local or dev testing. Tunnel IDs, credential files, and other infrastructure-specific details are managed via deployment configuration and internal documentation and may change without affecting these public URLs.
 
 ## Theme System
 
@@ -113,6 +118,16 @@ These endpoints are stable; mobile and web clients should target the API bases a
 | EC2 t3.micro | ~$8/mo (or free tier) |
 | S3 (1.3GB) | ~$0.03/mo |
 | **Total** | **~$8/mo** |
+
+## Pre-merge checks
+
+Comment on a PR to run tests (only members/owners/collaborators can trigger). After the first run, add the "Pre-merge tests" status check to branch protection for `main` in **Settings → Branches**.
+
+- **🚀** — Run all tests (Android, backend, frontend) and merge into **main** on success (PR must target `main`).
+- **`:run-tests:`** — Run all tests without merging (any PR).
+- **`:run-test: android`** — Run only the Android build.
+- **`:run-test: frontend`** — Run only the frontend build.
+- **`:run-test: backend`** — Run only the backend sanity check.
 
 ## Development Notes
 

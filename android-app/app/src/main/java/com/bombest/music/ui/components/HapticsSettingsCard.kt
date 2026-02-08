@@ -117,7 +117,7 @@ fun HapticsSettingsCard(
                                         HapticPreferences.setIntensity(context, level)
                                     }
                                 },
-                                label = { 
+                                label = {
                                     Text(
                                         text = level.name.lowercase().replaceFirstChar { it.uppercase() },
                                         fontSize = 12.sp

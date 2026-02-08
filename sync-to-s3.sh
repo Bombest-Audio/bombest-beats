@@ -7,6 +7,7 @@ set -euo pipefail
 #
 # Notes:
 # - Uses aws s3 sync --delete to keep S3 in lockstep.
+# - Run after editing track metadata (e.g. from the app's Edit metadata or backend PUT /track/<id>) so S3 reflects updated files and folder structure.
 # - Optionally watches with inotifywait if available (set WATCH=1).
 
 MUSIC_DIR="${MUSIC_DIR:-/home/thomas/bombest-beats/beets-backend/music}"
