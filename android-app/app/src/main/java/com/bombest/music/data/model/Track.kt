@@ -7,7 +7,7 @@ data class Track(
     @Json(name = "title") val title: String?,
     @Json(name = "artist") val artist: String?,
     @Json(name = "album") val album: String?,
-    @Json(name = "length") val length: Double, // Seconds
+    @Json(name = "length") val length: Double = 0.0, // Seconds (default when API omits it)
     @Json(name = "path") val path: String?,
     @Json(name = "album_id") val albumId: Int?
 ) {

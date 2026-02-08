@@ -11,6 +11,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.ui.draw.clip
@@ -24,8 +25,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import android.net.Uri
+import coil.compose.AsyncImage
 import com.bombest.music.data.api.Playlist
 import com.bombest.music.data.api.Track
+import com.bombest.music.data.NetworkModule
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -34,11 +40,13 @@ fun PlaylistsScreen(
     isLoading: Boolean,
     onCreatePlaylist: (String) -> Unit,
     onPlaylistClick: (Int) -> Unit,
+    onPlaylistPlayClick: (Playlist) -> Unit,
     onDeletePlaylist: (Int) -> Unit,
     onBack: () -> Unit
 ) {
     var showCreateDialog by remember { mutableStateOf(false) }
     var newPlaylistName by remember { mutableStateOf("") }
+    var playlistToDelete by remember { mutableStateOf<Playlist?>(null) }
     
     Scaffold(
         topBar = {
@@ -88,13 +96,40 @@ fun PlaylistsScreen(
                         PlaylistItem(
                             playlist = playlist,
                             onClick = { onPlaylistClick(playlist.id) },
-                            onDelete = { onDeletePlaylist(playlist.id) },
+                            onPlayClick = { onPlaylistPlayClick(playlist) },
+                            onDelete = { playlistToDelete = playlist },
                             isSystem = playlist.is_system
                         )
                     }
                 }
             }
         }
+    }
+    
+    playlistToDelete?.let { playlist ->
+        AlertDialog(
+            onDismissRequest = { playlistToDelete = null },
+            title = { Text("Delete playlist?") },
+            text = { Text("${playlist.name} will be permanently deleted. This cannot be undone.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onDeletePlaylist(playlist.id)
+                        playlistToDelete = null
+                    }
+                ) {
+                    Text("Delete", color = Color(0xFFE90060))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { playlistToDelete = null }) {
+                    Text("Cancel", color = Color.White)
+                }
+            },
+            containerColor = Color(0xFF1A1D2E),
+            titleContentColor = Color.White,
+            textContentColor = Color.White
+        )
     }
     
     if (showCreateDialog) {
@@ -140,6 +175,7 @@ fun PlaylistsScreen(
 fun PlaylistItem(
     playlist: Playlist,
     onClick: () -> Unit,
+    onPlayClick: () -> Unit,
     onDelete: () -> Unit,
     isSystem: Boolean = false
 ) {
@@ -157,6 +193,17 @@ fun PlaylistItem(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
+            val artUrl = playlist.art_url?.let { NetworkModule.getStreamBaseUrl() + it }
+            if (artUrl != null) {
+                AsyncImage(
+                    model = artUrl,
+                    contentDescription = null,
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+            }
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = playlist.name,
@@ -174,7 +221,7 @@ fun PlaylistItem(
             }
             
             Row {
-                IconButton(onClick = onClick) {
+                IconButton(onClick = onPlayClick) {
                     Icon(Icons.Default.PlayArrow, contentDescription = "Play", tint = Color(0xFFE90060))
                 }
                 if (!isSystem) {
@@ -196,25 +243,54 @@ fun PlaylistDetailScreen(
     allTracks: List<Track> = emptyList(),
     isLoading: Boolean,
     isSystem: Boolean = false,
+    playlistArtUrl: String? = null,
+    onPlayAll: () -> Unit = {},
     onTrackClick: (Track) -> Unit,
     onRemoveTrack: (Int) -> Unit,
     onAddTracks: (List<Int>) -> Unit = {},
+    onImageSelected: (Uri) -> Unit = {},
     onBack: () -> Unit
 ) {
     var showAddTracksDialog by remember { mutableStateOf(false) }
     var selectedTrackIds by remember { mutableStateOf(setOf<Int>()) }
+    val fullArtUrl = playlistArtUrl?.let { NetworkModule.getStreamBaseUrl() + it }
+    val imagePickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        uri?.let { onImageSelected(it) }
+    }
     
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(playlistName, fontWeight = FontWeight.Bold) },
+                title = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (fullArtUrl != null) {
+                            AsyncImage(
+                                model = fullArtUrl,
+                                contentDescription = null,
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .clip(RoundedCornerShape(6.dp))
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                        }
+                        Text(playlistName, fontWeight = FontWeight.Bold)
+                    }
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
                     }
                 },
                 actions = {
+                    if (tracks.isNotEmpty()) {
+                        IconButton(onClick = onPlayAll) {
+                            Icon(Icons.Default.PlayArrow, contentDescription = "Play all", tint = Color(0xFFE90060))
+                        }
+                    }
                     if (!isSystem) {
+                        IconButton(onClick = { imagePickerLauncher.launch("image/*") }) {
+                            Icon(Icons.Default.Image, contentDescription = if (fullArtUrl != null) "Change image" else "Add image", tint = Color.White)
+                        }
                         IconButton(onClick = { showAddTracksDialog = true }) {
                             Icon(Icons.Default.Add, contentDescription = "Add Tracks", tint = Color.White)
                         }
@@ -276,6 +352,7 @@ fun PlaylistDetailScreen(
                     items(tracks) { track ->
                         PlaylistTrackItem(
                             track = track,
+                            rowArtUrl = fullArtUrl,
                             onClick = { onTrackClick(track) },
                             onRemove = if (!isSystem) { { onRemoveTrack(track.id) } } else null
                         )
@@ -382,6 +459,7 @@ fun PlaylistDetailScreen(
 @Composable
 fun PlaylistTrackItem(
     track: Track,
+    rowArtUrl: String? = null,
     onClick: () -> Unit,
     onRemove: (() -> Unit)? = null
 ) {
@@ -399,6 +477,16 @@ fun PlaylistTrackItem(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
+            if (rowArtUrl != null) {
+                AsyncImage(
+                    model = rowArtUrl,
+                    contentDescription = null,
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+            }
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = track.title,

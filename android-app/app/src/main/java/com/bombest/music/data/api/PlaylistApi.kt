@@ -1,5 +1,6 @@
 package com.bombest.music.data.api
 
+import okhttp3.MultipartBody
 import retrofit2.http.*
 
 data class Playlist(
@@ -8,7 +9,8 @@ data class Playlist(
     val count: Int = 0,
     val created_at: String? = null,
     val is_public: Boolean = false, // Admin can publish to all users
-    val is_system: Boolean = false
+    val is_system: Boolean = false,
+    val art_url: String? = null
 )
 
 data class PlaylistsResponse(val playlists: List<Playlist>)
@@ -35,6 +37,10 @@ interface PlaylistApi {
     
     @GET("playlists/{id}/tracks")
     suspend fun getPlaylistTracks(@Path("id") id: Int): TracksResponse
+
+    @Multipart
+    @PUT("playlists/{id}/art")
+    suspend fun setPlaylistArt(@Path("id") id: Int, @Part image: MultipartBody.Part): Map<String, Any>
     
     @POST("playlists/{id}/tracks")
     suspend fun addTracksToPlaylist(@Path("id") id: Int, @Body request: AddTracksRequest): Map<String, Any>

@@ -1,7 +1,10 @@
 package com.bombest.music
 
+import android.net.Uri
 import android.content.Intent
 import android.os.Bundle
+import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -39,16 +42,54 @@ import com.bombest.music.ui.theme.BombestBeatsTheme
 import com.bombest.music.ui.viewmodel.MainViewModel
 import com.bombest.music.ui.viewmodel.PlaylistViewModel
 import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
 import com.bombest.music.data.PasskeyManager
 import com.bombest.music.data.repository.AuthRepository
 import com.bombest.music.data.NetworkModule
 import com.bombest.music.data.FavoritesManager
+import com.bombest.music.data.api.Track
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.MultipartBody
+import okhttp3.RequestBody.Companion.toRequestBody
 import android.widget.Toast
 import com.bombest.music.haptics.HapticGrooveEngine
 
 
 enum class Screen {
     LIBRARY, PLAYLISTS, PLAYLIST_DETAIL, DASHBOARD, UPLOAD, ACCOUNT
+}
+
+/** Builds a MediaItem from an API Track for playlist playback. Optional artworkUri (e.g. playlist art) overrides track art. */
+private fun createImagePart(context: android.content.Context, uri: Uri): MultipartBody.Part? {
+    return try {
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            val bytes = input.readBytes()
+            val body = bytes.toRequestBody("image/*".toMediaTypeOrNull(), 0, bytes.size)
+            MultipartBody.Part.createFormData("image", "image.jpg", body)
+        }
+    } catch (e: Exception) {
+        null
+    }
+}
+
+private fun trackToMediaItem(track: Track, artworkUri: Uri? = null): MediaItem {
+    val baseUrl = NetworkModule.getStreamBaseUrl()
+    val streamUrl = "$baseUrl/stream/${track.id}"
+    val artUrl = artworkUri?.toString() ?: "$baseUrl/track/${track.id}/art"
+    return MediaItem.Builder()
+        .setMediaId(track.id.toString())
+        .setUri(Uri.parse(streamUrl))
+        .setMediaMetadata(
+            MediaMetadata.Builder()
+                .setTitle(track.title)
+                .setArtist(track.artist)
+                .setAlbumTitle(track.album ?: "")
+                .setArtworkUri(Uri.parse(artUrl))
+                .setIsBrowsable(false)
+                .setIsPlayable(true)
+                .build()
+        )
+        .build()
 }
 
 class MainActivity : ComponentActivity() {
@@ -142,6 +183,7 @@ fun MainContent(
     var currentScreen by remember { mutableStateOf(Screen.LIBRARY) }
     var selectedPlaylistId by remember { mutableStateOf<Int?>(null) }
     val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
     
     val playlistViewModel: PlaylistViewModel = viewModel()
     
@@ -227,6 +269,17 @@ fun MainContent(
                         playlistViewModel.loadPlaylistTracks(id, playlist?.name ?: "")
                         currentScreen = Screen.PLAYLIST_DETAIL
                     },
+                    onPlaylistPlayClick = { playlist ->
+                        scope.launch {
+                            val tracks = playlistViewModel.getPlaylistTracksOnce(playlist.id)
+                            if (tracks.isNotEmpty()) {
+                                val playlistArtUri = playlist.art_url?.let { url -> Uri.parse(NetworkModule.getStreamBaseUrl() + url) }
+                                val items = tracks.map { trackToMediaItem(it, playlistArtUri) }
+                                viewModel.setPlaylistAndPlay(items)
+                                isPlayerOpen = true
+                            }
+                        }
+                    },
                     onDeletePlaylist = { id -> playlistViewModel.deletePlaylist(id) },
                     onBack = { currentScreen = Screen.LIBRARY }
                 )
@@ -234,15 +287,32 @@ fun MainContent(
             
             Screen.PLAYLIST_DETAIL -> {
                 val currentPlaylist = playlistViewModel.playlists.find { it.id == selectedPlaylistId }
+                val detailTracks = playlistViewModel.currentPlaylistTracks
                 PlaylistDetailScreen(
                     playlistId = selectedPlaylistId ?: 0,
                     playlistName = playlistViewModel.currentPlaylistName.value,
-                    tracks = playlistViewModel.currentPlaylistTracks,
+                    tracks = detailTracks,
                     allTracks = playlistViewModel.allTracks,  // Use ViewModel's allTracks from API
                     isLoading = playlistViewModel.isLoading.value,
                     isSystem = currentPlaylist?.is_system ?: false,
+                    playlistArtUrl = currentPlaylist?.art_url,
+                    onPlayAll = {
+                        if (detailTracks.isNotEmpty()) {
+                            val items = detailTracks.map { trackToMediaItem(it, currentPlaylist?.art_url?.let { url -> Uri.parse(NetworkModule.getStreamBaseUrl() + url) }) }
+                            viewModel.setPlaylistAndPlay(items)
+                            isPlayerOpen = true
+                        }
+                    },
                     onTrackClick = { track ->
-                        // TODO: Play track from playlist
+                        if (detailTracks.isNotEmpty()) {
+                            val playlistArtUri = currentPlaylist?.art_url?.let { url -> Uri.parse(NetworkModule.getStreamBaseUrl() + url) }
+                            val items = detailTracks.map { trackToMediaItem(it, playlistArtUri) }
+                            val index = detailTracks.indexOfFirst { it.id == track.id }
+                            if (index >= 0) {
+                                viewModel.setPlaylistAndPlayFrom(items, index)
+                                isPlayerOpen = true
+                            }
+                        }
                     },
                     onRemoveTrack = { trackId ->
                         selectedPlaylistId?.let { playlistViewModel.removeTrackFromPlaylist(it, trackId) }
@@ -250,7 +320,16 @@ fun MainContent(
                     onAddTracks = { trackIds ->
                         selectedPlaylistId?.let { playlistViewModel.addTracksToPlaylist(it, trackIds) }
                     },
-                    onBack = { currentScreen = Screen.PLAYLISTS }
+                    onImageSelected = { uri ->
+                        val part = createImagePart(context, uri)
+                        if (part != null && selectedPlaylistId != null) {
+                            playlistViewModel.uploadPlaylistArt(selectedPlaylistId!!, part)
+                        }
+                    },
+                    onBack = {
+                        playlistViewModel.loadPlaylists()
+                        currentScreen = Screen.PLAYLISTS
+                    }
                 )
             }
             

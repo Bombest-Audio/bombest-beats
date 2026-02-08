@@ -78,10 +78,12 @@ UPLOAD_FOLDER = os.path.join(os.getcwd(), 'uploads')
 MUSIC_FOLDER = os.path.join(os.getcwd(), 'music')
 WAVEFORM_FOLDER = os.path.join(os.getcwd(), 'waveforms')
 LIBRARY_DB = os.path.join(os.getcwd(), 'music', 'library.db')
+PLAYLIST_ART_FOLDER = os.path.join(MUSIC_FOLDER, 'playlist_art')
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(MUSIC_FOLDER, exist_ok=True)
 os.makedirs(WAVEFORM_FOLDER, exist_ok=True)
+os.makedirs(PLAYLIST_ART_FOLDER, exist_ok=True)
 
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
@@ -1550,14 +1552,23 @@ def get_playlists():
     try:
         conn = sqlite3.connect('music/users.db')
         cursor = conn.cursor()
-        cursor.execute("SELECT id, name, created_at, is_system FROM playlists ORDER BY created_at DESC")
-        playlists = [{'id': row[0], 'name': row[1], 'created_at': row[2], 'is_system': bool(row[3])} for row in cursor.fetchall()]
-        
+        # Ensure art_path column exists
+        cursor.execute("PRAGMA table_info(playlists)")
+        columns = [col[1] for col in cursor.fetchall()]
+        if 'art_path' not in columns:
+            cursor.execute("ALTER TABLE playlists ADD COLUMN art_path TEXT")
+            conn.commit()
+        cursor.execute("SELECT id, name, created_at, is_system, art_path FROM playlists ORDER BY created_at DESC")
+        playlists = []
+        for row in cursor.fetchall():
+            pl = {'id': row[0], 'name': row[1], 'created_at': row[2], 'is_system': bool(row[3])}
+            art_path = row[4] if len(row) > 4 else None
+            pl['art_url'] = f"/playlists/{pl['id']}/art" if art_path else None
+            playlists.append(pl)
         # Get track counts for each playlist
         for pl in playlists:
             cursor.execute("SELECT COUNT(*) FROM playlist_tracks WHERE playlist_id = ?", (pl['id'],))
             pl['count'] = cursor.fetchone()[0]
-            
         conn.close()
         return jsonify({'playlists': playlists})
     except Exception as e:
@@ -1624,6 +1635,76 @@ def delete_playlist(playlist_id):
         
         return jsonify({'success': True})
     except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+ALLOWED_IMAGE_EXTENSIONS = {'jpg', 'jpeg', 'png', 'gif', 'webp'}
+
+def allowed_image_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_IMAGE_EXTENSIONS
+
+@app.route('/playlists/<int:playlist_id>/art', methods=['GET'])
+def get_playlist_art(playlist_id):
+    """Serve playlist cover image if set"""
+    try:
+        conn = sqlite3.connect('music/users.db')
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA table_info(playlists)")
+        columns = [col[1] for col in cursor.fetchall()]
+        if 'art_path' not in columns:
+            conn.close()
+            return '', 404
+        cursor.execute("SELECT art_path FROM playlists WHERE id = ?", (playlist_id,))
+        row = cursor.fetchone()
+        conn.close()
+        if not row or not row[0]:
+            return '', 404
+        art_path = row[0]
+        if not os.path.isabs(art_path):
+            art_path = os.path.join(os.getcwd(), art_path)
+        if not os.path.isfile(art_path):
+            return '', 404
+        return send_file(art_path, mimetype=mimetypes.guess_type(art_path)[0] or 'image/jpeg')
+    except Exception as e:
+        print(f"Error serving playlist art: {e}")
+        return '', 404
+
+@app.route('/playlists/<int:playlist_id>/art', methods=['PUT', 'POST'])
+def set_playlist_art(playlist_id):
+    """Upload playlist cover image (multipart form, file key 'image' or first file)"""
+    try:
+        if 'file' not in request.files and 'image' not in request.files:
+            # Some clients send as first key
+            files = list(request.files.keys())
+            if not files:
+                return jsonify({'error': 'No file provided'}), 400
+            file = request.files[files[0]]
+        else:
+            file = request.files.get('file') or request.files.get('image')
+        if not file or file.filename == '':
+            return jsonify({'error': 'No file selected'}), 400
+        if not allowed_image_file(file.filename):
+            return jsonify({'error': 'Invalid image type'}), 400
+        ext = file.filename.rsplit('.', 1)[1].lower()
+        if ext == 'jpeg':
+            ext = 'jpg'
+        save_name = f"{playlist_id}.{ext}"
+        save_path = os.path.join(PLAYLIST_ART_FOLDER, save_name)
+        file.save(save_path)
+        # Store relative path for portability
+        rel_path = os.path.join('music', 'playlist_art', save_name)
+        conn = sqlite3.connect('music/users.db')
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA table_info(playlists)")
+        columns = [col[1] for col in cursor.fetchall()]
+        if 'art_path' not in columns:
+            cursor.execute("ALTER TABLE playlists ADD COLUMN art_path TEXT")
+            conn.commit()
+        cursor.execute("UPDATE playlists SET art_path = ? WHERE id = ?", (rel_path, playlist_id))
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True, 'art_url': f"/playlists/{playlist_id}/art"})
+    except Exception as e:
+        print(f"Error setting playlist art: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/playlists/<int:playlist_id>/tracks', methods=['GET'])

@@ -342,7 +342,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 itemCount: Int,
                 params: MediaLibraryService.LibraryParams?
             ) {
-                if (parentId == "root") {
+                // Refetch when the changed parent is the one we're currently showing
+                if (parentId == "root" || parentId == currentParentId.value) {
                     fetchChildren()
                 }
             }
@@ -532,6 +533,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 delay(1000)
                 isRefreshing.value = false
             }
+        }
+    }
+
+    /** Sets a custom list of media items as the playlist and starts playback from the beginning. */
+    fun setPlaylistAndPlay(mediaItems: List<MediaItem>) {
+        if (mediaItems.isEmpty()) return
+        mediaBrowser?.let {
+            playlist.clear()
+            playlist.addAll(mediaItems)
+            it.setMediaItems(mediaItems)
+            it.seekTo(0, 0)
+            it.prepare()
+            it.play()
+        }
+    }
+
+    /** Sets a custom list of media items and starts playback from the given index (for "play from track"). */
+    fun setPlaylistAndPlayFrom(mediaItems: List<MediaItem>, startIndex: Int) {
+        if (mediaItems.isEmpty() || startIndex !in mediaItems.indices) return
+        mediaBrowser?.let {
+            playlist.clear()
+            playlist.addAll(mediaItems)
+            it.setMediaItems(mediaItems)
+            it.seekTo(startIndex, 0)
+            it.prepare()
+            it.play()
         }
     }
 

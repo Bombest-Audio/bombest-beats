@@ -5,11 +5,14 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import okhttp3.MultipartBody
 import com.bombest.music.data.api.*
 import com.bombest.music.data.FavoritesManager
 import com.bombest.music.data.AuthPreferences
 import com.bombest.music.data.authDataStore
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import okhttp3.OkHttpClient
@@ -157,6 +160,16 @@ class PlaylistViewModel : ViewModel() {
         }
     }
     
+    /** Loads and returns tracks for a playlist (for playback). Does not update currentPlaylistTracks UI state. */
+    suspend fun getPlaylistTracksOnce(id: Int): List<Track> = withContext(Dispatchers.IO) {
+        try {
+            playlistApi.getPlaylistTracks(id).tracks
+        } catch (e: Exception) {
+            android.util.Log.e("PlaylistViewModel", "Failed to load playlist tracks: ${e.message}", e)
+            emptyList()
+        }
+    }
+
     fun loadPlaylistTracks(id: Int, name: String) {
         currentPlaylistName.value = name
         viewModelScope.launch {
@@ -196,6 +209,22 @@ class PlaylistViewModel : ViewModel() {
                 loadPlaylistTracks(playlistId, currentPlaylistName.value)
             } catch (e: Exception) {
                 android.util.Log.e("PlaylistViewModel", "Failed to add tracks: ${e.message}", e)
+                error.value = e.message
+            }
+        }
+    }
+
+    fun uploadPlaylistArt(playlistId: Int, imagePart: MultipartBody.Part) {
+        viewModelScope.launch {
+            try {
+                playlistApi.setPlaylistArt(playlistId, imagePart)
+                loadPlaylists()
+                // Refresh current playlist if we're viewing it
+                if (currentPlaylistName.value.isNotEmpty()) {
+                    loadPlaylistTracks(playlistId, currentPlaylistName.value)
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("PlaylistViewModel", "Failed to upload playlist art: ${e.message}", e)
                 error.value = e.message
             }
         }
