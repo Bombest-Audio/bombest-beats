@@ -78,12 +78,6 @@ fun DashboardScreen(onBack: () -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
     var authToken by remember { mutableStateOf<String?>(null) }
     
-    LaunchedEffect(Unit) {
-        authToken = context.authDataStore.data
-            .map { it[AuthPreferences.TOKEN_KEY] }
-            .first()
-    }
-    
     val dashboardApi = remember {
         val logging = HttpLoggingInterceptor().apply {
             level = HttpLoggingInterceptor.Level.BASIC
@@ -126,6 +120,9 @@ fun DashboardScreen(onBack: () -> Unit) {
     }
     
     LaunchedEffect(Unit) {
+        authToken = context.authDataStore.data
+            .map { it[AuthPreferences.TOKEN_KEY] }
+            .first()
         loadDashboard()
     }
     

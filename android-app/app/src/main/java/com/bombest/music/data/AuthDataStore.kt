@@ -12,4 +12,6 @@ val Context.authDataStore: DataStore<Preferences> by preferencesDataStore(name =
 object AuthPreferences {
     val TOKEN_KEY = stringPreferencesKey("access_token")
     val USER_KEY = stringPreferencesKey("username")
+    val USER_ID_KEY = stringPreferencesKey("user_id")
+    val ROLE_KEY = stringPreferencesKey("role")
 }

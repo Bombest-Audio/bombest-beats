@@ -30,6 +30,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
@@ -120,8 +121,9 @@ class MainActivity : ComponentActivity() {
                     viewModel = mainViewModel,
                     onShare = { title, artist -> shareTrack(title, artist) },
                     onLogout = {
-                        // Stop playback first
+                        // Stop playback and the media service
                         mainViewModel.stop()
+                        stopService(Intent(this@MainActivity, com.bombest.music.service.BombestMediaService::class.java))
                         lifecycleScope.launch {
                             authDataStore.edit { it.clear() }
                             val intent = Intent(this@MainActivity, LoginActivity::class.java)
@@ -326,6 +328,21 @@ fun MainContent(
                             playlistViewModel.uploadPlaylistArt(selectedPlaylistId!!, part)
                         }
                     },
+                    onSharePlaylist = {
+                        selectedPlaylistId?.let { id ->
+                            scope.launch {
+                                val shareUrl = playlistViewModel.sharePlaylist(id)
+                                shareUrl?.let { url ->
+                                    val sendIntent = Intent().apply {
+                                        action = Intent.ACTION_SEND
+                                        putExtra(Intent.EXTRA_TEXT, "Check out this playlist on Bombest Beats!\n$url")
+                                        type = "text/plain"
+                                    }
+                                    context.startActivity(Intent.createChooser(sendIntent, "Share Playlist"))
+                                }
+                            }
+                        }
+                    },
                     onBack = {
                         playlistViewModel.loadPlaylists()
                         currentScreen = Screen.PLAYLISTS
@@ -348,13 +365,17 @@ fun MainContent(
             Screen.ACCOUNT -> {
                 AccountScreen(
                     onBack = { currentScreen = Screen.LIBRARY },
-                    onRegisterPasskey = onRegisterPasskey
+                    onRegisterPasskey = onRegisterPasskey,
+                    onRefreshLibrary = { viewModel.refreshLibrary() },
+                    onSignOut = onLogout
                 )
             }
         }
         
         if (isMenuOpen) {
+            val bottomPaddingForMiniplayer = if (!isPlayerOpen && viewModel.currentMediaItem.value != null) 88.dp else 0.dp
             MenuOverlay(
+                bottomPadding = bottomPaddingForMiniplayer,
                 onDismiss = { isMenuOpen = false },
                 onLibrary = {
                     isMenuOpen = false
@@ -451,6 +472,7 @@ fun MainContent(
 
 @Composable
 fun MenuOverlay(
+    bottomPadding: Dp = 0.dp,
     onDismiss: () -> Unit,
     onLibrary: () -> Unit,
     onPlaylists: () -> Unit,
@@ -465,7 +487,10 @@ fun MenuOverlay(
             .background(Color(0xFF15192A))
     ) {
         Column(
-            modifier = Modifier.fillMaxSize().padding(24.dp)
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(24.dp)
+                .padding(bottom = bottomPadding)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),

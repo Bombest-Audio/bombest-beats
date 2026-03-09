@@ -48,6 +48,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
@@ -59,6 +60,9 @@ import com.bombest.music.ui.components.GraffitiVisualizer
 import com.bombest.music.ui.components.SprayPaintProgress
 import com.bombest.music.visualizer.GraffitiWaveformVisualizer
 import com.bombest.music.R
+import com.bombest.music.data.NetworkModule
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import kotlin.math.atan2
 
 @Composable
@@ -102,6 +106,8 @@ fun PlayerScreen(
             // Actually, for "Full Screen" visual effect, we usually want the background to go BEHIND the status bar.
             // So we shouldn't pad the background Box, but the content inside.
     ) {
+        // Canvas background (GIF/video like Spotify Canvas)
+        CanvasBackground(trackId = currentMediaItem.mediaId)
         // Content
         Column(
             modifier = Modifier
@@ -246,6 +252,64 @@ fun IconButtonCircle(onClick: () -> Unit = {}, content: @Composable BoxScope.() 
         contentAlignment = Alignment.Center,
         content = content
     )
+}
+
+
+@Composable
+private fun CanvasBackground(trackId: String) {
+    var canvasState by remember { mutableStateOf<Pair<String?, String?>>(null to null) } // url to type
+    val context = LocalContext.current
+    LaunchedEffect(trackId) {
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val baseUrl = NetworkModule.getStreamBaseUrl()
+                val url = "$baseUrl/track/$trackId/canvas"
+                val client = OkHttpClient.Builder().build()
+                val req = Request.Builder().url(url).head().build()
+                val resp = client.newCall(req).execute()
+                if (resp.isSuccessful) {
+                    val type = resp.header("X-Canvas-Type") ?: "gif"
+                    canvasState = url to type
+                }
+            } catch (_: Exception) {}
+        }
+    }
+    canvasState.let { (url, type) ->
+        if (url != null && type != null) {
+            Box(
+                modifier = Modifier.fillMaxSize()
+            ) {
+                if (type == "gif") {
+                    AsyncImage(
+                        model = ImageRequest.Builder(context).data(url).crossfade(true).build(),
+                        contentDescription = null,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                } else if (type == "video") {
+                    AndroidView(
+                        modifier = Modifier.fillMaxSize(),
+                        factory = { ctx ->
+                            android.widget.VideoView(ctx).apply {
+                                setVideoURI(android.net.Uri.parse(url))
+                                setOnPreparedListener { mp ->
+                                    mp.isLooping = true
+                                    mp.setVolume(0f, 0f)
+                                    mp.start()
+                                }
+                            }
+                        },
+                        onRelease = { it.stopPlayback() }
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.6f))))
+                )
+            }
+        }
+    }
 }
 
 @Composable

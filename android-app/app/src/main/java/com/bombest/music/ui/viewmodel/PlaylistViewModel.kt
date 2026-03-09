@@ -34,45 +34,40 @@ class PlaylistViewModel : ViewModel() {
     val currentPlaylistName = mutableStateOf("")
     
     fun initialize(context: Context) {
-        // Load auth token synchronously during initialization
-        authToken = kotlinx.coroutines.runBlocking {
-            context.authDataStore.data.map { it[AuthPreferences.TOKEN_KEY] }.first()
-        }
-        android.util.Log.d("PlaylistViewModel", "Loaded auth token: ${if (authToken != null) "present" else "null"}")
-        
-        val logging = HttpLoggingInterceptor().apply {
-            level = HttpLoggingInterceptor.Level.BASIC
-        }
-        val client = OkHttpClient.Builder()
-            .addInterceptor { chain ->
-                val request = chain.request().newBuilder()
-                // Add auth token if available
-                if (authToken != null) {
-                    request.addHeader("Authorization", "Bearer $authToken")
-                }
-                chain.proceed(request.build())
-            }
-            .addInterceptor(logging)
-            .connectTimeout(10, TimeUnit.SECONDS)
-            .readTimeout(10, TimeUnit.SECONDS)
-            .build()
-        
-        val moshi = com.squareup.moshi.Moshi.Builder()
-            .add(com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory())
-            .build()
-        
-        val retrofit = Retrofit.Builder()
-            .baseUrl(com.bombest.music.data.NetworkModule.currentBaseUrl)
-            .client(client)
-            .addConverterFactory(MoshiConverterFactory.create(moshi))
-            .build()
-        
-        playlistApi = retrofit.create(PlaylistApi::class.java)
-        loadPlaylists()
-        loadAllTracks()  // Load library tracks for picker
-        
-        // Initialize FavoritesManager after playlists are loaded
         viewModelScope.launch {
+            authToken = context.authDataStore.data.map { it[AuthPreferences.TOKEN_KEY] }.first()
+            android.util.Log.d("PlaylistViewModel", "Loaded auth token: ${if (authToken != null) "present" else "null"}")
+            
+            val logging = HttpLoggingInterceptor().apply {
+                level = HttpLoggingInterceptor.Level.BASIC
+            }
+            val client = OkHttpClient.Builder()
+                .addInterceptor { chain ->
+                    val request = chain.request().newBuilder()
+                    if (authToken != null) {
+                        request.addHeader("Authorization", "Bearer $authToken")
+                    }
+                    chain.proceed(request.build())
+                }
+                .addInterceptor(logging)
+                .connectTimeout(10, TimeUnit.SECONDS)
+                .readTimeout(10, TimeUnit.SECONDS)
+                .build()
+            
+            val moshi = com.squareup.moshi.Moshi.Builder()
+                .add(com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory())
+                .build()
+            
+            val retrofit = Retrofit.Builder()
+                .baseUrl(com.bombest.music.data.NetworkModule.currentBaseUrl)
+                .client(client)
+                .addConverterFactory(MoshiConverterFactory.create(moshi))
+                .build()
+            
+            playlistApi = retrofit.create(PlaylistApi::class.java)
+            loadPlaylists()
+            loadAllTracks()
+            
             try {
                 val response = playlistApi.getPlaylists()
                 val favoritesPlaylist = response.playlists.find { it.name == "Favorites" }
@@ -180,6 +175,7 @@ class PlaylistViewModel : ViewModel() {
                 android.util.Log.d("PlaylistViewModel", "Received ${response.tracks.size} tracks from API")
                 currentPlaylistTracks.clear()
                 currentPlaylistTracks.addAll(response.tracks)
+                updatePlaylistCountInList(id, response.tracks.size)
                 android.util.Log.d("PlaylistViewModel", "Loaded ${currentPlaylistTracks.size} tracks into UI")
             } catch (e: Exception) {
                 android.util.Log.e("PlaylistViewModel", "Failed to load playlist tracks: ${e.message}", e)
@@ -188,12 +184,22 @@ class PlaylistViewModel : ViewModel() {
             isLoading.value = false
         }
     }
+
+    /** Update the displayed track count for a playlist in the list (so card shows correct count even if API returned 0). */
+    private fun updatePlaylistCountInList(playlistId: Int, count: Int) {
+        val index = playlists.indexOfFirst { it.id == playlistId }
+        if (index >= 0) {
+            val p = playlists[index]
+            playlists[index] = p.copy(count = count)
+        }
+    }
     
     fun removeTrackFromPlaylist(playlistId: Int, trackId: Int) {
         viewModelScope.launch {
             try {
                 playlistApi.removeTracksFromPlaylist(playlistId, AddTracksRequest(listOf(trackId)))
                 currentPlaylistTracks.removeAll { it.id == trackId }
+                updatePlaylistCountInList(playlistId, currentPlaylistTracks.size)
             } catch (e: Exception) {
                 error.value = e.message
             }
@@ -205,8 +211,19 @@ class PlaylistViewModel : ViewModel() {
             try {
                 android.util.Log.d("PlaylistViewModel", "Adding ${trackIds.size} tracks to playlist $playlistId")
                 playlistApi.addTracksToPlaylist(playlistId, AddTracksRequest(trackIds))
-                // Reload playlist tracks to refresh the list
-                loadPlaylistTracks(playlistId, currentPlaylistName.value)
+                // Reload playlist tracks so detail screen shows new list
+                isLoading.value = true
+                try {
+                    val response = playlistApi.getPlaylistTracks(playlistId)
+                    currentPlaylistTracks.clear()
+                    currentPlaylistTracks.addAll(response.tracks)
+                    updatePlaylistCountInList(playlistId, response.tracks.size)
+                    android.util.Log.d("PlaylistViewModel", "After add: loaded ${response.tracks.size} tracks")
+                } finally {
+                    isLoading.value = false
+                }
+                // Refresh playlists so list screen shows updated count
+                loadPlaylists()
             } catch (e: Exception) {
                 android.util.Log.e("PlaylistViewModel", "Failed to add tracks: ${e.message}", e)
                 error.value = e.message
@@ -225,6 +242,48 @@ class PlaylistViewModel : ViewModel() {
                 }
             } catch (e: Exception) {
                 android.util.Log.e("PlaylistViewModel", "Failed to upload playlist art: ${e.message}", e)
+                error.value = e.message
+            }
+        }
+    }
+
+    /** Returns share URL for the playlist. Generates token if not already shared. Updates local state. */
+    suspend fun sharePlaylist(playlistId: Int): String? {
+        val playlist = playlists.find { it.id == playlistId } ?: return null
+        if (playlist.share_token != null) {
+            return "https://bom.best/beats/playlist/${playlist.share_token}"
+        }
+        return withContext(Dispatchers.IO) {
+            try {
+                val response = playlistApi.sharePlaylist(playlistId)
+                withContext(Dispatchers.Main) {
+                    val index = playlists.indexOfFirst { it.id == playlistId }
+                    if (index >= 0) {
+                        playlists[index] = playlists[index].copy(share_token = response.share_token)
+                    }
+                }
+                response.share_url
+            } catch (e: Exception) {
+                android.util.Log.e("PlaylistViewModel", "Failed to share playlist: ${e.message}", e)
+                error.value = e.message
+                null
+            }
+        }
+    }
+
+    /** Revoke sharing for a playlist. */
+    suspend fun unsharePlaylist(playlistId: Int) {
+        withContext(Dispatchers.IO) {
+            try {
+                playlistApi.unsharePlaylist(playlistId)
+                withContext(Dispatchers.Main) {
+                    val index = playlists.indexOfFirst { it.id == playlistId }
+                    if (index >= 0) {
+                        playlists[index] = playlists[index].copy(share_token = null)
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("PlaylistViewModel", "Failed to unshare playlist: ${e.message}", e)
                 error.value = e.message
             }
         }

@@ -13,6 +13,7 @@ import androidx.media3.datasource.okhttp.OkHttpDataSource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import java.io.File
@@ -66,9 +67,10 @@ class DownloadManager private constructor(private val context: Context) {
             .writeTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
             .addInterceptor { chain ->
                 val request = chain.request().newBuilder()
-                // Add auth token if available
-                val token = context.getSharedPreferences("auth_prefs", Context.MODE_PRIVATE)
-                    .getString("auth_token", null)
+                // Add auth token from DataStore (same store as rest of app)
+                val token = runBlocking {
+                    context.authDataStore.data.map { it[AuthPreferences.TOKEN_KEY] }.first()
+                }
                 if (token != null) {
                     request.addHeader("Authorization", "Bearer $token")
                 }

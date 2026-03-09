@@ -563,20 +563,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun playMedia(mediaItem: MediaItem) {
-        mediaBrowser?.let {
-            // Find index in playlist
-            val index = playlist.indexOfFirst { it.mediaId == mediaItem.mediaId }
+        mediaBrowser?.let { browser ->
+            val snapshot = playlist.toList()
+            val index = snapshot.indexOfFirst { it.mediaId == mediaItem.mediaId }
             if (index != -1) {
-                // Set the whole playlist so next/prev works
-                it.setMediaItems(playlist)
-                it.seekTo(index, 0)
-                it.prepare()
-                it.play()
+                // Only set media items if the player's queue doesn't match our playlist
+                val playerCount = browser.mediaItemCount
+                val playlistMatch = playerCount == snapshot.size &&
+                    (0 until playerCount).all { i ->
+                        browser.getMediaItemAt(i).mediaId == snapshot[i].mediaId
+                    }
+                if (!playlistMatch) {
+                    browser.setMediaItems(snapshot)
+                }
+                browser.seekTo(index, 0)
+                browser.prepare()
+                browser.play()
             } else {
-                // Fallback
-                it.setMediaItem(mediaItem)
-                it.prepare()
-                it.play()
+                browser.setMediaItem(mediaItem)
+                browser.prepare()
+                browser.play()
             }
         }
     }
@@ -656,67 +662,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         
-        // #region agent log
-        try {
-            val logFile = java.io.File("/Users/thomasphillips/bombest-audio/.cursor/debug.log")
-            val logEntry = org.json.JSONObject().apply {
-                put("location", "MainViewModel.kt:625")
-                put("message", "onFavorite called")
-                put("data", org.json.JSONObject().apply {
-                    put("mediaId", mediaId)
-                    put("trackId", trackId)
-                })
-                put("timestamp", System.currentTimeMillis())
-                put("sessionId", "debug-session")
-                put("runId", "run1")
-                put("hypothesisId", "A")
-            }
-            logFile.appendText(logEntry.toString() + "\n")
-        } catch (e: Exception) {}
-        // #endregion
-        
         viewModelScope.launch {
             try {
-                // #region agent log
-                try {
-                    val logFile = java.io.File("/Users/thomasphillips/bombest-audio/.cursor/debug.log")
-                    val logEntry = org.json.JSONObject().apply {
-                        put("location", "MainViewModel.kt:640")
-                        put("message", "Before FavoritesManager.toggleFavorite")
-                        put("data", org.json.JSONObject().apply {
-                            put("trackId", trackId)
-                            put("wasFavorited", FavoritesManager.isFavorited(trackId))
-                        })
-                        put("timestamp", System.currentTimeMillis())
-                        put("sessionId", "debug-session")
-                        put("runId", "run1")
-                        put("hypothesisId", "A")
-                    }
-                    logFile.appendText(logEntry.toString() + "\n")
-                } catch (e: Exception) {}
-                // #endregion
-                
                 val result = FavoritesManager.toggleFavorite(trackId)
-                
-                // #region agent log
-                try {
-                    val logFile = java.io.File("/Users/thomasphillips/bombest-audio/.cursor/debug.log")
-                    val logEntry = org.json.JSONObject().apply {
-                        put("location", "MainViewModel.kt:650")
-                        put("message", "After FavoritesManager.toggleFavorite")
-                        put("data", org.json.JSONObject().apply {
-                            put("trackId", trackId)
-                            put("result", result)
-                            put("isFavorited", FavoritesManager.isFavorited(trackId))
-                        })
-                        put("timestamp", System.currentTimeMillis())
-                        put("sessionId", "debug-session")
-                        put("runId", "run1")
-                        put("hypothesisId", "A")
-                    }
-                    logFile.appendText(logEntry.toString() + "\n")
-                } catch (e: Exception) {}
-                // #endregion
                 
                 // Update local favorites state for UI
                 val currentFavorites = favorites.value.toMutableSet()
@@ -730,24 +678,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 android.util.Log.d("MainViewModel", "Favorite toggled: trackId=$trackId, result=$result")
             } catch (e: Exception) {
                 android.util.Log.e("MainViewModel", "Failed to toggle favorite: ${e.message}", e)
-                // #region agent log
-                try {
-                    val logFile = java.io.File("/Users/thomasphillips/bombest-audio/.cursor/debug.log")
-                    val logEntry = org.json.JSONObject().apply {
-                        put("location", "MainViewModel.kt:675")
-                        put("message", "Error in onFavorite")
-                        put("data", org.json.JSONObject().apply {
-                            put("error", e.message)
-                            put("trackId", trackId)
-                        })
-                        put("timestamp", System.currentTimeMillis())
-                        put("sessionId", "debug-session")
-                        put("runId", "run1")
-                        put("hypothesisId", "A")
-                    }
-                    logFile.appendText(logEntry.toString() + "\n")
-                } catch (e2: Exception) {}
-                // #endregion
             }
         }
     }
@@ -824,7 +754,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     override fun onCleared() {
-        super.onCleared()
+        visualizer?.release()
+        visualizer = null
+        simulationJob?.cancel()
+        simulationJob = null
+        updateProgressJob?.cancel()
+        updateProgressJob = null
         browserFuture?.let { MediaBrowser.releaseFuture(it) }
+        super.onCleared()
     }
 }

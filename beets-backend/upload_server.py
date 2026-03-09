@@ -1,9 +1,14 @@
+import errno
 import os
 import mimetypes
 import re
 import json
+import uuid
 import subprocess
 import sqlite3
+import tempfile
+import shutil
+import zipfile
 import traceback
 import wave
 import struct
@@ -32,7 +37,13 @@ with open('config.yaml', 'r') as f:
 app.config['JWT_SECRET_KEY'] = config.get('jwt_secret', 'dev-secret-key')
 app.config['JWT_ACCESS_TOKEN_EXPIRES'] = False # Non-expiring for simplicty in MVP
 jwt = JWTManager(app)
-CORS(app)
+# CORS: allow frontend origins (bom.best, CloudFront, beats-app host the app; beats.bom.best is API)
+CORS(app, origins=[
+    'https://bom.best', 'https://www.bom.best',
+    'https://beats.bom.best', 'https://beats-app.bom.best',
+    'https://d37qdccady5d3d.cloudfront.net',  # CloudFront distribution URL
+    'http://localhost:3000', 'http://localhost:8338', 'http://127.0.0.1:3000'
+], supports_credentials=True)
 
 # --- S3 Configuration ---
 S3_BUCKET = os.environ.get('S3_BUCKET')
@@ -63,7 +74,7 @@ def admin_required():
         @jwt_required()
         def decorator(*args, **kwargs):
             current_user_id = get_jwt_identity()
-            conn = sqlite3.connect('music/users.db')
+            conn = sqlite3.connect(USERS_DB)
             cursor = conn.cursor()
             cursor.execute("SELECT role FROM users WHERE id = ?", (current_user_id,))
             result = cursor.fetchone()
@@ -74,10 +85,19 @@ def admin_required():
             return fn(*args, **kwargs)
         return decorator
     return wrapper
+
+# Persist playlists: set DATA_DIR to a path that is volume-mounted (e.g. /app/data in Docker).
+# users.db lives in DATA_DIR; library and music stay under cwd/music so image content is used.
+DATA_DIR = os.environ.get('DATA_DIR')
+if DATA_DIR:
+    USERS_DB = os.path.join(DATA_DIR, 'users.db')
+else:
+    USERS_DB = os.path.join(os.getcwd(), 'music', 'users.db')
+
 UPLOAD_FOLDER = os.path.join(os.getcwd(), 'uploads')
 MUSIC_FOLDER = os.path.join(os.getcwd(), 'music')
 WAVEFORM_FOLDER = os.path.join(os.getcwd(), 'waveforms')
-LIBRARY_DB = os.path.join(os.getcwd(), 'music', 'library.db')
+LIBRARY_DB = os.path.join(MUSIC_FOLDER, 'library.db')
 PLAYLIST_ART_FOLDER = os.path.join(MUSIC_FOLDER, 'playlist_art')
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
@@ -85,7 +105,43 @@ os.makedirs(MUSIC_FOLDER, exist_ok=True)
 os.makedirs(WAVEFORM_FOLDER, exist_ok=True)
 os.makedirs(PLAYLIST_ART_FOLDER, exist_ok=True)
 
+# Track artwork storage (per-track cover art and canvas GIF/video)
+TRACK_ART_FOLDER = os.path.join(MUSIC_FOLDER, 'track_art')
+os.makedirs(TRACK_ART_FOLDER, exist_ok=True)
+
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+# Allow large folder uploads (65+ files); default is unlimited but some proxies limit
+app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500 MB
+
+# Ensure 500 errors return JSON so frontend can display the message
+@app.errorhandler(500)
+def handle_500(err):
+    traceback.print_exc()
+    return jsonify({'error': str(err) if err else 'Internal server error'}), 500
+
+# Script directory for beet/config - works regardless of cwd when starting server
+BEETS_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def init_track_artwork():
+    """Create track_artwork table in library.db if not exists"""
+    try:
+        conn = sqlite3.connect(LIBRARY_DB)
+        cursor = conn.cursor()
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS track_artwork (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                track_id INTEGER NOT NULL,
+                file_path TEXT NOT NULL,
+                art_type TEXT NOT NULL,
+                is_primary INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"track_artwork init: {e}")
 
 ALLOWED_EXTENSIONS = {'mp3', 'wav', 'ogg', 'flac', 'm4a'}
 
@@ -101,12 +157,19 @@ def get_track_name(filename):
     return name.strip() or filename
 
 def check_duplicate(track_name):
-    """Check if a track with similar name already exists in the library"""
+    """Check if a track with similar name already exists in the library.
+    Normalizes track_name to match stored format (underscores->spaces, lowercase)."""
     try:
+        normalized = (track_name or '').replace('_', ' ').strip().lower()
+        if not normalized:
+            return None
         conn = sqlite3.connect(LIBRARY_DB)
         cursor = conn.cursor()
-        # Check for exact match or similar (case-insensitive)
-        cursor.execute("SELECT id, title FROM items WHERE LOWER(title) = LOWER(?)", (track_name,))
+        # DB stores title as track_name.replace('_', ' ').lower(); compare normalized
+        cursor.execute(
+            "SELECT id, title FROM items WHERE LOWER(TRIM(REPLACE(title, '_', ' '))) = ?",
+            (normalized,)
+        )
         result = cursor.fetchone()
         conn.close()
         return result  # Returns (id, title) if found, None otherwise
@@ -330,41 +393,348 @@ def upload_file():
     return jsonify({'error': 'Invalid file type'}), 400
 
 
-@app.route('/duplicates', methods=['DELETE'])
-def remove_duplicates():
-    """Find and remove duplicate tracks from the library"""
+# --- Folder / Zip Upload ---
+ALLOWED_IMAGE_EXT = {'jpg', 'jpeg', 'png', 'gif', 'webp'}
+ALLOWED_CANVAS_EXT = {'gif', 'mp4', 'webm', 'mov'}
+
+def _basename_stem(path):
+    """Get basename stem (no extension), case-insensitive, ignore leading ._"""
+    name = os.path.basename(path)
+    if name.startswith('._'):
+        name = name[2:]
+    return os.path.splitext(name)[0].lower().strip()
+
+def _scan_for_audio_and_images(root_dir):
+    """Scan root_dir recursively. Return (audio_files, image_map).
+    image_map: {dir_path: {stem: [full_path, ...]}}
+    """
+    audio_ext = ALLOWED_EXTENSIONS
+    image_ext = ALLOWED_IMAGE_EXT | ALLOWED_CANVAS_EXT
+    audio_files = []
+    images_by_dir = {}
+    for dirpath, _, filenames in os.walk(root_dir):
+        dir_images = {}
+        for f in filenames:
+            if f.startswith('._'):
+                continue
+            fp = os.path.join(dirpath, f)
+            ext = f.rsplit('.', 1)[-1].lower() if '.' in f else ''
+            if ext in audio_ext:
+                audio_files.append(fp)
+            elif ext in image_ext:
+                stem = _basename_stem(fp)
+                dir_images.setdefault(stem, []).append(fp)
+        if dir_images:
+            images_by_dir[dirpath] = dir_images
+    return audio_files, images_by_dir
+
+def _match_images_to_audio(audio_path, images_by_dir):
+    """Return (cover_candidates, canvas_candidates) for this audio file."""
+    audio_dir = os.path.dirname(audio_path)
+    stem = _basename_stem(audio_path)
+    dir_images = images_by_dir.get(audio_dir, {})
+    candidates = dir_images.get(stem, [])
+    covers = []
+    canvases = []
+    for p in candidates:
+        ext = os.path.splitext(p)[1].lower().lstrip('.')
+        if ext in ALLOWED_CANVAS_EXT:
+            canvases.append(p)
+        elif ext in ALLOWED_IMAGE_EXT:
+            covers.append(p)
+    # Prefer jpeg > png > gif > webp for cover
+    cover_order = ('jpg', 'jpeg', 'png', 'gif', 'webp')
+    covers.sort(key=lambda x: (cover_order.index(os.path.splitext(x)[1].lower().lstrip('.'))
+                              if os.path.splitext(x)[1].lower().lstrip('.') in cover_order
+                              else 99))
+    return covers, canvases
+
+def _derive_metadata_from_path(audio_path, extract_root):
+    """Derive album from folder structure. extract_root is the scan root."""
+    rel = os.path.relpath(audio_path, extract_root)
+    parts = rel.split(os.sep)
+    if len(parts) >= 2:
+        root_name = parts[0]
+        return root_name  # e.g. "8 Tracks n 6 Packs"
+    return 'Unknown Album'
+
+def _set_audio_metadata(filepath, title, artist, album):
+    """Set title, artist, album on audio file before import."""
+    try:
+        from mutagen import File
+        audio = File(filepath, easy=True)
+        if audio is not None:
+            formatted_title = title.replace('_', ' ').lower()
+            audio['title'] = formatted_title
+            audio['artist'] = artist
+            audio['album'] = album
+            audio.save()
+            return True
+    except Exception as e:
+        print(f"Could not set metadata: {e}")
+    return False
+
+def _insert_track_artwork(track_id, src_path, art_type, is_primary=0, suffix=None):
+    """Copy file to TRACK_ART_FOLDER and insert into track_artwork. Returns rel_path or None."""
+    ext = os.path.splitext(src_path)[1].lower()
+    if ext == '.jpeg':
+        ext = '.jpg'
+    dest_name = f"{track_id}_{art_type}_{suffix}{ext}" if suffix is not None else f"{track_id}_{art_type}{ext}"
+    dest_path = os.path.join(TRACK_ART_FOLDER, dest_name)
+    try:
+        shutil.copy2(src_path, dest_path)
+        rel_path = os.path.join('music', 'track_art', dest_name)
+        conn = sqlite3.connect(LIBRARY_DB)
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO track_artwork (track_id, file_path, art_type, is_primary) VALUES (?, ?, ?, ?)",
+            (track_id, rel_path, art_type, is_primary)
+        )
+        conn.commit()
+        conn.close()
+        return rel_path
+    except Exception as e:
+        print(f"Failed to store track artwork: {e}")
+        return None
+
+
+@app.route('/upload/folder', methods=['POST'])
+@admin_required()
+def upload_folder():
+    """Accept multiple files or a zip, extract/scan, import audio with metadata from folder structure, associate matching images."""
+    work_dir = None
+    extract_root = None
+
+    try:
+        # Determine input: zip or multiple files
+        if 'file' in request.files:
+            f = request.files['file']
+            if f.filename and f.filename.lower().endswith('.zip'):
+                work_dir = tempfile.mkdtemp()
+                zip_path = os.path.join(work_dir, 'upload.zip')
+                f.save(zip_path)
+                with zipfile.ZipFile(zip_path, 'r') as z:
+                    z.extractall(work_dir)
+                extract_root = work_dir
+            else:
+                return jsonify({'error': 'Expected a .zip file for single file upload'}), 400
+        elif 'files' in request.files or 'files[]' in request.files:
+            files = request.files.getlist('files') or request.files.getlist('files[]')
+            if not files:
+                return jsonify({'error': 'No files provided'}), 400
+            work_dir = tempfile.mkdtemp()
+            extract_root = work_dir
+            work_dir_abs = os.path.abspath(work_dir)
+            # Extensions we save (audio + images); avoids saving "Volume 1" as file when it's a dir
+            save_exts = ALLOWED_EXTENSIONS | {'jpg', 'jpeg', 'png', 'gif', 'webp', 'mp4', 'webm', 'mov'}
+            for i, f in enumerate(files):
+                if f.filename and f.filename.strip():
+                    raw_fn = f.filename.replace('\\', '/').strip()
+                    ext = raw_fn.rsplit('.', 1)[-1].lower() if '.' in raw_fn else ''
+                    if ext not in save_exts:
+                        continue
+                    parts = [secure_filename(p) for p in raw_fn.split('/') if p]
+                    fn = os.path.join(*parts) if parts else f"file_{i}"
+                    save_path = os.path.join(work_dir, fn)
+                    if not os.path.abspath(save_path).startswith(work_dir_abs):
+                        continue
+                    try:
+                        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+                        f.save(save_path)
+                    except OSError as e:
+                        if e.errno != errno.EEXIST:
+                            raise
+                        continue
+        else:
+            return jsonify({'error': 'Provide "file" (zip) or "files"/"files[]" (multiple files)'}), 400
+
+        audio_files, images_by_dir = _scan_for_audio_and_images(extract_root)
+        if not audio_files:
+            return jsonify({'error': 'No audio files found (mp3, wav, ogg, flac, m4a)'}), 400
+
+        results = {'imported': [], 'failed': [], 'skipped': [], 'needs_art_selection': []}
+
+        for audio_path in audio_files:
+            track_name = get_track_name(os.path.basename(audio_path))
+            existing = check_duplicate(track_name)
+            if existing:
+                results['skipped'].append({'file': os.path.basename(audio_path), 'reason': 'duplicate'})
+                continue
+
+            album = _derive_metadata_from_path(audio_path, extract_root)
+            _set_audio_metadata(audio_path, track_name, 'thomas phillips', album)
+
+            try:
+                subprocess.run(
+                    ['beet', '-c', os.path.join(BEETS_DIR, 'config.yaml'), 'import', '-q', '--noautotag', '-s', audio_path],
+                    check=True, cwd=BEETS_DIR
+                )
+            except subprocess.CalledProcessError as e:
+                results['failed'].append({'file': os.path.basename(audio_path), 'reason': str(e)})
+                continue
+
+            # Get newly imported track id
+            conn = sqlite3.connect(LIBRARY_DB)
+            cursor = conn.cursor()
+            cursor.execute("SELECT id FROM items ORDER BY id DESC LIMIT 1")
+            row = cursor.fetchone()
+            conn.close()
+            if not row:
+                results['failed'].append({'file': os.path.basename(audio_path), 'reason': 'no track id'})
+                continue
+
+            new_id = row[0]
+            formatted_title = track_name.replace('_', ' ').lower()
+            conn = sqlite3.connect(LIBRARY_DB)
+            cursor = conn.cursor()
+            cursor.execute("UPDATE items SET title = ?, artist = ?, album = ? WHERE id = ?",
+                          (formatted_title, 'thomas phillips', album, new_id))
+            conn.commit()
+            conn.close()
+
+            # Match and store artwork
+            covers, canvases = _match_images_to_audio(audio_path, images_by_dir)
+            if covers:
+                if len(covers) == 1:
+                    _insert_track_artwork(new_id, covers[0], 'cover', is_primary=1)
+                else:
+                    candidates = []
+                    for i, c in enumerate(covers):
+                        rel = _insert_track_artwork(new_id, c, 'cover', is_primary=0, suffix=i)
+                        if rel:
+                            candidates.append({
+                                'path': rel,
+                                'display_name': os.path.basename(c)
+                            })
+                    if candidates:
+                        results['needs_art_selection'].append({
+                            'track_id': new_id,
+                            'track_name': formatted_title,
+                            'candidates': candidates
+                        })
+            if canvases:
+                _insert_track_artwork(new_id, canvases[0], 'canvas', is_primary=0)
+
+            # S3 upload if configured
+            if s3_client:
+                try:
+                    conn = sqlite3.connect(LIBRARY_DB)
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT path FROM items WHERE id = ?", (new_id,))
+                    res = cursor.fetchone()
+                    conn.close()
+                    if res:
+                        final_path = res[0]
+                        if isinstance(final_path, bytes):
+                            final_path = final_path.decode('utf-8', errors='ignore')
+                        rel_path = os.path.relpath(final_path, start=os.getcwd())
+                        if not rel_path.startswith('..'):
+                            s3_client.upload_file(final_path, S3_BUCKET, rel_path)
+                except Exception as s3_err:
+                    print(f"S3 upload failed for {new_id}: {s3_err}")
+
+            results['imported'].append({'track_name': track_name, 'id': new_id})
+
+        return jsonify({
+            'message': f"Imported {len(results['imported'])} tracks",
+            'imported': results['imported'],
+            'failed': results['failed'],
+            'skipped': results['skipped'],
+            'needs_art_selection': results['needs_art_selection']
+        }), 200
+
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+    finally:
+        if work_dir and os.path.isdir(work_dir):
+            try:
+                shutil.rmtree(work_dir)
+            except Exception:
+                pass
+
+
+@app.route('/upload/folder/confirm-art', methods=['POST'])
+@admin_required()
+def confirm_art_selection():
+    """Set the primary cover for tracks that had multiple matching images."""
+    data = request.get_json(silent=True) or {}
+    selections = data.get('selections', [])
+    if not selections:
+        return jsonify({'error': 'Provide "selections": [{ "track_id", "selected_path" }]'}), 400
+
     try:
         conn = sqlite3.connect(LIBRARY_DB)
         cursor = conn.cursor()
-        
-        # Find duplicates (same title, keep lowest ID)
-        cursor.execute("""
-            SELECT id, title FROM items 
-            WHERE title IN (
-                SELECT title FROM items 
-                GROUP BY title HAVING COUNT(*) > 1
+        for sel in selections:
+            track_id = sel.get('track_id')
+            selected_path = sel.get('selected_path')
+            if not track_id or not selected_path:
+                continue
+            # Clear primary for all covers of this track
+            cursor.execute(
+                "UPDATE track_artwork SET is_primary = 0 WHERE track_id = ? AND art_type = 'cover'",
+                (track_id,)
             )
-            ORDER BY title, id
-        """)
-        
-        duplicates = cursor.fetchall()
-        
-        # Group by title and mark all but first for deletion
-        to_delete = []
-        seen_titles = {}
-        for item_id, title in duplicates:
-            if title in seen_titles:
-                to_delete.append(item_id)
-            else:
-                seen_titles[title] = item_id
-        
-        # Delete from database
-        for item_id in to_delete:
-            cursor.execute("DELETE FROM items WHERE id = ?", (item_id,))
-        
+            # Set primary for the selected one
+            cursor.execute(
+                "UPDATE track_artwork SET is_primary = 1 WHERE track_id = ? AND file_path = ? AND art_type = 'cover'",
+                (track_id, selected_path)
+            )
         conn.commit()
         conn.close()
-        
+        return jsonify({'message': 'Art selection confirmed'}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/duplicates', methods=['DELETE'])
+@admin_required()
+def remove_duplicates():
+    """Find and remove duplicate tracks from the library. Keeps lowest ID per group.
+    Case-insensitive; normalizes title (underscores, whitespace) before grouping."""
+    try:
+        from collections import defaultdict
+
+        lib_conn = sqlite3.connect(LIBRARY_DB)
+        lib_cursor = lib_conn.cursor()
+        lib_cursor.execute("SELECT id, title FROM items")
+        rows = lib_cursor.fetchall()
+
+        # Group by normalized title (same as check_duplicate)
+        def normalize(t):
+            return (t or '').replace('_', ' ').strip().lower()
+
+        by_normalized = defaultdict(list)
+        for item_id, title in rows:
+            by_normalized[normalize(title)].append((item_id, title))
+
+        to_delete = []
+        for ntitle, items in by_normalized.items():
+            if len(items) > 1:
+                items.sort(key=lambda x: x[0])
+                for item_id, _ in items[1:]:
+                    to_delete.append(item_id)
+
+        if to_delete:
+            # Clean playlist_tracks (USERS_DB) before removing from items
+            users_conn = sqlite3.connect(USERS_DB)
+            users_cursor = users_conn.cursor()
+            placeholders = ','.join('?' for _ in to_delete)
+            users_cursor.execute(
+                f"DELETE FROM playlist_tracks WHERE track_id IN ({placeholders})",
+                to_delete
+            )
+            users_conn.commit()
+            users_conn.close()
+
+            for item_id in to_delete:
+                lib_cursor.execute("DELETE FROM items WHERE id = ?", (item_id,))
+
+        lib_conn.commit()
+        lib_conn.close()
+
         return jsonify({
             'message': f'Removed {len(to_delete)} duplicate tracks',
             'deleted_ids': to_delete
@@ -678,6 +1048,12 @@ def get_library():
                 conn.close()
                 return jsonify({'items': []}), 200
             raise
+        canvas_track_ids = set()
+        try:
+            cursor.execute("SELECT DISTINCT track_id FROM track_artwork WHERE art_type = 'canvas'")
+            canvas_track_ids = {r[0] for r in cursor.fetchall()}
+        except sqlite3.OperationalError:
+            pass
         conn.close()
 
         items = []
@@ -685,7 +1061,7 @@ def get_library():
             item_id = row['id']
             raw_path = row['path']
             path_key = _path_to_s3_key(raw_path)
-            items.append({
+            item = {
                 'id': item_id,
                 'title': _decode_val(row['title']) or 'Unknown',
                 'artist': _decode_val(row['artist']) or 'Unknown Artist',
@@ -693,7 +1069,10 @@ def get_library():
                 'album_id': row['album_id'],
                 'path': path_key,
                 'stream_url': f'/stream/{item_id}',
-            })
+            }
+            if item_id in canvas_track_ids:
+                item['canvas_url'] = f'/track/{item_id}/canvas'
+            items.append(item)
         return jsonify({'items': items}), 200
     except Exception as e:
         if 'no such table' in str(e).lower() or 'no such column' in str(e).lower():
@@ -703,7 +1082,7 @@ def get_library():
 @app.route('/tracks/<int:track_id>/loops', methods=['GET'])
 @jwt_required()
 def get_loops(track_id):
-    conn = sqlite3.connect('music/users.db')
+    conn = sqlite3.connect(USERS_DB)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     
@@ -732,7 +1111,7 @@ def create_loop(track_id):
     if start_time is None or end_time is None:
         return jsonify({'error': 'Missing start/end time'}), 400
         
-    conn = sqlite3.connect('music/users.db')
+    conn = sqlite3.connect(USERS_DB)
     cursor = conn.cursor()
     
     try:
@@ -807,7 +1186,7 @@ def update_item(item_id):
 @jwt_required()
 def delete_loop(loop_id):
     current_user_id = get_jwt_identity()
-    conn = sqlite3.connect('music/users.db')
+    conn = sqlite3.connect(USERS_DB)
     cursor = conn.cursor()
     
     # Check ownership
@@ -834,7 +1213,7 @@ LIBRARY_DB = os.path.join(os.getcwd(), 'music', 'library.db')
 @app.route('/tracks/<int:track_id>/lyrics', methods=['GET'])
 @jwt_required()
 def get_lyrics(track_id):
-    conn = sqlite3.connect('music/users.db')
+    conn = sqlite3.connect(USERS_DB)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     
@@ -866,7 +1245,7 @@ def save_lyrics(track_id):
     if content is None:
         return jsonify({'error': 'Missing content'}), 400
         
-    conn = sqlite3.connect('music/users.db')
+    conn = sqlite3.connect(USERS_DB)
     cursor = conn.cursor()
     
     try:
@@ -898,7 +1277,7 @@ def save_lyrics(track_id):
 @app.route('/tracks/<int:track_id>/comments', methods=['GET'])
 @jwt_required()
 def get_comments(track_id):
-    conn = sqlite3.connect('music/users.db')
+    conn = sqlite3.connect(USERS_DB)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     
@@ -925,7 +1304,7 @@ def create_comment(track_id):
     if not content:
         return jsonify({'error': 'Missing content'}), 400
         
-    conn = sqlite3.connect('music/users.db')
+    conn = sqlite3.connect(USERS_DB)
     cursor = conn.cursor()
     
     try:
@@ -945,7 +1324,7 @@ def create_comment(track_id):
 @jwt_required()
 def delete_comment(comment_id):
     current_user_id = get_jwt_identity()
-    conn = sqlite3.connect('music/users.db')
+    conn = sqlite3.connect(USERS_DB)
     cursor = conn.cursor()
     
     # Check ownership
@@ -980,7 +1359,7 @@ def register():
     if not username or not password or not invite_code:
         return jsonify({'error': 'Missing required fields'}), 400
 
-    conn = sqlite3.connect('music/users.db')
+    conn = sqlite3.connect(USERS_DB)
     cursor = conn.cursor()
 
     # If users table is missing (old image or first deploy), create it now
@@ -989,7 +1368,7 @@ def register():
     except sqlite3.OperationalError:
         conn.close()
         _ensure_users_db()
-        conn = sqlite3.connect('music/users.db')
+        conn = sqlite3.connect(USERS_DB)
         cursor = conn.cursor()
 
     # Check invite code (for now, simplistic check or check against used codes if we table them)
@@ -1059,8 +1438,14 @@ def register():
     finally:
         conn.close()
 
-@app.route('/auth/login', methods=['POST'])
+@app.route('/auth/login', methods=['GET', 'POST'])
 def login():
+    if request.method == 'GET':
+        return jsonify({
+            'message': 'Login requires POST with {"username","password"}. Use the web app or API client.',
+            'endpoint': '/auth/login',
+            'methods': ['POST']
+        }), 405
     data = request.get_json()
     username = data.get('username')
     password = data.get('password')
@@ -1068,7 +1453,7 @@ def login():
     if not username or not password:
         return jsonify({'error': 'Missing username or password'}), 400
 
-    conn = sqlite3.connect('music/users.db')
+    conn = sqlite3.connect(USERS_DB)
     cursor = conn.cursor()
     
     cursor.execute('SELECT id, password_hash, role FROM users WHERE username = ?', (username,))
@@ -1094,7 +1479,7 @@ def login():
 @jwt_required()
 def me():
     current_user_id = get_jwt_identity()
-    conn = sqlite3.connect('music/users.db')
+    conn = sqlite3.connect(USERS_DB)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     
@@ -1166,7 +1551,7 @@ passkey_challenges = {}
 
 def init_passkey_table():
     """Create passkey_credentials table if not exists"""
-    conn = sqlite3.connect('music/users.db')
+    conn = sqlite3.connect(USERS_DB)
     cursor = conn.cursor()
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS passkey_credentials (
@@ -1190,7 +1575,7 @@ def passkey_register_options():
     """Generate options for registering a new passkey"""
     current_user_id = get_jwt_identity()
     
-    conn = sqlite3.connect('music/users.db')
+    conn = sqlite3.connect(USERS_DB)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute("SELECT id, username FROM users WHERE id = ?", (current_user_id,))
@@ -1252,7 +1637,7 @@ def passkey_register_verify():
         )
         
         # Store the credential
-        conn = sqlite3.connect('music/users.db')
+        conn = sqlite3.connect(USERS_DB)
         cursor = conn.cursor()
         cursor.execute('''
             INSERT INTO passkey_credentials (user_id, credential_id, public_key, sign_count)
@@ -1281,7 +1666,7 @@ def passkey_login_options():
     data = request.get_json() or {}
     username = data.get('username')
     
-    conn = sqlite3.connect('music/users.db')
+    conn = sqlite3.connect(USERS_DB)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     
@@ -1342,7 +1727,7 @@ def passkey_login_verify():
     if not credential_id:
         return jsonify({'error': 'Missing credential ID'}), 400
     
-    conn = sqlite3.connect('music/users.db')
+    conn = sqlite3.connect(USERS_DB)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute('''
@@ -1400,7 +1785,7 @@ def passkey_list():
     """List user's registered passkeys"""
     current_user_id = get_jwt_identity()
     
-    conn = sqlite3.connect('music/users.db')
+    conn = sqlite3.connect(USERS_DB)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute(
@@ -1418,7 +1803,7 @@ def passkey_delete(passkey_id):
     """Delete a passkey"""
     current_user_id = get_jwt_identity()
     
-    conn = sqlite3.connect('music/users.db')
+    conn = sqlite3.connect(USERS_DB)
     cursor = conn.cursor()
     cursor.execute(
         "DELETE FROM passkey_credentials WHERE id = ? AND user_id = ?",
@@ -1438,7 +1823,7 @@ def list_passkeys():
     """List all passkeys for the current user"""
     current_user_id = get_jwt_identity()
     
-    conn = sqlite3.connect('music/users.db')
+    conn = sqlite3.connect(USERS_DB)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute(
@@ -1466,7 +1851,7 @@ def change_password():
     if len(new_password) < 6:
         return jsonify({'error': 'Password must be at least 6 characters'}), 400
     
-    conn = sqlite3.connect('music/users.db')
+    conn = sqlite3.connect(USERS_DB)
     cursor = conn.cursor()
     cursor.execute("SELECT password_hash FROM users WHERE id = ?", (current_user_id,))
     row = cursor.fetchone()
@@ -1503,7 +1888,7 @@ def create_invite():
     import secrets
     code = secrets.token_urlsafe(8)
     
-    conn = sqlite3.connect('music/users.db')
+    conn = sqlite3.connect(USERS_DB)
     cursor = conn.cursor()
     
     # Ensure invites table exists
@@ -1550,7 +1935,7 @@ def apple_association():
 def get_playlists():
     """Get all playlists"""
     try:
-        conn = sqlite3.connect('music/users.db')
+        conn = sqlite3.connect(USERS_DB)
         cursor = conn.cursor()
         # Ensure art_path column exists
         cursor.execute("PRAGMA table_info(playlists)")
@@ -1558,12 +1943,22 @@ def get_playlists():
         if 'art_path' not in columns:
             cursor.execute("ALTER TABLE playlists ADD COLUMN art_path TEXT")
             conn.commit()
-        cursor.execute("SELECT id, name, created_at, is_system, art_path FROM playlists ORDER BY created_at DESC")
+        if 'is_system' not in columns:
+            cursor.execute("ALTER TABLE playlists ADD COLUMN is_system INTEGER DEFAULT 0")
+            conn.commit()
+        if 'share_token' not in columns:
+            try:
+                cursor.execute("ALTER TABLE playlists ADD COLUMN share_token TEXT UNIQUE")
+                conn.commit()
+            except sqlite3.OperationalError:
+                pass  # Column may already exist from parallel migration
+        cursor.execute("SELECT id, name, created_at, is_system, art_path, share_token FROM playlists ORDER BY created_at DESC")
         playlists = []
         for row in cursor.fetchall():
             pl = {'id': row[0], 'name': row[1], 'created_at': row[2], 'is_system': bool(row[3])}
             art_path = row[4] if len(row) > 4 else None
             pl['art_url'] = f"/playlists/{pl['id']}/art" if art_path else None
+            pl['share_token'] = row[5] if len(row) > 5 else None
             playlists.append(pl)
         # Get track counts for each playlist
         for pl in playlists:
@@ -1584,7 +1979,7 @@ def create_playlist():
         if not name:
             return jsonify({'error': 'Name is required'}), 400
             
-        conn = sqlite3.connect('music/users.db')
+        conn = sqlite3.connect(USERS_DB)
         cursor = conn.cursor()
         
         # Check if is_public column exists, add if not
@@ -1612,7 +2007,7 @@ def update_playlist(playlist_id):
         if not name:
             return jsonify({'error': 'Name is required'}), 400
             
-        conn = sqlite3.connect('music/users.db')
+        conn = sqlite3.connect(USERS_DB)
         cursor = conn.cursor()
         cursor.execute("UPDATE playlists SET name = ? WHERE id = ?", (name, playlist_id))
         conn.commit()
@@ -1626,7 +2021,7 @@ def update_playlist(playlist_id):
 def delete_playlist(playlist_id):
     """Delete a playlist"""
     try:
-        conn = sqlite3.connect('music/users.db')
+        conn = sqlite3.connect(USERS_DB)
         cursor = conn.cursor()
         cursor.execute("DELETE FROM playlist_tracks WHERE playlist_id = ?", (playlist_id,))
         cursor.execute("DELETE FROM playlists WHERE id = ?", (playlist_id,))
@@ -1637,6 +2032,127 @@ def delete_playlist(playlist_id):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+SHARE_BASE_URL = os.environ.get('SHARE_BASE_URL', 'https://bom.best')
+API_PUBLIC_URL = os.environ.get('API_PUBLIC_URL', 'https://beats.bom.best')
+
+@app.route('/playlists/<int:playlist_id>/share', methods=['POST'])
+@jwt_required()
+def share_playlist(playlist_id):
+    """Generate a share token for a playlist. Returns share_url for sharing with others."""
+    try:
+        conn = sqlite3.connect(USERS_DB)
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA table_info(playlists)")
+        columns = [col[1] for col in cursor.fetchall()]
+        if 'share_token' not in columns:
+            try:
+                cursor.execute("ALTER TABLE playlists ADD COLUMN share_token TEXT UNIQUE")
+                conn.commit()
+            except sqlite3.OperationalError:
+                pass
+        cursor.execute("SELECT share_token FROM playlists WHERE id = ?", (playlist_id,))
+        row = cursor.fetchone()
+        if not row:
+            conn.close()
+            return jsonify({'error': 'Playlist not found'}), 404
+        share_token = row[0]
+        if not share_token:
+            share_token = str(uuid.uuid4())
+            cursor.execute("UPDATE playlists SET share_token = ? WHERE id = ?", (share_token, playlist_id))
+            conn.commit()
+        conn.close()
+        share_url = f"{SHARE_BASE_URL}/beats/playlist/{share_token}"
+        return jsonify({'share_token': share_token, 'share_url': share_url})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/playlists/<int:playlist_id>/share', methods=['DELETE'])
+@jwt_required()
+def unshare_playlist(playlist_id):
+    """Revoke sharing for a playlist."""
+    try:
+        conn = sqlite3.connect(USERS_DB)
+        cursor = conn.cursor()
+        cursor.execute("UPDATE playlists SET share_token = NULL WHERE id = ?", (playlist_id,))
+        conn.commit()
+        conn.close()
+        return jsonify({'message': 'Sharing disabled'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/shared/<token>', methods=['GET'])
+def get_shared_playlist(token):
+    """Get playlist by share token. No auth required."""
+    try:
+        conn = sqlite3.connect(USERS_DB)
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA table_info(playlists)")
+        columns = [col[1] for col in cursor.fetchall()]
+        if 'share_token' not in columns:
+            conn.close()
+            return jsonify({'error': 'Not found'}), 404
+        cursor.execute("SELECT id, name, art_path FROM playlists WHERE share_token = ?", (token,))
+        row = cursor.fetchone()
+        if not row:
+            conn.close()
+            return jsonify({'error': 'Not found'}), 404
+        playlist_id, name, art_path = row[0], row[1], row[2]
+        cursor.execute("SELECT track_id FROM playlist_tracks WHERE playlist_id = ? ORDER BY position ASC", (playlist_id,))
+        track_ids = [r[0] for r in cursor.fetchall()]
+        conn.close()
+        if not track_ids:
+            art_url = f"{API_PUBLIC_URL}/playlists/{playlist_id}/art" if art_path else None
+            return jsonify({'name': name, 'art_url': art_url, 'tracks': []})
+        lib_conn = sqlite3.connect(LIBRARY_DB)
+        lib_conn.row_factory = sqlite3.Row
+        lib_cursor = lib_conn.cursor()
+        placeholders = ','.join('?' for _ in track_ids)
+        lib_cursor.execute(f"SELECT * FROM items WHERE id IN ({placeholders})", track_ids)
+        rows = lib_cursor.fetchall()
+        lib_conn.close()
+        tracks_map = {r['id']: dict(r) for r in rows}
+        ordered_tracks = [tracks_map[tid] for tid in track_ids if tid in tracks_map]
+
+        def decode_val(val):
+            if isinstance(val, bytes):
+                return val.decode('utf-8', errors='ignore')
+            return val
+
+        base_url = API_PUBLIC_URL or request.host_url.rstrip('/')
+        tracks = []
+        for track in ordered_tracks:
+            tid = track['id']
+            tracks.append({
+                'id': tid,
+                'title': decode_val(track.get('title') or track.get('title_sort', 'Unknown')),
+                'artist': decode_val(track.get('artist') or track.get('artist_sort', 'Unknown Artist')),
+                'album': decode_val(track.get('album') or track.get('album_sort')),
+                'duration': track.get('length', 0.0),
+                'length': track.get('length', 0.0),
+                'path': decode_val(track.get('path', '')),
+                'stream_url': f"{base_url}/stream/{tid}",
+                'art_url': f"{base_url}/track/{tid}/art"
+            })
+        art_url = f"{base_url}/playlists/{playlist_id}/art" if art_path else None
+        return jsonify({'name': name, 'art_url': art_url, 'tracks': tracks})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/shared/<token>/art', methods=['GET'])
+def get_shared_playlist_art(token):
+    """Serve playlist art by share token."""
+    try:
+        conn = sqlite3.connect(USERS_DB)
+        cursor = conn.cursor()
+        cursor.execute("SELECT id FROM playlists WHERE share_token = ?", (token,))
+        row = cursor.fetchone()
+        conn.close()
+        if not row:
+            return '', 404
+        return get_playlist_art(row[0])
+    except Exception:
+        return '', 404
+
 ALLOWED_IMAGE_EXTENSIONS = {'jpg', 'jpeg', 'png', 'gif', 'webp'}
 
 def allowed_image_file(filename):
@@ -1646,7 +2162,7 @@ def allowed_image_file(filename):
 def get_playlist_art(playlist_id):
     """Serve playlist cover image if set"""
     try:
-        conn = sqlite3.connect('music/users.db')
+        conn = sqlite3.connect(USERS_DB)
         cursor = conn.cursor()
         cursor.execute("PRAGMA table_info(playlists)")
         columns = [col[1] for col in cursor.fetchall()]
@@ -1692,7 +2208,7 @@ def set_playlist_art(playlist_id):
         file.save(save_path)
         # Store relative path for portability
         rel_path = os.path.join('music', 'playlist_art', save_name)
-        conn = sqlite3.connect('music/users.db')
+        conn = sqlite3.connect(USERS_DB)
         cursor = conn.cursor()
         cursor.execute("PRAGMA table_info(playlists)")
         columns = [col[1] for col in cursor.fetchall()]
@@ -1712,7 +2228,7 @@ def get_playlist_tracks(playlist_id):
     """Get tracks for a playlist with full metadata"""
     try:
         # Get track IDs from playlist DB
-        conn = sqlite3.connect('music/users.db')
+        conn = sqlite3.connect(USERS_DB)
         cursor = conn.cursor()
         cursor.execute("SELECT track_id FROM playlist_tracks WHERE playlist_id = ? ORDER BY position ASC", (playlist_id,))
         track_ids = [row[0] for row in cursor.fetchall()]
@@ -1766,7 +2282,7 @@ def add_tracks_to_playlist(playlist_id):
         data = request.get_json()
         track_ids = data.get('track_ids', [])
         
-        conn = sqlite3.connect('music/users.db')
+        conn = sqlite3.connect(USERS_DB)
         cursor = conn.cursor()
         
         # Get current max position
@@ -1797,7 +2313,7 @@ def remove_tracks_from_playlist(playlist_id):
         data = request.get_json()
         track_ids = data.get('track_ids', [])
         
-        conn = sqlite3.connect('music/users.db')
+        conn = sqlite3.connect(USERS_DB)
         cursor = conn.cursor()
         
         placeholders = ','.join('?' for _ in track_ids)
@@ -1815,7 +2331,7 @@ def remove_tracks_from_playlist(playlist_id):
 def initialize_system_playlists():
     """Initialize All Songs and Favorites system playlists"""
     try:
-        conn = sqlite3.connect('music/users.db')
+        conn = sqlite3.connect(USERS_DB)
         cursor = conn.cursor()
         
         # Create All Songs playlist if it doesn't exist
@@ -1876,7 +2392,7 @@ def reorder_playlist_tracks(playlist_id):
         data = request.get_json()
         track_ids = data.get('track_ids', [])  # New ordered list
         
-        conn = sqlite3.connect('music/users.db')
+        conn = sqlite3.connect(USERS_DB)
         cursor = conn.cursor()
         
         # Delete all existing positions
@@ -1906,7 +2422,7 @@ def search_playlist(playlist_id):
         if not query:
             return jsonify({'tracks': []})
         
-        conn = sqlite3.connect('music/users.db')
+        conn = sqlite3.connect(USERS_DB)
         cursor = conn.cursor()
         
         # Get track IDs from playlist
@@ -2051,8 +2567,29 @@ def get_album_art(album_id):
 
 @app.route('/track/<int:track_id>/art', methods=['GET'])
 def get_track_art(track_id):
-    """Serve track artwork - extracts from file or returns default"""
+    """Serve track artwork - track_artwork first, then album, embedded, default. ?path=... serves a specific track_artwork path."""
     try:
+        requested_path = request.args.get('path')
+        if requested_path:
+            try:
+                conn = sqlite3.connect(LIBRARY_DB)
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT file_path FROM track_artwork WHERE track_id = ? AND file_path = ? AND art_type = 'cover'",
+                    (track_id, requested_path)
+                )
+                row = cursor.fetchone()
+                conn.close()
+                if row and row[0]:
+                    art_path = row[0] if isinstance(row[0], str) else row[0].decode('utf-8', errors='ignore')
+                    if not os.path.isabs(art_path):
+                        art_path = os.path.join(os.getcwd(), art_path)
+                    if os.path.exists(art_path):
+                        return send_file(art_path, mimetype=mimetypes.guess_type(art_path)[0] or 'image/jpeg')
+            except sqlite3.OperationalError:
+                pass
+            return jsonify({'error': 'Art not found'}), 404
+
         conn = sqlite3.connect(LIBRARY_DB)
         cursor = conn.cursor()
         cursor.execute("SELECT path, album_id FROM items WHERE id = ?", (track_id,))
@@ -2066,7 +2603,26 @@ def get_track_art(track_id):
         if isinstance(file_path, bytes):
             file_path = file_path.decode('utf-8', errors='ignore')
 
-        # Try album art first if album_id exists
+        # 1. Try track_artwork (per-track cover from folder upload)
+        try:
+            conn = sqlite3.connect(LIBRARY_DB)
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT file_path FROM track_artwork WHERE track_id = ? AND art_type = 'cover' ORDER BY is_primary DESC, id ASC LIMIT 1",
+                (track_id,)
+            )
+            art_row = cursor.fetchone()
+            conn.close()
+            if art_row and art_row[0]:
+                art_path = art_row[0] if isinstance(art_row[0], str) else art_row[0].decode('utf-8', errors='ignore')
+                if not os.path.isabs(art_path):
+                    art_path = os.path.join(os.getcwd(), art_path)
+                if os.path.exists(art_path):
+                    return send_file(art_path, mimetype=mimetypes.guess_type(art_path)[0] or 'image/jpeg')
+        except sqlite3.OperationalError:
+            pass  # track_artwork table may not exist yet
+
+        # 2. Try album art if album_id exists
         if album_id:
             conn = sqlite3.connect(LIBRARY_DB)
             cursor = conn.cursor()
@@ -2122,6 +2678,38 @@ def get_track_art(track_id):
         print(f"Track art error: {e}")
         return jsonify({'error': str(e)}), 500
 
+
+@app.route('/track/<int:track_id>/canvas', methods=['GET'])
+def get_track_canvas(track_id):
+    """Serve track canvas (GIF or video) for fullscreen display like Spotify Canvas"""
+    try:
+        conn = sqlite3.connect(LIBRARY_DB)
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT file_path FROM track_artwork WHERE track_id = ? AND art_type = 'canvas' LIMIT 1",
+            (track_id,)
+        )
+        row = cursor.fetchone()
+        conn.close()
+        if not row or not row[0]:
+            return jsonify({'error': 'No canvas found'}), 404
+        art_path = row[0] if isinstance(row[0], str) else row[0].decode('utf-8', errors='ignore')
+        if not os.path.isabs(art_path):
+            art_path = os.path.join(os.getcwd(), art_path)
+        if not os.path.exists(art_path):
+            return jsonify({'error': 'Canvas file not found'}), 404
+        mime = mimetypes.guess_type(art_path)[0] or 'image/gif'
+        resp = send_file(art_path, mimetype=mime, conditional=True)
+        canvas_type = 'video' if mime.startswith('video/') else 'gif'
+        resp.headers['X-Canvas-Type'] = canvas_type
+        return resp
+    except sqlite3.OperationalError:
+        return jsonify({'error': 'No canvas found'}), 404
+    except Exception as e:
+        print(f"Canvas error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/notify-interest', methods=['POST'])
 @jwt_required()
 def notify_interest():
@@ -2134,7 +2722,7 @@ def notify_interest():
             return jsonify({'error': 'Missing track ID'}), 400
 
         # Get user details
-        conn = sqlite3.connect('music/users.db')
+        conn = sqlite3.connect(USERS_DB)
         cursor = conn.cursor()
         cursor.execute("SELECT username FROM users WHERE id = ?", (current_user_id,))
         user_result = cursor.fetchone()
@@ -2192,7 +2780,7 @@ def notify_interest():
 @jwt_required()
 def favorites():
     user_id = get_jwt_identity()
-    conn = sqlite3.connect('music/users.db')
+    conn = sqlite3.connect(USERS_DB)
     cursor = conn.cursor()
     
     # Ensure tables exist (Lazy migration)
@@ -2245,7 +2833,7 @@ def toggle_favorite(playlist_id):
         if not track_id:
             return jsonify({'error': 'No track_id provided'}), 400
         
-        conn = sqlite3.connect('music/users.db')
+        conn = sqlite3.connect(USERS_DB)
         cursor = conn.cursor()
         
         # Ensure favorites table exists
@@ -2318,7 +2906,7 @@ def record_play():
         
     user_id = get_jwt_identity() # Might be None if not logged in (optional=True)
     
-    conn = sqlite3.connect('music/users.db')
+    conn = sqlite3.connect(USERS_DB)
     cursor = conn.cursor()
     
     # Lazy migration for plays table
@@ -2342,7 +2930,7 @@ def batch_record_plays():
         if not events:
             return jsonify({'message': 'No events processed'}), 200
             
-        conn = sqlite3.connect('music/users.db')
+        conn = sqlite3.connect(USERS_DB)
         cursor = conn.cursor()
         
         # Ensure table exists
@@ -2374,7 +2962,7 @@ def batch_record_plays():
 def get_dashboard_metrics():
     user_id_filter = request.args.get('user_id')  # Optional filter
     
-    conn = sqlite3.connect('music/users.db')
+    conn = sqlite3.connect(USERS_DB)
     cursor = conn.cursor()
     
     # Ensure tables exist
@@ -2456,4 +3044,5 @@ if __name__ == '__main__':
     # Ensure users.db and tables exist (required for /auth/register, /auth/login, etc.)
     from init_db import init_db
     init_db()
+    init_track_artwork()
     app.run(host='0.0.0.0', port=8338)

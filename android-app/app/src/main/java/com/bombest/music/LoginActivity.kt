@@ -135,6 +135,8 @@ class LoginActivity : ComponentActivity() {
                                     authDataStore.edit { prefs ->
                                         prefs[AuthPreferences.TOKEN_KEY] = response.access_token
                                         prefs[AuthPreferences.USER_KEY] = response.user.username
+                                        prefs[AuthPreferences.USER_ID_KEY] = response.user.id.toString()
+                                        prefs[AuthPreferences.ROLE_KEY] = response.user.role
                                     }
                                     onResult(true, null)
                                     goToMain()
@@ -150,6 +152,8 @@ class LoginActivity : ComponentActivity() {
                                     authDataStore.edit { prefs ->
                                         prefs[AuthPreferences.TOKEN_KEY] = response.access_token
                                         prefs[AuthPreferences.USER_KEY] = response.user.username
+                                        prefs[AuthPreferences.USER_ID_KEY] = response.user.id.toString()
+                                        prefs[AuthPreferences.ROLE_KEY] = response.user.role
                                     }
                                     onResult(true, null)
                                     goToMain()

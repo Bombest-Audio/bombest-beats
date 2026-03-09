@@ -14,6 +14,7 @@ import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.material3.*
@@ -249,6 +250,7 @@ fun PlaylistDetailScreen(
     onRemoveTrack: (Int) -> Unit,
     onAddTracks: (List<Int>) -> Unit = {},
     onImageSelected: (Uri) -> Unit = {},
+    onSharePlaylist: () -> Unit = {},
     onBack: () -> Unit
 ) {
     var showAddTracksDialog by remember { mutableStateOf(false) }
@@ -286,6 +288,9 @@ fun PlaylistDetailScreen(
                         IconButton(onClick = onPlayAll) {
                             Icon(Icons.Default.PlayArrow, contentDescription = "Play all", tint = Color(0xFFE90060))
                         }
+                    }
+                    IconButton(onClick = onSharePlaylist) {
+                        Icon(Icons.Default.Share, contentDescription = "Share playlist", tint = Color.White)
                     }
                     if (!isSystem) {
                         IconButton(onClick = { imagePickerLauncher.launch("image/*") }) {
