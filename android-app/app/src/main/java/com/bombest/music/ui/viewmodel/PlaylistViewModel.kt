@@ -275,12 +275,16 @@ class PlaylistViewModel : ViewModel() {
     suspend fun unsharePlaylist(playlistId: Int) {
         withContext(Dispatchers.IO) {
             try {
-                playlistApi.unsharePlaylist(playlistId)
-                withContext(Dispatchers.Main) {
-                    val index = playlists.indexOfFirst { it.id == playlistId }
-                    if (index >= 0) {
-                        playlists[index] = playlists[index].copy(share_token = null)
+                val response = playlistApi.unsharePlaylist(playlistId)
+                if (response.isSuccessful) {
+                    withContext(Dispatchers.Main) {
+                        val index = playlists.indexOfFirst { it.id == playlistId }
+                        if (index >= 0) {
+                            playlists[index] = playlists[index].copy(share_token = null)
+                        }
                     }
+                } else {
+                    error.value = "Failed to unshare playlist"
                 }
             } catch (e: Exception) {
                 android.util.Log.e("PlaylistViewModel", "Failed to unshare playlist: ${e.message}", e)

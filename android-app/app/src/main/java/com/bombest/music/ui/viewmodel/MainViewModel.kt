@@ -18,8 +18,12 @@ import com.google.common.util.concurrent.MoreExecutors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import com.bombest.music.data.AuthPreferences
 import com.bombest.music.data.DownloadManager
+import com.bombest.music.data.authDataStore
 import com.bombest.music.data.repository.MusicRepository
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import com.bombest.music.data.FavoritesManager
 
 import android.app.Application
@@ -722,9 +726,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     
     fun initDownloadManager(context: Context) {
         if (downloadManager == null) {
-            downloadManager = DownloadManager.getInstance(context)
+            val dm = DownloadManager.getInstance(context)
+            downloadManager = dm
             musicRepository = MusicRepository(context)
-            // Load persisted download state
+            viewModelScope.launch {
+                val token = context.authDataStore.data.map { it[AuthPreferences.TOKEN_KEY] }.first()
+                dm.setAuthToken(token)
+            }
             viewModelScope.launch {
                 val downloadedTracks = downloadManager?.getDownloadedTracks() ?: emptySet()
                 downloads.value = downloadedTracks

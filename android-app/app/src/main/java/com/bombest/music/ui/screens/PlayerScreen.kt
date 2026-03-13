@@ -265,11 +265,12 @@ private fun CanvasBackground(trackId: String) {
                 val baseUrl = NetworkModule.getStreamBaseUrl()
                 val url = "$baseUrl/track/$trackId/canvas"
                 val client = OkHttpClient.Builder().build()
-                val req = Request.Builder().url(url).head().build()
-                val resp = client.newCall(req).execute()
-                if (resp.isSuccessful) {
-                    val type = resp.header("X-Canvas-Type") ?: "gif"
-                    canvasState = url to type
+                val req = Request.Builder().url(url).get().build()
+                client.newCall(req).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        val type = resp.header("X-Canvas-Type") ?: "gif"
+                        canvasState = url to type
+                    }
                 }
             } catch (_: Exception) {}
         }

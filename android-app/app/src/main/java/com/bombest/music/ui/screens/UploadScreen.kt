@@ -42,11 +42,12 @@ private fun collectFilesFromFolder(context: Context, treeUri: Uri): List<Pair<Ur
     val list = mutableListOf<Pair<Uri, String>>()
     val doc = DocumentFile.fromTreeUri(context, treeUri) ?: return list
     fun walk(file: DocumentFile, prefix: String) {
+        val safeName = file.name ?: ""
         if (file.isFile) {
-            list.add(file.uri to (if (prefix.isNotEmpty()) "$prefix/${file.name}" else (file.name ?: "file")))
+            list.add(file.uri to (if (prefix.isNotEmpty()) "$prefix/$safeName" else safeName.ifEmpty { "file" }))
         } else if (file.isDirectory) {
             file.listFiles().forEach { child ->
-                walk(child, if (prefix.isNotEmpty()) "$prefix/${file.name}" else (file.name ?: ""))
+                walk(child, if (prefix.isNotEmpty()) "$prefix/$safeName" else safeName)
             }
         }
     }
@@ -164,11 +165,14 @@ fun UploadScreen(onBack: () -> Unit) {
                                     .addHeader("Authorization", "Bearer $token")
                                     .post(builder.build())
                                     .build()
-                                val response = withContext(Dispatchers.IO) { client.newCall(request).execute() }
-                                val body = response.body?.string() ?: ""
-                                Log.d(TAG, "Folder batch upload: ${response.code} - $body")
+                                val (code, body) = withContext(Dispatchers.IO) {
+                                    client.newCall(request).execute().use { resp ->
+                                        resp.code to (resp.body?.string() ?: "")
+                                    }
+                                }
+                                Log.d(TAG, "Folder batch upload: $code - $body")
 
-                                if (response.isSuccessful) {
+                                if (code in 200..299) {
                                     val json = org.json.JSONObject(body)
                                     totalImported += json.optJSONArray("imported")?.length() ?: 0
                                     totalFailed += json.optJSONArray("failed")?.length() ?: 0
@@ -221,18 +225,19 @@ fun UploadScreen(onBack: () -> Unit) {
                                 .addHeader("Authorization", "Bearer $token")
                                 .post(builder.build())
                                 .build()
-                            withContext(Dispatchers.IO) {
-                                val response = client.newCall(request).execute()
-                                val body = response.body?.string() ?: ""
-                                Log.d(TAG, "Folder upload: ${response.code} - $body")
-                                if (response.isSuccessful) {
-                                    val imported = org.json.JSONObject(body).optJSONArray("imported")?.length() ?: 0
-                                    uploadMessage = "Imported $imported tracks"
-                                    selectedFiles = emptyList()
-                                    selectedFileName = null
-                                } else {
-                                    error = org.json.JSONObject(body).optString("error", "Upload failed")
+                            val (code, body) = withContext(Dispatchers.IO) {
+                                client.newCall(request).execute().use { resp ->
+                                    resp.code to (resp.body?.string() ?: "")
                                 }
+                            }
+                            Log.d(TAG, "Folder upload: $code - $body")
+                            if (code in 200..299) {
+                                val imported = org.json.JSONObject(body).optJSONArray("imported")?.length() ?: 0
+                                uploadMessage = "Imported $imported tracks"
+                                selectedFiles = emptyList()
+                                selectedFileName = null
+                            } else {
+                                error = org.json.JSONObject(body).optString("error", "Upload failed")
                             }
                         } finally {
                             singleTempFiles.forEach { it.delete() }
@@ -274,15 +279,16 @@ fun UploadScreen(onBack: () -> Unit) {
                             .post(requestBody)
                             .build()
                         withContext(Dispatchers.IO) {
-                            val response = client.newCall(request).execute()
-                            if (response.isSuccessful) successCount++
-                            else {
-                                failCount++
-                                lastError = when (response.code) {
-                                    401 -> "Unauthorized"
-                                    403 -> "Admin required"
-                                    409 -> "Duplicate"
-                                    else -> "Error ${response.code}"
+                            client.newCall(request).execute().use { resp ->
+                                if (resp.isSuccessful) successCount++
+                                else {
+                                    failCount++
+                                    lastError = when (resp.code) {
+                                        401 -> "Unauthorized"
+                                        403 -> "Admin required"
+                                        409 -> "Duplicate"
+                                    else -> "Error ${resp.code}"
+                                    }
                                 }
                             }
                         }

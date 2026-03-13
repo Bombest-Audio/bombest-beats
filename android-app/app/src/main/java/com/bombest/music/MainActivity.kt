@@ -37,6 +37,7 @@ import androidx.core.view.WindowCompat
 import androidx.datastore.preferences.core.edit
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.bombest.music.data.DownloadManager
 import com.bombest.music.data.authDataStore
 import com.bombest.music.ui.screens.*
 import com.bombest.music.ui.theme.BombestBeatsTheme
@@ -121,7 +122,7 @@ class MainActivity : ComponentActivity() {
                     viewModel = mainViewModel,
                     onShare = { title, artist -> shareTrack(title, artist) },
                     onLogout = {
-                        // Stop playback and the media service
+                        DownloadManager.getInstance(this@MainActivity).setAuthToken(null)
                         mainViewModel.stop()
                         stopService(Intent(this@MainActivity, com.bombest.music.service.BombestMediaService::class.java))
                         lifecycleScope.launch {

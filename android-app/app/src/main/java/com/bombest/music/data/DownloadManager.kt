@@ -13,7 +13,6 @@ import androidx.media3.datasource.okhttp.OkHttpDataSource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import java.io.File
@@ -31,7 +30,15 @@ private val Context.downloadDataStore by preferencesDataStore(name = "downloads"
  */
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 class DownloadManager private constructor(private val context: Context) {
-    
+
+    @Volatile
+    private var cachedToken: String? = null
+
+    /** Set auth token for API requests. Call with null on logout. */
+    fun setAuthToken(token: String?) {
+        cachedToken = token
+    }
+
     companion object {
         private const val TAG = "DownloadManager"
         private const val CACHE_SIZE_BYTES = 1024L * 1024 * 1024 // 1 GB
@@ -67,11 +74,7 @@ class DownloadManager private constructor(private val context: Context) {
             .writeTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
             .addInterceptor { chain ->
                 val request = chain.request().newBuilder()
-                // Add auth token from DataStore (same store as rest of app)
-                val token = runBlocking {
-                    context.authDataStore.data.map { it[AuthPreferences.TOKEN_KEY] }.first()
-                }
-                if (token != null) {
+                cachedToken?.let { token ->
                     request.addHeader("Authorization", "Bearer $token")
                 }
                 chain.proceed(request.build())

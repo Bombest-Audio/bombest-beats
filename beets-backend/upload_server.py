@@ -117,7 +117,8 @@ app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500 MB
 @app.errorhandler(500)
 def handle_500(err):
     traceback.print_exc()
-    return jsonify({'error': str(err) if err else 'Internal server error'}), 500
+    message = str(err) if (err and app.debug) else 'Internal server error'
+    return jsonify({'error': message}), 500
 
 # Script directory for beet/config - works regardless of cwd when starting server
 BEETS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -336,16 +337,18 @@ def upload_file():
             
             # Update the title in the database for the most recently added track
             # Beets doesn't always preserve metadata, so we set it directly
+            formatted_title = track_name.replace('_', ' ').lower()
             try:
                 conn = sqlite3.connect(LIBRARY_DB)
                 cursor = conn.cursor()
-                # Get the most recently added item (highest ID)
-                cursor.execute("SELECT id FROM items ORDER BY id DESC LIMIT 1")
+                # Look up by title to avoid race with concurrent imports
+                cursor.execute("SELECT id FROM items WHERE title = ? ORDER BY id DESC LIMIT 1", (formatted_title,))
                 result = cursor.fetchone()
+                if not result:
+                    cursor.execute("SELECT id FROM items ORDER BY id DESC LIMIT 1")
+                    result = cursor.fetchone()
                 if result:
                     new_id = result[0]
-                    # Format title: lowercase, underscores to spaces
-                    formatted_title = track_name.replace('_', ' ').lower()
                     cursor.execute("UPDATE items SET title = ?, artist = ? WHERE id = ?", (formatted_title, 'thomas phillips', new_id))
                     conn.commit()
                 conn.close()
@@ -353,12 +356,11 @@ def upload_file():
                 print(f"Warning: Could not update title in database: {db_err}")
             
             # --- S3 Upload ---
-            if s3_client:
+            if s3_client and result:
                 try:
                     conn = sqlite3.connect(LIBRARY_DB)
                     cursor = conn.cursor()
-                    # Get the most recently added item again to be sure of path
-                    cursor.execute("SELECT path FROM items ORDER BY id DESC LIMIT 1")
+                    cursor.execute("SELECT path FROM items WHERE id = ?", (new_id,))
                     res = cursor.fetchone()
                     conn.close()
                     
@@ -498,6 +500,19 @@ def _insert_track_artwork(track_id, src_path, art_type, is_primary=0, suffix=Non
         return None
 
 
+def _safe_extract_zip(zip_path, work_dir):
+    """Extract zip contents safely, rejecting path traversal (Zip Slip) attacks."""
+    work_dir_abs = os.path.abspath(work_dir)
+    with zipfile.ZipFile(zip_path, 'r') as z:
+        for member in z.namelist():
+            if member.startswith('/') or '..' in member:
+                continue
+            dest = os.path.normpath(os.path.join(work_dir, member))
+            if not os.path.abspath(dest).startswith(work_dir_abs):
+                continue
+            z.extract(member, work_dir)
+
+
 @app.route('/upload/folder', methods=['POST'])
 @admin_required()
 def upload_folder():
@@ -513,8 +528,7 @@ def upload_folder():
                 work_dir = tempfile.mkdtemp()
                 zip_path = os.path.join(work_dir, 'upload.zip')
                 f.save(zip_path)
-                with zipfile.ZipFile(zip_path, 'r') as z:
-                    z.extractall(work_dir)
+                _safe_extract_zip(zip_path, work_dir)
                 extract_root = work_dir
             else:
                 return jsonify({'error': 'Expected a .zip file for single file upload'}), 400
@@ -573,18 +587,21 @@ def upload_folder():
                 results['failed'].append({'file': os.path.basename(audio_path), 'reason': str(e)})
                 continue
 
-            # Get newly imported track id
+            # Get newly imported track id (look up by title to avoid race with concurrent imports)
+            formatted_title = track_name.replace('_', ' ').lower()
             conn = sqlite3.connect(LIBRARY_DB)
             cursor = conn.cursor()
-            cursor.execute("SELECT id FROM items ORDER BY id DESC LIMIT 1")
+            cursor.execute("SELECT id FROM items WHERE title = ? ORDER BY id DESC LIMIT 1", (formatted_title,))
             row = cursor.fetchone()
+            if not row:
+                cursor.execute("SELECT id FROM items ORDER BY id DESC LIMIT 1")
+                row = cursor.fetchone()
             conn.close()
             if not row:
                 results['failed'].append({'file': os.path.basename(audio_path), 'reason': 'no track id'})
                 continue
 
             new_id = row[0]
-            formatted_title = track_name.replace('_', ' ').lower()
             conn = sqlite3.connect(LIBRARY_DB)
             cursor = conn.cursor()
             cursor.execute("UPDATE items SET title = ?, artist = ?, album = ? WHERE id = ?",
