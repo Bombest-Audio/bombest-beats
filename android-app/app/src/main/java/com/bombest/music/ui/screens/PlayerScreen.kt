@@ -287,7 +287,9 @@ private fun CanvasBackground(trackId: String) {
                         canvasState = url to type
                     }
                 }
-            } catch (_: Exception) {}
+            } catch (e: Exception) {
+                android.util.Log.e("CanvasBackground", "Failed to load canvas for track $trackId", e)
+            }
         }
     }
     canvasState.let { (url, type) ->

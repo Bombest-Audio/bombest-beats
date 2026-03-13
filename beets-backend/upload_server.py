@@ -41,12 +41,15 @@ app.config['JWT_SECRET_KEY'] = config.get('jwt_secret', 'dev-secret-key')
 app.config['JWT_ACCESS_TOKEN_EXPIRES'] = False # Non-expiring for simplicty in MVP
 jwt = JWTManager(app)
 # CORS: allow frontend origins (bom.best, CloudFront, beats-app host the app; beats.bom.best is API)
-CORS(app, origins=[
+_cors_origins = [
     'https://bom.best', 'https://www.bom.best',
     'https://beats.bom.best', 'https://beats-app.bom.best',
     'https://d37qdccady5d3d.cloudfront.net',  # CloudFront distribution URL
-    'http://localhost:3000', 'http://localhost:8338', 'http://127.0.0.1:3000'
-], supports_credentials=True)
+]
+# Only allow localhost origins in development
+if os.environ.get('FLASK_ENV') == 'development' or os.environ.get('FLASK_DEBUG') == '1':
+    _cors_origins += ['http://localhost:3000', 'http://localhost:8338', 'http://127.0.0.1:3000']
+CORS(app, origins=_cors_origins, supports_credentials=True)
 
 # --- S3 Configuration ---
 S3_BUCKET = os.environ.get('S3_BUCKET')

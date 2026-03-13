@@ -34,6 +34,7 @@ class PlaylistViewModel : ViewModel() {
     val currentPlaylistName = mutableStateOf("")
     
     fun initialize(context: Context) {
+        if (::playlistApi.isInitialized) return
         viewModelScope.launch {
             authToken = context.authDataStore.data.map { it[AuthPreferences.TOKEN_KEY] }.first()
             android.util.Log.d("PlaylistViewModel", "Loaded auth token: ${if (authToken != null) "present" else "null"}")
@@ -249,10 +250,6 @@ class PlaylistViewModel : ViewModel() {
 
     /** Returns share URL for the playlist. Generates token if not already shared. Updates local state. */
     suspend fun sharePlaylist(playlistId: Int): String? {
-        val playlist = playlists.find { it.id == playlistId } ?: return null
-        if (playlist.share_token != null) {
-            return "https://bom.best/beats/playlist/${playlist.share_token}"
-        }
         return withContext(Dispatchers.IO) {
             try {
                 val response = playlistApi.sharePlaylist(playlistId)
