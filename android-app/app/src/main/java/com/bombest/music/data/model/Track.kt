@@ -11,9 +11,13 @@ data class Track(
     @Json(name = "path") val path: String?,
     @Json(name = "album_id") val albumId: Int?
 ) {
+    companion object {
+        private val TRACK_NUMBER_PREFIX = Regex("^\\d+\\s+.*")
+        private val TRACK_NUMBER_STRIP = Regex("^\\d+\\s*")
+    }
+
     // Helper to get formatted Display Title
-    // When DB title is suspicious (e.g. single word like "jefferson" that may be album name)
-    // but path filename has a proper title (e.g. "08 any other day.wav"), prefer path-derived title
+    // Prefer title when present. Fall back to path-derived name (strip extension, track number).
     val displayTitle: String
         get() {
             val filename = path?.substringAfterLast("/") ?: ""
@@ -21,14 +25,12 @@ data class Track(
                 filename.substringBeforeLast(".").trim()
             } else filename.trim()
             val pathDerivedTitle = when {
-                nameWithoutExt.matches(Regex("^\\d+\\s+.*")) -> nameWithoutExt.replace(Regex("^\\d+\\s*"), "").trim()
+                nameWithoutExt.matches(TRACK_NUMBER_PREFIX) -> nameWithoutExt.replace(TRACK_NUMBER_STRIP, "").trim()
                 nameWithoutExt.isNotBlank() -> nameWithoutExt
                 else -> null
             }
             return when {
                 title.isNullOrBlank() -> pathDerivedTitle ?: "Unknown Track"
-                pathDerivedTitle != null && pathDerivedTitle.contains(" ") && !title.contains(" ") ->
-                    pathDerivedTitle
                 else -> title
             }
         }
