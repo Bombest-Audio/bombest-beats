@@ -2,12 +2,14 @@ import sqlite3
 import bcrypt
 import os
 
-DB_PATH = 'music/users.db'
+# When DATA_DIR is set (e.g. Docker), persist users.db there; else use music/users.db
+_DATA_DIR = os.environ.get('DATA_DIR')
+DB_PATH = os.path.join(_DATA_DIR, 'users.db') if _DATA_DIR else os.path.join(os.getcwd(), 'music', 'users.db')
 
 def init_db():
     print(f"Initializing user database at {DB_PATH}...")
     
-    # Ensure directory exists
+    # Ensure directory exists (DATA_DIR or music/)
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     
     conn = sqlite3.connect(DB_PATH)
@@ -33,6 +35,12 @@ def init_db():
         name TEXT NOT NULL,
         user_id INTEGER,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        is_system INTEGER DEFAULT 0,
+        is_synced INTEGER DEFAULT 0,
+        sort_mode TEXT,
+        description TEXT,
+        art_path TEXT,
+        is_public INTEGER DEFAULT 0,
         FOREIGN KEY (user_id) REFERENCES users (id)
     )
     ''')
