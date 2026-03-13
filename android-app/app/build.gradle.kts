@@ -95,6 +95,7 @@ dependencies {
     implementation("com.google.android.material:material:1.11.0")
     implementation("com.mikhaellopez:circularimageview:4.3.1")
 
+    implementation("androidx.documentfile:documentfile:1.0.1")
     implementation("androidx.datastore:datastore-preferences:1.0.0")
     implementation("com.google.guava:guava:32.1.3-android")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-guava:1.7.3")

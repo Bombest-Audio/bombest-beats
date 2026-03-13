@@ -42,7 +42,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="10dp"
-                android:text="Streaming from your home server"
+                android:text="Streaming from Bombest Beats"
                 android:textColor="@android:color/white"
                 android:textSize="16sp"
                 android:textStyle="italic|bold" />

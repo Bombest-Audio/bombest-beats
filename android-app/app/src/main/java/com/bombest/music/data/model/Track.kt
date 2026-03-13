@@ -12,8 +12,26 @@ data class Track(
     @Json(name = "album_id") val albumId: Int?
 ) {
     // Helper to get formatted Display Title
+    // When DB title is suspicious (e.g. single word like "jefferson" that may be album name)
+    // but path filename has a proper title (e.g. "08 any other day.wav"), prefer path-derived title
     val displayTitle: String
-        get() = title ?: path?.substringAfterLast("/") ?: "Unknown Track"
+        get() {
+            val filename = path?.substringAfterLast("/") ?: ""
+            val nameWithoutExt = if (filename.contains(".")) {
+                filename.substringBeforeLast(".").trim()
+            } else filename.trim()
+            val pathDerivedTitle = when {
+                nameWithoutExt.matches(Regex("^\\d+\\s+.*")) -> nameWithoutExt.replace(Regex("^\\d+\\s*"), "").trim()
+                nameWithoutExt.isNotBlank() -> nameWithoutExt
+                else -> null
+            }
+            return when {
+                title.isNullOrBlank() -> pathDerivedTitle ?: "Unknown Track"
+                pathDerivedTitle != null && pathDerivedTitle.contains(" ") && !title.contains(" ") ->
+                    pathDerivedTitle
+                else -> title
+            }
+        }
         
     val displayArtist: String
         get() = artist ?: "Unknown Artist"
