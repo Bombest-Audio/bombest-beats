@@ -61,7 +61,6 @@ import com.bombest.music.ui.components.SprayPaintProgress
 import com.bombest.music.visualizer.GraffitiWaveformVisualizer
 import com.bombest.music.R
 import com.bombest.music.data.NetworkModule
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import kotlin.math.atan2
 
@@ -264,9 +263,8 @@ private fun CanvasBackground(trackId: String) {
             try {
                 val baseUrl = NetworkModule.getStreamBaseUrl()
                 val url = "$baseUrl/track/$trackId/canvas"
-                val client = OkHttpClient.Builder().build()
                 val req = Request.Builder().url(url).get().build()
-                client.newCall(req).execute().use { resp ->
+                NetworkModule.simpleOkHttpClient.newCall(req).execute().use { resp ->
                     if (resp.isSuccessful) {
                         val type = resp.header("X-Canvas-Type") ?: "gif"
                         canvasState = url to type
