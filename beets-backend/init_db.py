@@ -45,6 +45,25 @@ def init_db():
     )
     ''')
 
+    # Migrate playlists table if it existed with old schema (add missing columns)
+    cursor.execute("PRAGMA table_info(playlists)")
+    columns = [col[1] for col in cursor.fetchall()]
+    for col_name, sql in [
+        ('is_system', 'ALTER TABLE playlists ADD COLUMN is_system INTEGER DEFAULT 0'),
+        ('is_synced', 'ALTER TABLE playlists ADD COLUMN is_synced INTEGER DEFAULT 0'),
+        ('sort_mode', 'ALTER TABLE playlists ADD COLUMN sort_mode TEXT'),
+        ('description', 'ALTER TABLE playlists ADD COLUMN description TEXT'),
+        ('art_path', 'ALTER TABLE playlists ADD COLUMN art_path TEXT'),
+        ('is_public', 'ALTER TABLE playlists ADD COLUMN is_public INTEGER DEFAULT 0'),
+        ('share_token', 'ALTER TABLE playlists ADD COLUMN share_token TEXT UNIQUE'),
+    ]:
+        if col_name not in columns:
+            try:
+                cursor.execute(sql)
+                columns.append(col_name)
+            except sqlite3.OperationalError:
+                pass
+
     # Create playlist_tracks table
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS playlist_tracks (

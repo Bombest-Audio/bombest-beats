@@ -9,7 +9,7 @@ Admins can use the web app:
 1. Open **Settings** → **Dashboard**
 2. Click **Remove duplicates**
 
-This finds tracks with the same normalized title (case-insensitive, underscores treated as spaces), keeps the lowest ID per group, removes the rest from the library and playlists, and refreshes the app.
+This finds tracks with the same normalized title (case-insensitive, underscores treated as spaces), keeps the lowest ID per group, removes the rest from the library and playlists. The web app will show the updated list (you may need to refresh the page or navigate away and back).
 
 ## Prevention: Upload duplicate check
 
@@ -17,7 +17,7 @@ Folder and file uploads now normalize track names before checking. "w_mcnichols"
 
 ## Manual CLI (for edge cases)
 
-1. **Find duplicates**  
+1. **Find duplicates**
    From `beets-backend/`:
    ```bash
    python find_and_remove_duplicate_tracks.py --list
@@ -31,7 +31,7 @@ Folder and file uploads now normalize track names before checking. "w_mcnichols"
    ```
    Use `--delete-file` to remove the file from disk so it is no longer synced to S3.
 
-3. **Sync to S3**  
+3. **Sync to S3**
    Run from the repo root:
    ```bash
    ./sync-to-s3.sh
