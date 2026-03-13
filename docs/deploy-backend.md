@@ -2,13 +2,15 @@
 
 How to deploy the Bombest Beats backend and nginx config to EC2.
 
+> **Note:** `deploy-nginx-to-ec2.sh`, `nginx-ec2.conf`, and `scripts/add-ssm-permissions.sh` are introduced in the infrastructure PR (#5). They are not on `main` yet.
+
 ## Quick reference
 
 | What | Command |
 |------|---------|
 | Full backend (Docker + container) | `./deploy-to-ec2.sh [REGION]` |
-| Nginx CORS config only | `./deploy-nginx-to-ec2.sh [REGION]` |
-| Add SSM permissions (one-time) | `./scripts/add-ssm-permissions.sh [IAM_USER]` |
+| Nginx CORS config only | `./deploy-nginx-to-ec2.sh [REGION]` (PR #5) |
+| Add SSM permissions (one-time) | `./scripts/add-ssm-permissions.sh [IAM_USER]` (PR #5) |
 
 ---
 
@@ -40,7 +42,7 @@ Updates `/etc/nginx/conf.d/bombest-beats.conf` on the EC2 instance. Run this whe
 **Prerequisites:**
 - Same as §1 (instance with SSM, your CLI user has SSM permissions)
 
-**Config file:** `nginx-ec2.conf` in the project root.
+**Config file:** `nginx-ec2.conf` in the project root (added in PR #5).
 
 ---
 
@@ -68,7 +70,11 @@ Requires `iam:PutUserPolicy` (admin or equivalent). Adds: `ssm:SendCommand`, `ss
 
 If SSM fails (e.g. missing IAM permissions), deploy nginx manually:
 
-1. Open **EC2 Instance Connect** in the AWS Console for your instance (find via tag: `Name=bombest-beats`, or `aws ec2 describe-instances --filters Name=tag:Name,Values=bombest-beats --query 'Reservations[].Instances[].InstanceId' --output text`).
+1. Open **EC2 Instance Connect** in the AWS Console for your instance. Find the instance ID by tag:
+   ```bash
+   aws ec2 describe-instances --filters Name=tag:Name,Values=bombest-beats \
+     --query 'Reservations[].Instances[].InstanceId' --output text
+   ```
 2. Run the script — it will print a block to paste:
    ```bash
    ./deploy-nginx-to-ec2.sh

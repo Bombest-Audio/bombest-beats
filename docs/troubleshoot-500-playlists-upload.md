@@ -43,10 +43,10 @@ Often resolves after fixing the 500 on /playlists. If it persists, check the Net
 **Fix:** The frontend batches folder uploads in groups of 3 files (reduced from 6). Redeploy the frontend:
 
 ```bash
-./scripts/deploy-frontend.sh
+./scripts/deploy-frontend.sh  # PR #5
 ```
 
-If timeouts persist with large files, try uploading in smaller batches (e.g. split your folder) or use a zip file (one request for the whole archive).
+If timeouts persist with large files, try uploading in smaller batches or use a zip file (one request for the whole archive).
 
 ## Verify backend after fix
 

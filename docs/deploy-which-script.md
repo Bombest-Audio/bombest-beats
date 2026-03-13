@@ -1,6 +1,8 @@
 # Deploy Scripts
 
-Home server deployment (deploy.sh, deploy_docker.sh) is deprecated. Use EC2 (free tier).
+Home server deployment (deploy.sh, deploy_docker.sh, cloudflared tunnel) is deprecated. Use EC2 (free tier).
+
+> **Note:** Scripts marked "(PR #5)" are introduced in the infrastructure PR and are not on `main` yet.
 
 **Full guide:** [deploy-backend.md](deploy-backend.md) — SSM permissions, manual fallback, nginx CORS deploy.
 
@@ -17,9 +19,9 @@ Deploys the backend (Docker image + container) to AWS EC2 (t3.micro free tier).
 - Existing EC2 instance with tag `Name=bombest-beats`
 - S3 credentials in `/home/ec2-user/.env.bombest` on the instance
 - SSM agent with IAM role (or use `INSTANCE_ID=i-xxx` if needed)
-- Your CLI user has SSM permissions: `./scripts/add-ssm-permissions.sh`
+- Your CLI user has SSM permissions: `./scripts/add-ssm-permissions.sh` (PR #5)
 
-## Nginx CORS config: deploy-nginx-to-ec2.sh
+## Nginx CORS config: deploy-nginx-to-ec2.sh (PR #5)
 
 Updates `/etc/nginx/conf.d/bombest-beats.conf` on EC2 (CORS, proxy to Flask). Run when you change `nginx-ec2.conf`:
 
@@ -41,7 +43,7 @@ Point **beats.bom.best** at your EC2 public IP so the web app can reach the API:
 
 - In Cloudflare DNS, add an **A record**: `beats.bom.best` → `<EC2_PUBLIC_IP>`
 - Proxy through Cloudflare (recommended) or DNS only
-- **SSL/TLS mode**: use **Full (Strict)** when origin has a valid cert (e.g. Cloudflare Origin Certificate on nginx); otherwise **Flexible** if origin is HTTP-only
+- **SSL/TLS mode**: use **Full (Strict)** with a Cloudflare Origin Certificate on nginx (recommended). Use **Flexible** only if origin is HTTP-only (Cloudflare→origin traffic will be unencrypted)
 - **Port 80**: EC2 must listen on port 80. New instances get nginx via setup script. For existing instances, run `./scripts/ec2-setup-nginx.sh` on the EC2 host, and add port 80 to the security group.
 
 ## Web frontend (bom.best/beats)
@@ -54,7 +56,7 @@ Deploy with the frontend script (builds, syncs to S3, optionally invalidates Clo
 CLOUDFRONT_DIST_ID=E1RBYOEP5K0UI3 ./scripts/deploy-frontend.sh
 ```
 
-**S3 bucket:** `bombest-beats-web`, path `/beats/`. Override with `FRONTEND_BUCKET` and `FRONTEND_PATH`.  
-**Cloudflare DNS:** `beats.bom.best` and `beats-aws.bom.best` are A records to EC2 (Proxied). `bom.best/beats` is served via Cloudflare Tunnel to CloudFront/S3.
+**S3 bucket:** `bombest-beats-web`, path `/beats/`. Override with `FRONTEND_BUCKET` and `FRONTEND_PATH`.
+**Cloudflare DNS:** `beats.bom.best` and `beats-aws.bom.best` are A records to EC2 (Proxied). `bom.best/beats` is served via Cloudflare DNS (CNAME to CloudFront).
 
 Full details: [deploy-frontend.md](deploy-frontend.md).

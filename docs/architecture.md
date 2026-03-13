@@ -24,9 +24,9 @@ This document is the source of truth for deployment, S3, EC2, and making users a
   - Defaults: `MUSIC_DIR` = `$REPO_ROOT/beets-backend/music`, `BUCKET=bombest-beats-music`, `REGION=us-west-2`.
   - Honors `AWS_PROFILE` (recommended: `bombest-beats-sync`).
   - Options: `WATCH=1` uses `inotifywait`; otherwise one-shot/cron.
-- Cron (user `thomas`): runs every 5 minutes
+- Cron (user `thomas`): runs every 5 minutes (replace `/path/to/repo` with your actual repo path)
   ```
-  AWS_PROFILE=bombest-beats-sync $REPO_ROOT/sync-to-s3.sh >> $REPO_ROOT/sync-to-s3.log 2>&1
+  AWS_PROFILE=bombest-beats-sync /path/to/repo/sync-to-s3.sh >> /path/to/repo/sync-to-s3.log 2>&1
   ```
 
 ## Bucket Setup Script
@@ -48,19 +48,19 @@ This document is the source of truth for deployment, S3, EC2, and making users a
 
 ## Frontend hosting (bom.best/beats)
 
-The web frontend is served from **S3** (`bombest-beats-web`) with path prefix `/beats/`, behind **CloudFront** (distribution ID `E1RBYOEP5K0UI3`). **Cloudflare** (DNS CNAME or Tunnel) routes `bom.best/beats` to CloudFront. The legacy home-server tunnel (`cloudflared-config.yml`) is deprecated; use EC2 + Cloudflare DNS. Deploy with:
+The web frontend is served from **S3** (`bombest-beats-web`) with path prefix `/beats/`, behind **CloudFront** (distribution ID `E1RBYOEP5K0UI3`). **Cloudflare** DNS routes `bom.best/beats` to CloudFront. Deploy with:
 
 ```bash
-./scripts/deploy-frontend.sh
+./scripts/deploy-frontend.sh  # added in PR #5
 # With CloudFront invalidation:
 CLOUDFRONT_DIST_ID=E1RBYOEP5K0UI3 ./scripts/deploy-frontend.sh
 ```
 
-See [deploy-which-script.md](deploy-which-script.md) for full frontend deploy instructions.
+See [deploy-which-script.md](deploy-which-script.md) for full frontend deploy instructions. The deploy and nginx scripts (`deploy-nginx-to-ec2.sh`, `scripts/deploy-frontend.sh`, `scripts/add-ssm-permissions.sh`, `scripts/ec2-setup-nginx.sh`, `nginx-ec2.conf`) are introduced in the infrastructure PR (#5).
 
 ## Deploy to AWS (free tier)
 
-Backend runs in Docker on EC2. Stay within [AWS Free Tier](https://aws.amazon.com/free/) (first 12 months): one **t3.micro**, 8 GB root EBS → about **$0/mo**.
+Backend runs in Docker on EC2. Stay within [AWS Free Tier](https://aws.amazon.com/free/) (first 12 months): one **t3.micro**, 30 GB root EBS → about **$0/mo**.
 
 ### 1. Build and push image (from your machine)
 
@@ -83,14 +83,14 @@ Optional: restrict SSH to your current IP:
 RESTRICT_SSH=1 ./setup-ec2-aws-cli.sh us-west-2
 ```
 
-The script creates a key pair (saves to `~/.local/keys/bombest-beats-key.pem` or repo root), a security group (ports 22, 80, and 8338), and a t3.micro instance with 8 GB root. It installs Docker and pulls the image via user data. At the end it prints the public IP, SSH command, and the one-time steps to set S3 env vars and run `./run-bombest-beats.sh` on the instance.
+The script creates a key pair (saves `bombest-beats-key.pem` in the current directory), a security group (ports 22 and 8338), and a t3.micro instance with 30 GB root. It installs Docker and pulls the image via user data. At the end it prints the public IP, SSH command, and the one-time steps to set S3 env vars and run `./run-bombest-beats.sh` on the instance. Port 80 (nginx) is added separately via `./scripts/ec2-setup-nginx.sh`.
 
 ### 2b. Create EC2 instance (AWS Console)
 
 - **Region**: e.g. us-east-1, us-west-2 (match S3/Cloudflare).
 - **AMI**: Amazon Linux 2023.
 - **Instance type**: **t3.micro** only (free tier; do not use t3.small or larger).
-- **Storage**: Default **8 GB** root volume (within 30 GB EBS free tier).
+- **Storage**: Default **30 GB** root volume (within 30 GB EBS free tier).
 - **Security group**: Inbound — **22** (SSH), **80** (nginx), **8338** (Flask). Restrict 22 by your IP if possible.
 - **Key pair**: Create or select one for SSH.
 - **Elastic IP**: Optional. Free tier includes one only when attached; do not leave it unattached or you may be charged.
@@ -151,8 +151,8 @@ sudo docker run -d --name bombest-beats -p 8338:8338 --restart unless-stopped \
 
 - App backend URL: `http://<EC2-public-IP>:8338` or a domain that points to that IP.
 - Cloudflare: Add EC2 as origin (e.g. `beats.bom.best` → EC2 IP, `beats-aws.bom.best` → same EC2 IP). Both hostnames point to the same instance; there is no automatic failover to a different server. Cloudflare connects to **port 80**.
-- EC2 runs nginx on port 80, proxying to Flask on 8338 (setup-ec2-aws-cli.sh configures this).
-- **502 on login?** Ensure (1) security group allows port 80, (2) nginx is running (`sudo systemctl status nginx`), (3) Cloudflare SSL mode: **Full (Strict)** when origin has a cert, otherwise **Flexible**. For existing instances: run `./scripts/ec2-setup-nginx.sh` on EC2 and add port 80 to the security group.
+- EC2 runs nginx on port 80, proxying to Flask on 8338. Install nginx with `./scripts/ec2-setup-nginx.sh` (PR #5) on the EC2 host and add port 80 to the security group.
+- **502 on login?** Ensure (1) security group allows port 80, (2) nginx is running (`sudo systemctl status nginx`), (3) Cloudflare SSL mode: **Full (Strict)** with a Cloudflare Origin Certificate on nginx, or **Flexible** if origin is HTTP-only (unencrypted Cloudflare→origin; acceptable for private backend behind Cloudflare proxy).
 
 ### Use frontend with EC2 backend (local dev)
 

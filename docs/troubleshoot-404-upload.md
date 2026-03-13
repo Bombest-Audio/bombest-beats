@@ -12,7 +12,7 @@ If `POST https://beats.bom.best/upload/folder` returns **404 Not Found**, traffi
 2. For **beats.bom.best**:
    - **Type**: **A**
    - **Name**: `beats`
-   - **Content**: your EC2 public IP (e.g. `16.147.88.132`)
+   - **Content**: your EC2 public IP (find with `aws ec2 describe-instances --filters Name=tag:Name,Values=bombest-beats --query 'Reservations[].Instances[].PublicIpAddress' --output text`)
    - **Proxy**: Proxied (orange cloud) or DNS only
 3. Remove any **CNAME** or **Tunnel route** that points beats.bom.best elsewhere.
 
@@ -22,9 +22,12 @@ If `POST https://beats.bom.best/upload/folder` returns **404 Not Found**, traffi
 # From your machine - should resolve to Cloudflare IPs (proxied) or EC2 IP (DNS only)
 dig beats.bom.best +short
 
-# Test backend directly (bypass Cloudflare if using proxy)
+# Test via Cloudflare (verifies full path)
 curl -s -o /dev/null -w "%{http_code}" https://beats.bom.best/library
 # Expect 200 (or 401 if auth required) — not 404
+
+# To bypass Cloudflare and test origin directly (replace <EC2_IP>):
+curl -s -o /dev/null -w "%{http_code}" --resolve beats.bom.best:80:<EC2_IP> http://beats.bom.best/library
 ```
 
 ## After fixing DNS
@@ -32,6 +35,6 @@ curl -s -o /dev/null -w "%{http_code}" https://beats.bom.best/library
 Redeploy nginx and backend to EC2 so CORS and routes are current:
 
 ```bash
-./deploy-nginx-to-ec2.sh
+./deploy-nginx-to-ec2.sh  # PR #5
 ./deploy-to-ec2.sh
 ```

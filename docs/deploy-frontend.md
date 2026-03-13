@@ -5,7 +5,7 @@ Single-page reference for deploying the music-frontend to S3 and CloudFront.
 ## Quick deploy
 
 ```bash
-./scripts/deploy-frontend.sh
+./scripts/deploy-frontend.sh  # added in PR #5
 # With CloudFront cache invalidation:
 CLOUDFRONT_DIST_ID=E1RBYOEP5K0UI3 ./scripts/deploy-frontend.sh
 ```
@@ -17,7 +17,7 @@ CLOUDFRONT_DIST_ID=E1RBYOEP5K0UI3 ./scripts/deploy-frontend.sh
 | `PUBLIC_URL` | `/beats` | Base path for assets |
 | `REACT_APP_API_BASE` | `https://beats.bom.best` | API URL the app calls |
 | `GENERATE_SOURCEMAP` | `false` | Disable source maps in prod |
-| `NODE_OPTIONS` | `--openssl-legacy-provider` | Only needed for Node &lt; 17 with OpenSSL 3.x (e.g. Ubuntu 22.04) |
+| `NODE_OPTIONS` | *(not set by default)* | Set to `--openssl-legacy-provider` if you hit OpenSSL/webpack errors (Node 17+ with older react-scripts) |
 
 ## S3 & CloudFront
 
@@ -31,7 +31,7 @@ Override via `FRONTEND_BUCKET` and `FRONTEND_PATH` env vars.
 
 ## CloudFront 403 on /beats/
 
-If `https://beats-app.bom.best/beats/` returns 403, see [cloudfront-403-fix.md](cloudfront-403-fix.md). A CloudFront Function rewrites `/beats` and `/beats/` to `/beats/index.html`. The custom domain requires an ACM cert and alias; add the DNS validation CNAME in Cloudflare, then run `./scripts/cloudfront-add-alias.sh`.
+If `https://beats-app.bom.best/beats/` returns 403, see [cloudfront-403-fix.md](cloudfront-403-fix.md). A CloudFront Function rewrites `/beats` and `/beats/` to `/beats/index.html`. The custom domain requires an ACM cert and alias; add the DNS validation CNAME in Cloudflare, then run `./scripts/cloudfront-add-alias.sh` (PR #5).
 
 ## bom.best DNS not resolving
 
@@ -49,10 +49,10 @@ If you see "bom.best's DNS address could not be found" or `DNS_PROBE_POSSIBLE`:
 
 ## Cloudflare DNS / routing
 
-- **beats.bom.best**, **beats-aws.bom.best**: A records (Proxied) → EC2 public IP (e.g. 16.147.88.132).
+- **beats.bom.best**, **beats-aws.bom.best**: A records (Proxied) → EC2 public IP (find with `aws ec2 describe-instances --filters Name=tag:Name,Values=bombest-beats --query 'Reservations[].Instances[].PublicIpAddress' --output text`).
 - **bom.best** (root): Must have a DNS record or the site won't load ("DNS address could not be found"). Use one of:
   - **CNAME** `bom.best` → `d37qdccady5d3d.cloudfront.net` (Proxied). Requires CloudFront to have `bom.best` as an alternate domain (and ACM cert).
-  - **Cloudflare Tunnel** (cloudflared): public hostname `bom.best` → `https://d37qdccady5d3d.cloudfront.net`. Note: the legacy home-server tunnel (`cloudflared-config.yml`) is deprecated; use EC2 + Cloudflare DNS.
+  - **Cloudflare Tunnel** (cloudflared): public hostname `bom.best` → `https://d37qdccady5d3d.cloudfront.net`. Note: the home-server tunnel config (`cloudflared-config.yml`) is deprecated; prefer EC2 + Cloudflare DNS.
   - **Workaround**: Use `https://beats-app.bom.best/beats/` (CNAME to CloudFront already exists).
 
 ## Required AWS permissions

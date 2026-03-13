@@ -37,7 +37,7 @@ A cross-platform music streaming application with Android, iOS, and web clients 
 | Component | Value |
 |-----------|-------|
 | API URL | `https://beats.bom.best/` |
-| Failover URL | `https://beats-aws.bom.best/` |
+| Alternate URL | `https://beats-aws.bom.best/` (same EC2 instance; not automatic failover) |
 | S3 Bucket | `s3://bombest-beats-music` |
 | Docker Image | `tomdabomb2u/bombest-beats:latest` |
 
@@ -52,7 +52,7 @@ cd beets-backend && ./venv/bin/python upload_server.py
 
 ### Deploy to AWS
 - **Backend:** `./deploy-to-ec2.sh [REGION]` — build image, push to Docker Hub, update container on EC2 (requires existing EC2 instance with tag `Name=bombest-beats`).
-- **Frontend:** `./scripts/deploy-frontend.sh` — build and deploy bom.best/beats to S3 (`bombest-beats-web`) and CloudFront. Set `CLOUDFRONT_DIST_ID=E1RBYOEP5K0UI3` for cache invalidation.
+- **Frontend:** `./scripts/deploy-frontend.sh` (added in PR #5) — build and deploy bom.best/beats to S3 (`bombest-beats-web`) and CloudFront. Set `CLOUDFRONT_DIST_ID=E1RBYOEP5K0UI3` for cache invalidation.
 - **First-time:** run `./deploy-aws.sh`, then create EC2 via `./setup-ec2-aws-cli.sh`; see [docs/architecture.md](docs/architecture.md).
 
 ### Android
@@ -97,7 +97,7 @@ bombest-beats/
 ## Client Connection (Static Endpoints)
 
 - API base (primary): `https://beats.bom.best/`
-- API base (failover): `https://beats-aws.bom.best/`
+- API base (alternate): `https://beats-aws.bom.best/` (same EC2 instance)
 - DNS hostnames served via Cloudflare; traffic routes to EC2 backend
 
 These endpoints are stable; mobile and web clients can use them as defaults. Clients may optionally override the API base via configuration (e.g. `REACT_APP_API_BASE`) for local or dev testing. Tunnel IDs, credential files, and other infrastructure-specific details are managed via deployment configuration and internal documentation and may change without affecting these public URLs.
