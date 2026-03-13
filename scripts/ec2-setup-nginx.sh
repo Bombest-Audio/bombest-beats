@@ -2,14 +2,25 @@
 # Run this on EC2 (via SSH or SSM) to add nginx reverse proxy.
 # Fixes 502 on login: Cloudflare proxies to port 80, but the backend runs on 8338.
 # This script configures nginx to listen on 80 and proxy to localhost:8338.
+#
+# If nginx-ec2.conf is available (repo checkout), it is used as the source of truth.
+# Otherwise, a minimal config is generated inline.
 
 set -e
 
 echo "Installing nginx..."
 sudo yum install -y nginx 2>/dev/null || sudo dnf install -y nginx
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_CONF="$SCRIPT_DIR/../nginx-ec2.conf"
+
 echo "Configuring nginx..."
-sudo tee /etc/nginx/conf.d/bombest-beats.conf > /dev/null << 'EOF'
+if [ -f "$REPO_CONF" ]; then
+  echo "  Using nginx-ec2.conf from repo"
+  sudo cp "$REPO_CONF" /etc/nginx/conf.d/bombest-beats.conf
+else
+  echo "  nginx-ec2.conf not found; generating minimal config"
+  sudo tee /etc/nginx/conf.d/bombest-beats.conf > /dev/null << 'EOF'
 map $http_origin $cors_origin {
     default "https://bom.best";
     "https://bom.best" "https://bom.best";
@@ -17,7 +28,6 @@ map $http_origin $cors_origin {
     "https://beats.bom.best" "https://beats.bom.best";
     "https://beats-app.bom.best" "https://beats-app.bom.best";
     "https://d37qdccady5d3d.cloudfront.net" "https://d37qdccady5d3d.cloudfront.net";
-    "http://localhost:3000" "http://localhost:3000";
 }
 server {
     listen 80;
@@ -62,9 +72,11 @@ server {
     }
 }
 EOF
+fi
 
 sudo rm -f /etc/nginx/conf.d/default.conf
 sudo systemctl enable nginx
 sudo systemctl restart nginx
 
-echo "Done. Ensure security group allows port 80. Cloudflare SSL: use Full (Strict) for end-to-end encryption."
+echo "Done. Ensure security group allows port 80."
+echo "Cloudflare SSL: use Full mode (origin listens on HTTP). For Full (Strict), add an origin TLS certificate."

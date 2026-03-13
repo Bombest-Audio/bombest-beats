@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Create Bombest Beats backend on AWS EC2 (free tier) using AWS CLI.
-# Free tier: t3.micro instance, 8 GB gp3 EBS (within 12-month free tier limits).
+# Free tier: t3.micro instance, 30 GB gp3 EBS (within 12-month free tier limits).
 # Prerequisites: AWS CLI installed and configured (aws configure).
 # Usage: ./setup-ec2-aws-cli.sh [REGION]
 #   REGION defaults to us-west-2. Export AWS_PROFILE if needed.
