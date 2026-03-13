@@ -48,7 +48,7 @@ This document is the source of truth for deployment, S3, EC2, and making users a
 
 ## Frontend hosting (bom.best/beats)
 
-The web frontend is served from **S3** (`bombest-beats-web`) with path prefix `/beats/`, behind **CloudFront** (distribution ID `E1RBYOEP5K0UI3`). **Cloudflare** (Tunnel `bombest-beats` or DNS) routes `bom.best/beats` to CloudFront. Deploy with:
+The web frontend is served from **S3** (`bombest-beats-web`) with path prefix `/beats/`, behind **CloudFront** (distribution ID `E1RBYOEP5K0UI3`). **Cloudflare** (DNS CNAME or Tunnel) routes `bom.best/beats` to CloudFront. The legacy home-server tunnel (`cloudflared-config.yml`) is deprecated; use EC2 + Cloudflare DNS. Deploy with:
 
 ```bash
 ./scripts/deploy-frontend.sh
@@ -150,9 +150,9 @@ sudo docker run -d --name bombest-beats -p 8338:8338 --restart unless-stopped \
 ### 6. Point app and Cloudflare at EC2
 
 - App backend URL: `http://<EC2-public-IP>:8338` or a domain that points to that IP.
-- Cloudflare: Add EC2 as origin (e.g. `beats.bom.best` → EC2 IP). Cloudflare connects to **port 80**.
+- Cloudflare: Add EC2 as origin (e.g. `beats.bom.best` → EC2 IP, `beats-aws.bom.best` → same EC2 IP). Both hostnames point to the same instance; there is no automatic failover to a different server. Cloudflare connects to **port 80**.
 - EC2 runs nginx on port 80, proxying to Flask on 8338 (setup-ec2-aws-cli.sh configures this).
-- **502 on login?** Ensure (1) security group allows port 80, (2) nginx is running (`sudo systemctl status nginx`), (3) Cloudflare SSL mode is **Flexible**. For existing instances: run `./scripts/ec2-setup-nginx.sh` on EC2 and add port 80 to the security group.
+- **502 on login?** Ensure (1) security group allows port 80, (2) nginx is running (`sudo systemctl status nginx`), (3) Cloudflare SSL mode: **Full (Strict)** when origin has a cert, otherwise **Flexible**. For existing instances: run `./scripts/ec2-setup-nginx.sh` on EC2 and add port 80 to the security group.
 
 ### Use frontend with EC2 backend (local dev)
 

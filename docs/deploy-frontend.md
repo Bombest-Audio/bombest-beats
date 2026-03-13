@@ -17,7 +17,7 @@ CLOUDFRONT_DIST_ID=E1RBYOEP5K0UI3 ./scripts/deploy-frontend.sh
 | `PUBLIC_URL` | `/beats` | Base path for assets |
 | `REACT_APP_API_BASE` | `https://beats.bom.best` | API URL the app calls |
 | `GENERATE_SOURCEMAP` | `false` | Disable source maps in prod |
-| `NODE_OPTIONS` | `--openssl-legacy-provider` | Required for older Node / OpenSSL |
+| `NODE_OPTIONS` | `--openssl-legacy-provider` | Only needed for Node &lt; 17 with OpenSSL 3.x (e.g. Ubuntu 22.04) |
 
 ## S3 & CloudFront
 
@@ -52,7 +52,7 @@ If you see "bom.best's DNS address could not be found" or `DNS_PROBE_POSSIBLE`:
 - **beats.bom.best**, **beats-aws.bom.best**: A records (Proxied) → EC2 public IP (e.g. 16.147.88.132).
 - **bom.best** (root): Must have a DNS record or the site won't load ("DNS address could not be found"). Use one of:
   - **CNAME** `bom.best` → `d37qdccady5d3d.cloudfront.net` (Proxied). Requires CloudFront to have `bom.best` as an alternate domain (and ACM cert).
-  - **Tunnel** public hostname `bom.best` → `https://d37qdccady5d3d.cloudfront.net` (Cloudflare creates DNS automatically).
+  - **Cloudflare Tunnel** (cloudflared): public hostname `bom.best` → `https://d37qdccady5d3d.cloudfront.net`. Note: the legacy home-server tunnel (`cloudflared-config.yml`) is deprecated; use EC2 + Cloudflare DNS.
   - **Workaround**: Use `https://beats-app.bom.best/beats/` (CNAME to CloudFront already exists).
 
 ## Required AWS permissions

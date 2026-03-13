@@ -2,8 +2,8 @@
 
 If the Upload screen shows "SERVER RETURNED AN ERROR PAGE" and the console shows:
 
-- **500 Internal Server Error** on `beats.bom.best/playlists`
-- **404** on upload/folder
+- **500 Internal Server Error** on `https://beats.bom.best/playlists`
+- **404** on `https://beats.bom.best/upload/folder`
 - **SyntaxError: Unexpected token '<'** on jsmediatags (HTML returned instead of JS)
 
 ## 500 on /playlists

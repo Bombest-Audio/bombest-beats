@@ -41,7 +41,7 @@ Point **beats.bom.best** at your EC2 public IP so the web app can reach the API:
 
 - In Cloudflare DNS, add an **A record**: `beats.bom.best` → `<EC2_PUBLIC_IP>`
 - Proxy through Cloudflare (recommended) or DNS only
-- **SSL/TLS mode**: set to **Flexible** (Cloudflare↔origin uses HTTP; origin has no cert)
+- **SSL/TLS mode**: use **Full (Strict)** when origin has a valid cert (e.g. Cloudflare Origin Certificate on nginx); otherwise **Flexible** if origin is HTTP-only
 - **Port 80**: EC2 must listen on port 80. New instances get nginx via setup script. For existing instances, run `./scripts/ec2-setup-nginx.sh` on the EC2 host, and add port 80 to the security group.
 
 ## Web frontend (bom.best/beats)

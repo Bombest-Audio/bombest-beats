@@ -68,7 +68,7 @@ Requires `iam:PutUserPolicy` (admin or equivalent). Adds: `ssm:SendCommand`, `ss
 
 If SSM fails (e.g. missing IAM permissions), deploy nginx manually:
 
-1. Open **EC2 Instance Connect** in the AWS Console for instance `i-09d9ff1f4729585b2` (or your instance).
+1. Open **EC2 Instance Connect** in the AWS Console for your instance (find via tag: `Name=bombest-beats`, or `aws ec2 describe-instances --filters Name=tag:Name,Values=bombest-beats --query 'Reservations[].Instances[].InstanceId' --output text`).
 2. Run the script — it will print a block to paste:
    ```bash
    ./deploy-nginx-to-ec2.sh
