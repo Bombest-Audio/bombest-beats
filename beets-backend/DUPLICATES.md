@@ -24,7 +24,7 @@ Folder and file uploads now normalize track names before checking. "w_mcnichols"
    ```
    This finds pairs with the same album and similar/related titles (e.g. one title substring of another, or "00 X" vs "X (y)").
 
-2. **Remove the wrong track**    
+2. **Remove the wrong track**
    Keep the correct track (e.g. "slow sippin (añeja)"). Remove the other by ID:
    ```bash
    python find_and_remove_duplicate_tracks.py --remove <ID> [--delete-file]
