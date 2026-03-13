@@ -1,4 +1,5 @@
 # Caddyfile - Bombest Beats only
+# DEPRECATED: Home server config. EC2 is now the primary deployment target.
 
 # Bombest Beats - Internal server for Cloudflare Tunnel
 http://:8085 {

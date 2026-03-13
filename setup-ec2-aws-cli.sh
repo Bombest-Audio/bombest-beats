@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Create Bombest Beats backend on AWS EC2 (free tier) using AWS CLI.
+# Free tier: t3.micro instance, 8 GB gp3 EBS (within 12-month free tier limits).
 # Prerequisites: AWS CLI installed and configured (aws configure).
 # Usage: ./setup-ec2-aws-cli.sh [REGION]
 #   REGION defaults to us-west-2. Export AWS_PROFILE if needed.
@@ -62,6 +63,9 @@ if aws ec2 describe-security-groups --group-names "$SG_NAME" --region "$REGION" 
   SG_ID=$(aws ec2 describe-security-groups --group-names "$SG_NAME" --region "$REGION" \
     --query 'SecurityGroups[0].GroupId' --output text)
   echo "Using existing security group: $SG_ID"
+  # Ensure port 80 is open (for Cloudflare proxy); ignore if already exists
+  aws ec2 authorize-security-group-ingress --group-id "$SG_ID" --region "$REGION" \
+    --protocol tcp --port 80 --cidr 0.0.0.0/0 2>/dev/null || true
 else
   echo "Creating security group: $SG_NAME"
   SG_ID=$(aws ec2 create-security-group --group-name "$SG_NAME" --description "Bombest Beats backend" \
@@ -69,8 +73,10 @@ else
   aws ec2 authorize-security-group-ingress --group-id "$SG_ID" --region "$REGION" \
     --protocol tcp --port 22 --cidr "$SSH_CIDR"
   aws ec2 authorize-security-group-ingress --group-id "$SG_ID" --region "$REGION" \
+    --protocol tcp --port 80 --cidr 0.0.0.0/0
+  aws ec2 authorize-security-group-ingress --group-id "$SG_ID" --region "$REGION" \
     --protocol tcp --port 8338 --cidr 0.0.0.0/0
-  echo "  Ingress: 22 (SSH) from $SSH_CIDR, 8338 (Flask) from 0.0.0.0/0"
+  echo "  Ingress: 22 (SSH), 80 (HTTP/Cloudflare), 8338 (Flask direct)"
 fi
 
 # 4. Latest Amazon Linux 2023 AMI
@@ -111,13 +117,35 @@ fi
 USER_DATA=$(cat <<'USERDATA_END'
 #!/bin/bash
 set -e
-yum install -y docker
+yum install -y docker nginx
 systemctl enable docker
 systemctl start docker
 usermod -aG docker ec2-user
 mkdir -p /data/beets
 chown ec2-user:ec2-user /data/beets
 sudo -u ec2-user docker pull DOCKER_IMAGE_PLACEHOLDER || true
+# Nginx reverse proxy: Cloudflare connects to port 80, we proxy to Flask on 8338
+cat > /etc/nginx/conf.d/bombest-beats.conf << 'NGINXEOF'
+server {
+    listen 80;
+    server_name _;
+    location / {
+        proxy_pass http://127.0.0.1:8338;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+}
+NGINXEOF
+rm -f /etc/nginx/conf.d/default.conf
+systemctl enable nginx
+systemctl start nginx || true
+USERDATA_END
 # Run script for ec2-user to start container (set S3_* env vars first)
 cat > /home/ec2-user/run-bombest-beats.sh << RUN_END
 #!/bin/bash
@@ -144,7 +172,7 @@ RUN_INSTANCE_ARGS=(
   --instance-type t3.micro
   --key-name "$KEY_NAME"
   --security-group-ids "$SG_ID"
-  --block-device-mappings '[{"DeviceName":"/dev/xvda","Ebs":{"VolumeSize":30,"VolumeType":"gp3"}}]'
+  --block-device-mappings '[{"DeviceName":"/dev/xvda","Ebs":{"VolumeSize":8,"VolumeType":"gp3"}}]'
   --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=$INSTANCE_TAG}]"
   --user-data "$USER_DATA"
 )

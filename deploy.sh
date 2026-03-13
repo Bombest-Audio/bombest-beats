@@ -1,4 +1,9 @@
 #!/bin/bash
+# DEPRECATED: Home server deployment. Use ./deploy-to-ec2.sh for EC2 deployment.
+echo "DEPRECATED: This script deploys to the home server (100.69.137.108)."
+echo "Use ./deploy-to-ec2.sh for EC2 deployment."
+exit 1
+
 set -e
 
 SERVER="thomas@100.69.137.108"
