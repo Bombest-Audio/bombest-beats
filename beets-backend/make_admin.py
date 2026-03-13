@@ -5,7 +5,9 @@ import os
 import sqlite3
 import sys
 
-DB_PATH = os.path.join(os.path.dirname(__file__), 'music', 'users.db')
+from db_path import get_users_db_path
+
+DB_PATH = get_users_db_path()
 USERNAME = (sys.argv[1] if len(sys.argv) > 1 else 'thomas').strip()
 
 def main():
