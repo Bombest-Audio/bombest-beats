@@ -1,11 +1,11 @@
 // Rewrite /beats, /beats/, and /beats/* (SPA routes) to /beats/index.html
 // Static assets (/beats/static/..., .js, .css, etc.) keep their paths
-async function handler(event) {
+function handler(event) {
     var request = event.request;
     var uri = request.uri;
 
-    // Only rewrite paths under /beats
-    if (!uri.startsWith('/beats')) {
+    // Only rewrite /beats or /beats/* (not e.g. /beats-something)
+    if (uri !== '/beats' && !uri.startsWith('/beats/')) {
         return request;
     }
     // Has a file extension? (static asset) — leave as-is

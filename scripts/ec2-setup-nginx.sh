@@ -67,4 +67,4 @@ sudo rm -f /etc/nginx/conf.d/default.conf
 sudo systemctl enable nginx
 sudo systemctl restart nginx
 
-echo "Done. Ensure security group allows port 80. Cloudflare SSL: use Flexible mode."
+echo "Done. Ensure security group allows port 80. Cloudflare SSL: use Full (Strict) for end-to-end encryption."

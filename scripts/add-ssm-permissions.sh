@@ -2,7 +2,7 @@
 # Add SSM SendCommand and GetCommandInvocation permissions to an IAM user.
 # Required for deploy-nginx-to-ec2.sh and deploy-container-to-ec2.sh.
 #
-# Usage: ./add-ssm-permissions.sh [IAM_USER_NAME]
+# Usage: ./scripts/add-ssm-permissions.sh [IAM_USER_NAME]
 #   Default user: bombest-deployment
 #   To find your CLI user: aws sts get-caller-identity --query 'Arn' --output text
 
@@ -14,7 +14,7 @@ echo "Adding SSM permissions to IAM user: $USER_NAME"
 echo "  (To use a different user, run: $0 YOUR_IAM_USER_NAME)"
 echo ""
 
-# Policy: minimal permissions for SSM Run Command
+# Policy: SSM Run Command. For production, scope Resource to instance ARNs or document.
 cat > /tmp/ssm-send-command-policy.json << 'EOF'
 {
     "Version": "2012-10-17",
@@ -38,3 +38,6 @@ aws iam put-user-policy \
   --policy-document file:///tmp/ssm-send-command-policy.json
 
 echo "✅ SSM permissions added. Try: ./deploy-nginx-to-ec2.sh"
+echo ""
+echo "Note: This policy uses Resource: \"*\". For production, consider scoping to specific"
+echo "instance ARNs or the AWS-RunShellScript document to limit blast radius."

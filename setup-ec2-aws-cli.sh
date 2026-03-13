@@ -66,6 +66,9 @@ if aws ec2 describe-security-groups --group-names "$SG_NAME" --region "$REGION" 
   # Ensure port 80 is open (for Cloudflare proxy); ignore if already exists
   aws ec2 authorize-security-group-ingress --group-id "$SG_ID" --region "$REGION" \
     --protocol tcp --port 80 --cidr 0.0.0.0/0 2>/dev/null || true
+  # Remove 8338 if present (nginx on 80 is the only public entrypoint)
+  aws ec2 revoke-security-group-ingress --group-id "$SG_ID" --region "$REGION" \
+    --protocol tcp --port 8338 --cidr 0.0.0.0/0 2>/dev/null || true
 else
   echo "Creating security group: $SG_NAME"
   SG_ID=$(aws ec2 create-security-group --group-name "$SG_NAME" --description "Bombest Beats backend" \
@@ -74,9 +77,7 @@ else
     --protocol tcp --port 22 --cidr "$SSH_CIDR"
   aws ec2 authorize-security-group-ingress --group-id "$SG_ID" --region "$REGION" \
     --protocol tcp --port 80 --cidr 0.0.0.0/0
-  aws ec2 authorize-security-group-ingress --group-id "$SG_ID" --region "$REGION" \
-    --protocol tcp --port 8338 --cidr 0.0.0.0/0
-  echo "  Ingress: 22 (SSH), 80 (HTTP/Cloudflare), 8338 (Flask direct)"
+  echo "  Ingress: 22 (SSH), 80 (HTTP/Cloudflare via nginx)"
 fi
 
 # 4. Latest Amazon Linux 2023 AMI
@@ -129,6 +130,7 @@ cat > /etc/nginx/conf.d/bombest-beats.conf << 'NGINXEOF'
 server {
     listen 80;
     server_name _;
+    client_max_body_size 500M;
     location / {
         proxy_pass http://127.0.0.1:8338;
         proxy_http_version 1.1;
@@ -172,7 +174,7 @@ RUN_INSTANCE_ARGS=(
   --instance-type t3.micro
   --key-name "$KEY_NAME"
   --security-group-ids "$SG_ID"
-  --block-device-mappings '[{"DeviceName":"/dev/xvda","Ebs":{"VolumeSize":8,"VolumeType":"gp3"}}]'
+  --block-device-mappings '[{"DeviceName":"/dev/xvda","Ebs":{"VolumeSize":30,"VolumeType":"gp3"}}]'
   --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=$INSTANCE_TAG}]"
   --user-data "$USER_DATA"
 )

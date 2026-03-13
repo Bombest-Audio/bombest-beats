@@ -32,9 +32,15 @@ echo "=== Adding beats-app.bom.best to CloudFront $DIST_ID ==="
 
 CONFIG=$(aws cloudfront get-distribution-config --id "$DIST_ID" --output json)
 ETAG=$(echo "$CONFIG" | jq -r '.ETag')
-DIST_CFG=$(echo "$CONFIG" | jq --arg cert "$CERT_ARN" '
-  .DistributionConfig.Aliases.Quantity = 1 |
-  .DistributionConfig.Aliases.Items = ["beats-app.bom.best"] |
+NEW_ALIAS="beats-app.bom.best"
+if echo "$CONFIG" | jq -e --arg a "$NEW_ALIAS" '(.DistributionConfig.Aliases.Items // []) | index($a) != null' >/dev/null 2>&1; then
+  echo "Alias $NEW_ALIAS already present. Skipping."
+  exit 0
+fi
+ALIASES=$(echo "$CONFIG" | jq -c --arg a "$NEW_ALIAS" '(.DistributionConfig.Aliases.Items // []) + [$a]')
+DIST_CFG=$(echo "$CONFIG" | jq --arg cert "$CERT_ARN" --argjson aliases "$ALIASES" '
+  .DistributionConfig.Aliases.Quantity = ($aliases | length) |
+  .DistributionConfig.Aliases.Items = $aliases |
   .DistributionConfig.ViewerCertificate = {
     "ACMCertificateArn": $cert,
     "SSLSupportMethod": "sni-only",
