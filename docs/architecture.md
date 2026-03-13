@@ -2,6 +2,8 @@
 
 This document is the source of truth for deployment, S3, EC2, and making users admin.
 
+**Note:** Home server deployment (deploy.sh, deploy_docker.sh, cloudflared tunnel) is deprecated. Use EC2 as the primary deployment target.
+
 ## High-Level Flow
 - Source of truth: Beets `music/library.db` and files under `beets-backend/music/` on the server.
 - Sync: `sync-to-s3.sh` mirrors the music directory to `s3://bombest-beats-music/music/`. Run it after changing metadata (e.g. from the app's Edit metadata) so S3 stays in sync.
@@ -18,17 +20,17 @@ This document is the source of truth for deployment, S3, EC2, and making users a
 - Credentials: stored locally (not in git) under `~/.aws` with profile `bombest-beats-sync` ( `.local/` is ignored).
 
 ## Sync Details
-- Script: `/home/thomas/bombest-beats/sync-to-s3.sh`
-  - Defaults: `MUSIC_DIR=/home/thomas/bombest-beats/beets-backend/music`, `BUCKET=bombest-beats-music`, `REGION=us-west-2`.
+- Script: `sync-to-s3.sh` (from repo root)
+  - Defaults: `MUSIC_DIR` = `$REPO_ROOT/beets-backend/music`, `BUCKET=bombest-beats-music`, `REGION=us-west-2`.
   - Honors `AWS_PROFILE` (recommended: `bombest-beats-sync`).
   - Options: `WATCH=1` uses `inotifywait`; otherwise one-shot/cron.
 - Cron (user `thomas`): runs every 5 minutes
   ```
-  AWS_PROFILE=bombest-beats-sync /home/thomas/bombest-beats/sync-to-s3.sh >> /home/thomas/bombest-beats/sync-to-s3.log 2>&1
+  AWS_PROFILE=bombest-beats-sync $REPO_ROOT/sync-to-s3.sh >> $REPO_ROOT/sync-to-s3.log 2>&1
   ```
 
 ## Bucket Setup Script
-- Script: `/home/thomas/bombest-beats/setup-s3-simple.sh`
+- Script: `setup-s3-simple.sh` (from repo root)
   - Creates bucket if missing.
   - Enables Block Public Access.
   - Clears any public policy.
@@ -36,13 +38,25 @@ This document is the source of truth for deployment, S3, EC2, and making users a
   - Enables SSE-S3 and Versioning.
 
 ## Verification
-- Log: `tail -n 50 /home/thomas/bombest-beats/sync-to-s3.log`
+- Log: `tail -n 50 sync-to-s3.log` (from repo root)
 - List bucket: `AWS_PROFILE=bombest-beats-sync aws s3 ls s3://bombest-beats-music/music/`
-- Manual sync: `AWS_PROFILE=bombest-beats-sync /home/thomas/bombest-beats/sync-to-s3.sh`
+- Manual sync: `AWS_PROFILE=bombest-beats-sync ./sync-to-s3.sh` (from repo root)
 
 ## Client Notes
 - Android app (Compose + Media3) lists tracks primarily from **S3** (ListObjects). It also fetches GET `/library` to build a path→backend id map so tracks that exist in the beets library can be edited in-app (Edit metadata). Playback URLs are S3-based; stream can also go via backend `/stream/<id>` (redirect to S3 or local file).
 - **After editing metadata**: When you change title, artist, or album from the app (Edit metadata) or via PUT `/track/<id>` on the backend, run `sync-to-s3.sh` so the updated files and folder structure are reflected in S3. The app refreshes the list from S3 after a successful edit; running sync ensures S3 and the on-disk library stay in sync.
+
+## Frontend hosting (bom.best/beats)
+
+The web frontend is served from **S3** (`bombest-beats-web`) with path prefix `/beats/`, behind **CloudFront** (distribution ID `E1RBYOEP5K0UI3`). **Cloudflare** (Tunnel `bombest-beats` or DNS) routes `bom.best/beats` to CloudFront. Deploy with:
+
+```bash
+./scripts/deploy-frontend.sh
+# With CloudFront invalidation:
+CLOUDFRONT_DIST_ID=E1RBYOEP5K0UI3 ./scripts/deploy-frontend.sh
+```
+
+See [deploy-which-script.md](deploy-which-script.md) for full frontend deploy instructions.
 
 ## Deploy to AWS (free tier)
 
@@ -52,7 +66,7 @@ Backend runs in Docker on EC2. Stay within [AWS Free Tier](https://aws.amazon.co
 
 - Start Docker Desktop.
 - From repo root: `./deploy-aws.sh`
-- Pushes `thomasphillips3/bombest-beats:latest` to Docker Hub (image includes `music/` and beets import; build where `beets-backend/music/` exists).
+- Pushes `tomdabomb2u/bombest-beats:latest` to Docker Hub (image includes `music/` and beets import; build where `beets-backend/music/` exists).
 
 ### 2a. Create EC2 with AWS CLI (recommended)
 
@@ -69,7 +83,7 @@ Optional: restrict SSH to your current IP:
 RESTRICT_SSH=1 ./setup-ec2-aws-cli.sh us-west-2
 ```
 
-The script creates a key pair (saves `bombest-beats-key.pem`), a security group (ports 22 and 8338), and a t3.micro instance with 8 GB root. It installs Docker and pulls the image via user data. At the end it prints the public IP, SSH command, and the one-time steps to set S3 env vars and run `./run-bombest-beats.sh` on the instance.
+The script creates a key pair (saves to `~/.local/keys/bombest-beats-key.pem` or repo root), a security group (ports 22, 80, and 8338), and a t3.micro instance with 8 GB root. It installs Docker and pulls the image via user data. At the end it prints the public IP, SSH command, and the one-time steps to set S3 env vars and run `./run-bombest-beats.sh` on the instance.
 
 ### 2b. Create EC2 instance (AWS Console)
 
@@ -77,7 +91,7 @@ The script creates a key pair (saves `bombest-beats-key.pem`), a security group 
 - **AMI**: Amazon Linux 2023.
 - **Instance type**: **t3.micro** only (free tier; do not use t3.small or larger).
 - **Storage**: Default **8 GB** root volume (within 30 GB EBS free tier).
-- **Security group**: Inbound — **22** (SSH), **8338** (Flask). Restrict 22 by your IP if possible.
+- **Security group**: Inbound — **22** (SSH), **80** (nginx), **8338** (Flask). Restrict 22 by your IP if possible.
 - **Key pair**: Create or select one for SSH.
 - **Elastic IP**: Optional. Free tier includes one only when attached; do not leave it unattached or you may be charged.
 
@@ -115,11 +129,11 @@ export S3_REGION=us-west-2
 # export JWT_SECRET_KEY=...
 # (email in config.yaml or env as needed)
 
-sudo docker pull thomasphillips3/bombest-beats:latest
+sudo docker pull tomdabomb2u/bombest-beats:latest
 sudo docker run -d --name bombest-beats -p 8338:8338 --restart unless-stopped \
   -v /data/beets:/app/music \
   -e S3_BUCKET -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e S3_REGION \
-  thomasphillips3/bombest-beats:latest
+  tomdabomb2u/bombest-beats:latest
 ```
 
 ### 5. Env var checklist
@@ -136,7 +150,9 @@ sudo docker run -d --name bombest-beats -p 8338:8338 --restart unless-stopped \
 ### 6. Point app and Cloudflare at EC2
 
 - App backend URL: `http://<EC2-public-IP>:8338` or a domain that points to that IP.
-- Cloudflare: Add EC2 as origin (e.g. `beats.bom.best` → EC2 IP:8338).
+- Cloudflare: Add EC2 as origin (e.g. `beats.bom.best` → EC2 IP). Cloudflare connects to **port 80**.
+- EC2 runs nginx on port 80, proxying to Flask on 8338 (setup-ec2-aws-cli.sh configures this).
+- **502 on login?** Ensure (1) security group allows port 80, (2) nginx is running (`sudo systemctl status nginx`), (3) Cloudflare SSL mode is **Flexible**. For existing instances: run `./scripts/ec2-setup-nginx.sh` on EC2 and add port 80 to the security group.
 
 ### Use frontend with EC2 backend (local dev)
 
@@ -173,7 +189,7 @@ To run the update without the script:
 - On EC2: pull, stop, remove container, then run the same `docker run` (keep `-v /data/beets:/app/music` so DB persists):
 
 ```bash
-sudo docker pull thomasphillips3/bombest-beats:latest
+sudo docker pull tomdabomb2u/bombest-beats:latest
 sudo docker stop bombest-beats && sudo docker rm bombest-beats
 # Run the same docker run command as in step 4 (with -v /data/beets:/app/music)
 ```
