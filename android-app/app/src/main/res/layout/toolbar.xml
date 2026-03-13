@@ -33,7 +33,7 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Bombest Beats"
+                android:text="@string/brand_name"
                 android:textColor="@android:color/white"
                 android:textSize="24sp"
                 android:textStyle="bold" />
@@ -42,7 +42,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="10dp"
-                android:text="Streaming from Bombest Beats"
+                android:text="@string/streaming_from_brand"
                 android:textColor="@android:color/white"
                 android:textSize="16sp"
                 android:textStyle="italic|bold" />
