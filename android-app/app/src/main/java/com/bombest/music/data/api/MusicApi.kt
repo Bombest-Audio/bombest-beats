@@ -66,6 +66,9 @@ interface MusicApi {
         @retrofit2.http.Body request: BatchPlayRequest,
         @Header("Authorization") auth: String
     ): Response<Unit>
+
+    @DELETE("duplicates")
+    suspend fun removeDuplicates(@Header("Authorization") auth: String): RemoveDuplicatesResponse
 }
 
 data class BatchPlayRequest(
@@ -75,4 +78,9 @@ data class BatchPlayRequest(
 data class PlayEvent(
     val track_id: Int,
     val timestamp: String // ISO 8601 or similar
+)
+
+data class RemoveDuplicatesResponse(
+    val message: String,
+    val deleted_ids: List<Int>
 )
