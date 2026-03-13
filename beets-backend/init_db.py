@@ -2,9 +2,9 @@ import sqlite3
 import bcrypt
 import os
 
-# When DATA_DIR is set (e.g. Docker), persist users.db there; else use music/users.db
-_DATA_DIR = os.environ.get('DATA_DIR')
-DB_PATH = os.path.join(_DATA_DIR, 'users.db') if _DATA_DIR else os.path.join(os.getcwd(), 'music', 'users.db')
+from db_path import get_users_db_path
+
+DB_PATH = get_users_db_path()
 
 def init_db():
     print(f"Initializing user database at {DB_PATH}...")
@@ -41,6 +41,7 @@ def init_db():
         description TEXT,
         art_path TEXT,
         is_public INTEGER DEFAULT 0,
+        share_token TEXT UNIQUE,
         FOREIGN KEY (user_id) REFERENCES users (id)
     )
     ''')
@@ -55,14 +56,26 @@ def init_db():
         ('description', 'ALTER TABLE playlists ADD COLUMN description TEXT'),
         ('art_path', 'ALTER TABLE playlists ADD COLUMN art_path TEXT'),
         ('is_public', 'ALTER TABLE playlists ADD COLUMN is_public INTEGER DEFAULT 0'),
-        ('share_token', 'ALTER TABLE playlists ADD COLUMN share_token TEXT UNIQUE'),
     ]:
         if col_name not in columns:
             try:
                 cursor.execute(sql)
                 columns.append(col_name)
-            except sqlite3.OperationalError:
-                pass
+            except sqlite3.OperationalError as e:
+                if 'duplicate column name' not in str(e).lower():
+                    raise
+    # share_token: SQLite doesn't support ADD COLUMN UNIQUE; add column then create index
+    if 'share_token' not in columns:
+        try:
+            cursor.execute("ALTER TABLE playlists ADD COLUMN share_token TEXT")
+            cursor.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_playlists_share_token "
+                "ON playlists(share_token) WHERE share_token IS NOT NULL"
+            )
+            columns.append('share_token')
+        except sqlite3.OperationalError as e:
+            if 'duplicate column name' not in str(e).lower():
+                raise
 
     # Create playlist_tracks table
     cursor.execute('''

@@ -88,11 +88,9 @@ def admin_required():
 
 # Persist playlists: set DATA_DIR to a path that is volume-mounted (e.g. /app/data in Docker).
 # users.db lives in DATA_DIR; library and music stay under cwd/music so image content is used.
-DATA_DIR = os.environ.get('DATA_DIR')
-if DATA_DIR:
-    USERS_DB = os.path.join(DATA_DIR, 'users.db')
-else:
-    USERS_DB = os.path.join(os.getcwd(), 'music', 'users.db')
+from db_path import get_users_db_path
+
+USERS_DB = get_users_db_path()
 
 UPLOAD_FOLDER = os.path.join(os.getcwd(), 'uploads')
 MUSIC_FOLDER = os.path.join(os.getcwd(), 'music')
@@ -1964,11 +1962,12 @@ def get_playlists():
             cursor.execute("ALTER TABLE playlists ADD COLUMN is_system INTEGER DEFAULT 0")
             conn.commit()
         if 'share_token' not in columns:
-            try:
-                cursor.execute("ALTER TABLE playlists ADD COLUMN share_token TEXT UNIQUE")
-                conn.commit()
-            except sqlite3.OperationalError:
-                pass  # Column may already exist from parallel migration
+            cursor.execute("ALTER TABLE playlists ADD COLUMN share_token TEXT")
+            cursor.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_playlists_share_token "
+                "ON playlists(share_token) WHERE share_token IS NOT NULL"
+            )
+            conn.commit()
         cursor.execute("SELECT id, name, created_at, is_system, art_path, share_token FROM playlists ORDER BY created_at DESC")
         playlists = []
         for row in cursor.fetchall():
@@ -2062,11 +2061,12 @@ def share_playlist(playlist_id):
         cursor.execute("PRAGMA table_info(playlists)")
         columns = [col[1] for col in cursor.fetchall()]
         if 'share_token' not in columns:
-            try:
-                cursor.execute("ALTER TABLE playlists ADD COLUMN share_token TEXT UNIQUE")
-                conn.commit()
-            except sqlite3.OperationalError:
-                pass
+            cursor.execute("ALTER TABLE playlists ADD COLUMN share_token TEXT")
+            cursor.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_playlists_share_token "
+                "ON playlists(share_token) WHERE share_token IS NOT NULL"
+            )
+            conn.commit()
         cursor.execute("SELECT share_token FROM playlists WHERE id = ?", (playlist_id,))
         row = cursor.fetchone()
         if not row:
