@@ -30,7 +30,15 @@ private val Context.downloadDataStore by preferencesDataStore(name = "downloads"
  */
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 class DownloadManager private constructor(private val context: Context) {
-    
+
+    @Volatile
+    private var cachedToken: String? = null
+
+    /** Set auth token for API requests. Call with null on logout. */
+    fun setAuthToken(token: String?) {
+        cachedToken = token
+    }
+
     companion object {
         private const val TAG = "DownloadManager"
         private const val CACHE_SIZE_BYTES = 1024L * 1024 * 1024 // 1 GB
@@ -66,10 +74,7 @@ class DownloadManager private constructor(private val context: Context) {
             .writeTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
             .addInterceptor { chain ->
                 val request = chain.request().newBuilder()
-                // Add auth token if available
-                val token = context.getSharedPreferences("auth_prefs", Context.MODE_PRIVATE)
-                    .getString("auth_token", null)
-                if (token != null) {
+                cachedToken?.let { token ->
                     request.addHeader("Authorization", "Bearer $token")
                 }
                 chain.proceed(request.build())

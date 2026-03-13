@@ -10,7 +10,13 @@ data class Playlist(
     val created_at: String? = null,
     val is_public: Boolean = false, // Admin can publish to all users
     val is_system: Boolean = false,
-    val art_url: String? = null
+    val art_url: String? = null,
+    val share_token: String? = null
+)
+
+data class ShareResponse(
+    val share_token: String,
+    val share_url: String
 )
 
 data class PlaylistsResponse(val playlists: List<Playlist>)
@@ -59,6 +65,12 @@ interface PlaylistApi {
 
     @GET("playlists/{id}/search")
     suspend fun searchPlaylist(@Path("id") id: Int, @Query("q") query: String): TracksResponse
+
+    @POST("playlists/{id}/share")
+    suspend fun sharePlaylist(@Path("id") id: Int): ShareResponse
+
+    @DELETE("playlists/{id}/share")
+    suspend fun unsharePlaylist(@Path("id") id: Int): retrofit2.Response<Unit>
 }
 
 data class TracksResponse(val tracks: List<Track>)

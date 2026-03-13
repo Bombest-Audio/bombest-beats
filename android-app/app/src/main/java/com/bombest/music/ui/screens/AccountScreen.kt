@@ -16,6 +16,7 @@ import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -27,6 +28,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.datastore.preferences.core.edit
 import com.bombest.music.data.NetworkModule
 import com.bombest.music.data.AuthPreferences
 import com.bombest.music.data.authDataStore
@@ -53,7 +55,9 @@ private fun formatBytes(bytes: Long): String {
 @Composable
 fun AccountScreen(
     onBack: () -> Unit,
-    onRegisterPasskey: () -> Unit
+    onRegisterPasskey: () -> Unit,
+    onRefreshLibrary: () -> Unit = {},
+    onSignOut: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -64,6 +68,23 @@ fun AccountScreen(
     var passkeysError by remember { mutableStateOf<String?>(null) }
     var isLoadingPasskeys by remember { mutableStateOf(false) }
     var showClearDownloadsConfirm by remember { mutableStateOf(false) }
+    var userRole by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(Unit) {
+        val token = context.authDataStore.data.map { it[AuthPreferences.TOKEN_KEY] }.first()
+        userRole = try {
+            if (token != null) {
+                val response = NetworkModule.authApi.getMe("Bearer $token")
+                context.authDataStore.edit { it[AuthPreferences.ROLE_KEY] = response.role }
+                response.role
+            } else {
+                context.authDataStore.data.map { it[AuthPreferences.ROLE_KEY] }.first()
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("AccountScreen", "Failed to refresh role", e)
+            context.authDataStore.data.map { it[AuthPreferences.ROLE_KEY] }.first()
+        }
+    }
 
     // Download state
     var isAutoSyncEnabled by remember {
@@ -124,6 +145,29 @@ fun AccountScreen(
                 onClick = onRegisterPasskey
             )
             
+            if (userRole == "admin") {
+                AccountMenuItem(
+                    icon = Icons.Default.Delete,
+                    title = "Remove duplicates",
+                    subtitle = "Remove duplicate tracks from library",
+                    onClick = {
+                        scope.launch {
+                            try {
+                                val token = context.authDataStore.data.map { it[AuthPreferences.TOKEN_KEY] }.first()
+                                if (token != null) {
+                                    val result = NetworkModule.api.removeDuplicates("Bearer $token")
+                                    Toast.makeText(context, result.message, Toast.LENGTH_SHORT).show()
+                                    onRefreshLibrary()
+                                }
+                            } catch (e: Exception) {
+                                Toast.makeText(context, e.message ?: "Remove duplicates failed", Toast.LENGTH_SHORT).show()
+                                android.util.Log.e("AccountScreen", "Remove duplicates error", e)
+                            }
+                        }
+                    }
+                )
+            }
+
             AccountMenuItem(
                 icon = Icons.Default.Key,
                 title = "Manage Passkeys",
@@ -147,6 +191,13 @@ fun AccountScreen(
                         }
                     }
                 }
+            )
+            
+            AccountMenuItem(
+                icon = Icons.Default.Logout,
+                title = "Sign Out",
+                subtitle = "Sign out of your account",
+                onClick = onSignOut
             )
             
             Spacer(Modifier.height(16.dp))
@@ -214,23 +265,27 @@ fun AccountScreen(
                                                 tracks = tracks,
                                                 getStreamUrl = { trackId -> "$baseUrl/stream/$trackId" },
                                                 onProgress = { downloaded, total ->
-                                                    downloadProgress = downloaded to total
-                                                    downloadedCount = downloaded
-                                                    storageUsed = com.bombest.music.data.DownloadManager.getInstance(context).getDownloadsSizeBytes()
+                                                    scope.launch(kotlinx.coroutines.Dispatchers.Main) {
+                                                        downloadProgress = downloaded to total
+                                                        downloadedCount = downloaded
+                                                        storageUsed = com.bombest.music.data.DownloadManager.getInstance(context).getDownloadsSizeBytes()
+                                                    }
                                                 }
                                             )
                                         
-                                        downloadProgress = null
-                                        downloadedCount = tracks.size
-                                        storageUsed = com.bombest.music.data.DownloadManager.getInstance(context).getDownloadsSizeBytes()
+                                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                            downloadProgress = null
+                                            downloadedCount = tracks.size
+                                            storageUsed = com.bombest.music.data.DownloadManager.getInstance(context).getDownloadsSizeBytes()
+                                        }
                                         
                                         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
                                             Toast.makeText(context, "All ${tracks.size} tracks downloaded!", Toast.LENGTH_SHORT).show()
                                         }
                                     }
                                 } catch (e: Exception) {
-                                    downloadProgress = null
                                     kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                        downloadProgress = null
                                         Toast.makeText(context, "Download failed: ${e.message}", Toast.LENGTH_SHORT).show()
                                     }
                                 }
@@ -278,14 +333,14 @@ fun AccountScreen(
                     showClearDownloadsConfirm = false
                     scope.launch(kotlinx.coroutines.Dispatchers.IO) {
                         com.bombest.music.data.DownloadManager.getInstance(context).clearAllDownloads()
-                        downloadedCount = 0
-                        storageUsed = 0L
-                        isAutoSyncEnabled = false
-                        context.getSharedPreferences("download_prefs", android.content.Context.MODE_PRIVATE)
-                            .edit().putBoolean("auto_sync_enabled", false).apply()
                         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                            downloadedCount = 0
+                            storageUsed = 0L
+                            isAutoSyncEnabled = false
                             Toast.makeText(context, "Downloads cleared", Toast.LENGTH_SHORT).show()
                         }
+                        context.getSharedPreferences("download_prefs", android.content.Context.MODE_PRIVATE)
+                            .edit().putBoolean("auto_sync_enabled", false).apply()
                     }
                 }) {
                     Text("Clear All", color = Color(0xFFE90060))
@@ -497,13 +552,6 @@ fun ManagePasskeysDialog(
                             color = Color(0xFFE90060)
                         )
                     }
-                    passkeys.isEmpty() -> {
-                            Text(
-                            text = "No passkeys registered",
-                            color = Color.Gray,
-                            modifier = Modifier.align(Alignment.Center)
-                        )
-                    }
                     error != null -> {
                         Text(
                             text = error,
@@ -512,9 +560,16 @@ fun ManagePasskeysDialog(
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center
                         )
                     }
+                    passkeys.isEmpty() -> {
+                        Text(
+                            text = "No passkeys registered",
+                            color = Color.Gray,
+                            modifier = Modifier.align(Alignment.Center)
+                        )
+                    }
                     else -> {
                         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            items(passkeys) { passkey ->
+                            items(passkeys, key = { it.id }) { passkey ->
                                 Card(
                                     colors = CardDefaults.cardColors(containerColor = Color(0xFF252535))
                                 ) {

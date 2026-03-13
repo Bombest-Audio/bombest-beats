@@ -1,5 +1,7 @@
 package com.bombest.music.service
 
+import android.app.PendingIntent
+import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import androidx.media3.common.MediaItem
@@ -12,6 +14,7 @@ import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
 import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
+import com.bombest.music.MainActivity
 import com.bombest.music.R
 import com.bombest.music.data.DownloadManager
 import com.bombest.music.data.MetricsManager
@@ -33,8 +36,8 @@ class BombestMediaService : MediaLibraryService() {
     private val repository by lazy { MusicRepository(this) }
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     
-    // Cache for MediaItems
-    private val libraryItems = mutableListOf<MediaItem>()
+    // Cache for MediaItems - synchronized for thread-safe access from coroutine + binder thread
+    private val libraryItems = java.util.Collections.synchronizedList(mutableListOf<MediaItem>())
     
     // Android Auto content style constants
     companion object {
@@ -301,6 +304,16 @@ class BombestMediaService : MediaLibraryService() {
                 }
             }
         )
+        .setSessionActivity(
+            PendingIntent.getActivity(
+                this,
+                0,
+                Intent(this, MainActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                },
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            )
+        )
         .setBitmapLoader(bitmapLoader)
         .build()
 
@@ -342,9 +355,6 @@ class BombestMediaService : MediaLibraryService() {
                 
                 libraryItems.clear()
                 
-                // Create fallback artwork URI from drawable resource
-                val fallbackArtUri = Uri.parse("android.resource://${packageName}/${R.drawable.default_album_art}")
-                
                 val mediaItems = tracks.map { track ->
                     val artUrl = repository.getTrackArtUrl(track.id)
                     val artUri = Uri.parse(artUrl)
@@ -357,7 +367,7 @@ class BombestMediaService : MediaLibraryService() {
                                 .setTitle(track.displayTitle)
                                 .setArtist(track.displayArtist)
                                 .setAlbumTitle(track.album)
-                                .setArtworkUri(fallbackArtUri) // Use local fallback that always works
+                                .setArtworkUri(artUri)
                                 .setIsBrowsable(false)
                                 .setIsPlayable(true)
                                 .build()
@@ -367,9 +377,11 @@ class BombestMediaService : MediaLibraryService() {
                 libraryItems.addAll(mediaItems)
                 android.util.Log.d("BombestMediaService", "Added ${libraryItems.size} items to library cache")
                 
-                // Pre-populate player playlist
-                player.setMediaItems(mediaItems)
-                player.prepare()
+                // Only set media items when player is idle - don't clobber active playback during refresh
+                if (player.playbackState == Player.STATE_IDLE || player.mediaItemCount == 0) {
+                    player.setMediaItems(mediaItems)
+                    player.prepare()
+                }
                 
                 // Notify session that children changed
                 mediaSession?.notifyChildrenChanged(ROOT_ID, 3, null)
@@ -382,6 +394,15 @@ class BombestMediaService : MediaLibraryService() {
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? {
         return mediaSession
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        mediaSession?.player?.run {
+            stop()
+            clearMediaItems()
+        }
+        stopSelf()
+        super.onTaskRemoved(rootIntent)
     }
 
     override fun onDestroy() {

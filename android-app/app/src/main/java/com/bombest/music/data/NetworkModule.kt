@@ -12,14 +12,14 @@ import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Network configuration with automatic failover support.
- * Primary: beats.bom.best (Home server via Tunnel)
- * Failover: beats-aws.bom.best (AWS EC2)
+ * Primary: beats.bom.best (EC2 via Cloudflare)
+ * Failover: beats-aws.bom.best (EC2 direct)
  */
 object NetworkModule {
     // Server URLs with failover support
     private val BASE_URLS = listOf(
-        "https://beats.bom.best/",      // Primary (Home via Tunnel)
-        "https://beats-aws.bom.best/"   // Failover (AWS EC2)
+        "https://beats.bom.best/",      // Primary (EC2 via Cloudflare)
+        "https://beats-aws.bom.best/"   // Failover (EC2 direct)
     )
     
     private val currentUrlIndex = AtomicInteger(0)
@@ -158,7 +158,15 @@ object NetworkModule {
     val authApi: AuthApi get() = retrofit.create(AuthApi::class.java)
     
     fun getStreamBaseUrl(): String = currentBaseUrl.dropLast(1) // remove trailing slash
-    
+
+    /** Shared OkHttpClient for one-off requests (e.g. Canvas probe). Reuse to avoid connection leaks. */
+    val simpleOkHttpClient: OkHttpClient by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(20, TimeUnit.SECONDS)
+            .build()
+    }
+
     /**
      * Check if failover is available
      */

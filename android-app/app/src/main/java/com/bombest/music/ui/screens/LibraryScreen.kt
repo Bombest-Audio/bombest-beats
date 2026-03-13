@@ -28,6 +28,7 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.bombest.music.R
 import com.bombest.music.data.AuthPreferences
+import com.bombest.music.data.NetworkModule
 import com.bombest.music.data.authDataStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
@@ -143,7 +144,7 @@ fun LibraryScreen(
                     .build()
                 
                 val request = Request.Builder()
-                    .url("https://bom.best/beats/api/track/$trackId")
+                    .url("${NetworkModule.getStreamBaseUrl()}/track/$trackId")
                     .addHeader("Authorization", "Bearer $token")
                     .delete()
                     .build()
