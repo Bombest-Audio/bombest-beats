@@ -8,8 +8,10 @@ services:
     volumes:
       - ./beets-backend/uploads:/app/uploads
       - ./beets-backend/waveforms:/app/waveforms
+      - ./beets-backend/data:/app/data
     environment:
       - FLASK_ENV=development
+      - DATA_DIR=/app/data
     restart: unless-stopped
 
   frontend:
