@@ -125,7 +125,7 @@ usermod -aG docker ec2-user
 mkdir -p /data/beets
 chown ec2-user:ec2-user /data/beets
 sudo -u ec2-user docker pull DOCKER_IMAGE_PLACEHOLDER || true
-# Nginx reverse proxy: Cloudflare connects to port 80, we proxy to Flask on 8338
+# Minimal nginx config for first boot. Run deploy-nginx-to-ec2.sh for full CORS/error handling.
 cat > /etc/nginx/conf.d/bombest-beats.conf << 'NGINXEOF'
 server {
     listen 80;

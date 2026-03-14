@@ -1,5 +1,5 @@
 # DEPRECATED: Home server tunnel config.
-# bom.best is now served via Cloudflare Tunnel bombest-beats to CloudFront/S3; beats.bom.best uses A record to EC2.
+# bom.best is now served via CloudFront/S3 (CNAME); beats.bom.best uses A record to EC2.
 tunnel: 4a638fa7-cbe1-453c-b360-95c56d17eaca
 credentials-file: /home/thomas/.cloudflared/4a638fa7-cbe1-453c-b360-95c56d17eaca.json
 origincert: /home/thomas/.cloudflared/cert.pem
