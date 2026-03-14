@@ -7,13 +7,16 @@ This document is the source of truth for deployment, S3, EC2, and making users a
 ## High-Level Flow
 - Source of truth: Beets `music/library.db` and files under `beets-backend/music/` on the server.
 - Sync: `sync-to-s3.sh` mirrors the music directory to `s3://bombest-beats-music/music/`. Run it after changing metadata (e.g. from the app's Edit metadata) so S3 stays in sync.
-- Storage: S3 bucket `bombest-beats-music` (private; Block Public Access; SSE-S3; Versioning on).
+- Storage: S3 bucket `bombest-beats-music` (see [Security & Access](#security--access) for current state — **action needed**).
 - Client: Android app lists tracks from backend GET `/library` and streams via backend `/stream/<id>` (redirect to S3 or local file).
 
 ## Security & Access
-- Bucket is private (Block Public Access enabled). No public read or list.
+
+> **⚠ Current state does not match intended config.** Block Public Access is **OFF** and a bucket policy grants `s3:GetObject` to `Principal: *` (public read). Versioning is **not enabled**. Run `./setup-s3-simple.sh` to lock down the bucket (enables Block Public Access, removes the public policy, enables Versioning). See [Infrastructure Audit](#infrastructure-audit) below.
+
+- **Intended** (after running `setup-s3-simple.sh`): Bucket is private (Block Public Access enabled). No public read or list.
 - Default encryption: SSE-S3.
-- Versioning: enabled.
+- Versioning: **not currently enabled** — run `setup-s3-simple.sh` to enable.
 - IAM policy (least privilege for sync user/role):
   - `s3:ListBucket` on `arn:aws:s3:::bombest-beats-music` with `prefix` limited to `music/`.
   - `s3:GetObject`, `s3:PutObject`, `s3:DeleteObject` on `arn:aws:s3:::bombest-beats-music/music/*`.
@@ -48,7 +51,7 @@ This document is the source of truth for deployment, S3, EC2, and making users a
 
 ## Frontend hosting (bom.best/beats)
 
-The web frontend is served from **S3** (`bombest-beats-web`) with path prefix `/beats/`, behind **CloudFront** (distribution ID `E1RBYOEP5K0UI3`). **Cloudflare** DNS routes `bom.best/beats` to CloudFront. Deploy with:
+The web frontend is served from **S3** (`bombest-beats-web`, region **us-east-1**) with path prefix `/beats/`, behind **CloudFront** (distribution ID `E1RBYOEP5K0UI3`, aliases: `beats-app.bom.best` and `bom.best`). **Cloudflare** DNS routes `bom.best/beats` to CloudFront. Deploy with:
 
 ```bash
 ./scripts/deploy-frontend.sh  # added in PR #5
@@ -91,7 +94,7 @@ The script creates a key pair (saves `bombest-beats-key.pem` in the current dire
 - **AMI**: Amazon Linux 2023.
 - **Instance type**: **t3.micro** only (free tier; do not use t3.small or larger).
 - **Storage**: Default **30 GB** root volume (within 30 GB EBS free tier).
-- **Security group**: Inbound — **22** (SSH), **80** (nginx), **8338** (Flask). Restrict 22 by your IP if possible.
+- **Security group**: Inbound — **22** (SSH), **80** (nginx), **5002** (legacy — remove; see [Infrastructure Audit](#infrastructure-audit)), **8338** (Flask). Restrict 22 by your IP if possible.
 - **Key pair**: Create or select one for SSH.
 - **Elastic IP**: Optional. Free tier includes one only when attached; do not leave it unattached or you may be charged.
 
@@ -160,7 +163,7 @@ To run the music-frontend locally and have it talk to the EC2 backend (auth, lib
 
 ```bash
 cd music-frontend
-REACT_APP_API_BASE=http://35.86.235.85:8338 npm start
+REACT_APP_API_BASE=http://<EC2_PUBLIC_IP>:8338 npm start
 ```
 
 Then open [http://localhost:3000](http://localhost:3000) and log in (admin for Upload). To use a different backend, set `REACT_APP_API_BASE` to that URL (no trailing slash). No code changes are required.
@@ -211,3 +214,30 @@ You can update the running container on an existing EC2 instance from your lapto
 ```
 
 The script finds the running instance with tag `Name=bombest-beats` in the given region (or uses `INSTANCE_ID` if set), then sends an SSM command to pull the image and run the container with the same volume and env as the run script.
+
+> **Note:** If multiple running instances share the `Name=bombest-beats` tag, the script may target the wrong one. Ensure only one instance has this tag in a running state. See [Infrastructure Audit](#infrastructure-audit).
+
+---
+
+## Infrastructure Audit
+
+> **Last validated:** 2026-03-13 via AWS CLI. These are known discrepancies between the intended (documented) state and live infrastructure.
+
+### Action items
+
+| # | Action | Severity | Command / Steps |
+|---|--------|----------|-----------------|
+| 1 | **Lock down S3 `bombest-beats-music`** — Block Public Access is OFF, bucket policy allows `Principal: *` read | **CRITICAL** | `./setup-s3-simple.sh` (enables Block Public Access, removes public policy, enables Versioning) |
+| 2 | **Terminate orphaned EC2 instance** `i-0b4f206d79d59cfc7` (52.32.197.25) — no SSM, unreachable, likely stale | **MAJOR** | `aws ec2 terminate-instances --instance-ids i-0b4f206d79d59cfc7 --region us-west-2` |
+| 3 | **Remove port 5002** from security group — undocumented legacy port, not used by current stack | **MEDIUM** | AWS Console or `aws ec2 revoke-security-group-ingress` |
+| 4 | **Change CloudFront ViewerProtocolPolicy** to `redirect-to-https` — currently `allow-all` (allows HTTP) | **LOW** | AWS Console → CloudFront → E1RBYOEP5K0UI3 → Behaviors → Edit |
+| 5 | **Verify CORS localhost origins** gated behind `FLASK_ENV` — PR #4 fix may not be deployed yet | **MEDIUM** | Check `FLASK_ENV` on running container; redeploy if needed |
+
+### Current instance inventory
+
+| Instance ID | Public IP | SSM | Status | Notes |
+|-------------|-----------|-----|--------|-------|
+| `i-09d9ff1f4729585b2` | 16.147.88.132 | Yes | **Active** | Primary instance |
+| `i-0b4f206d79d59cfc7` | 52.32.197.25 | No | Unreachable | Orphaned — terminate |
+
+> **No Elastic IP is attached.** The public IP will change if the instance is stopped and restarted. Update Cloudflare DNS A records (`beats.bom.best`, `beats-aws.bom.best`) after any stop/start cycle.

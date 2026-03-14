@@ -6,6 +6,8 @@ If `POST https://beats.bom.best/upload/folder` returns **404 Not Found**, traffi
 
 `beats.bom.best` may be routed through a **Cloudflare Tunnel** or to the wrong origin instead of your **EC2 instance**.
 
+> **Note:** No Elastic IP is attached to the EC2 instance. The public IP changes on every stop/start cycle. After restarting the instance, update the Cloudflare A records and any hardcoded IPs.
+
 ## Fix: Use A record to EC2
 
 1. In **Cloudflare** → **bom.best** → **DNS** → **Records**

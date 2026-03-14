@@ -21,7 +21,7 @@ A viewer-request function rewrites `/beats`, `/beats/`, and `/beats/*` (routes w
 
 ### 3. ACM certificate and alias (manual step)
 
-An ACM cert was requested for `beats-app.bom.best`. To finish setup:
+The ACM cert (us-east-1) covers `bom.best` and `www.bom.best`. The `beats-app.bom.best` subdomain works via Cloudflare's edge certificate (`*.bom.best`) — Cloudflare terminates TLS and connects to CloudFront using the distribution's domain name. To finish setup:
 
 **Add DNS validation in Cloudflare:**
 

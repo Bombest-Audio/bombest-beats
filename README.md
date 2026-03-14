@@ -38,7 +38,9 @@ A cross-platform music streaming application with Android, iOS, and web clients 
 |-----------|-------|
 | API URL | `https://beats.bom.best/` |
 | Alternate URL | `https://beats-aws.bom.best/` (same EC2 instance; not automatic failover) |
-| S3 Bucket | `s3://bombest-beats-music` |
+| S3 Bucket (music) | `s3://bombest-beats-music` (us-west-2) |
+| S3 Bucket (web) | `s3://bombest-beats-web` (us-east-1) |
+| CloudFront dist | `E1RBYOEP5K0UI3` (aliases: `beats-app.bom.best`, `bom.best`) |
 | Docker Image | `tomdabomb2u/bombest-beats:latest` |
 
 Full EC2, S3, tunnel, and admin setup: see [docs/architecture.md](docs/architecture.md).
@@ -114,8 +116,9 @@ These endpoints are stable; mobile and web clients can use them as defaults. Cli
 | Service | Estimated Cost |
 |---------|---------------|
 | EC2 t3.micro | ~$8/mo (or free tier) |
+| EC2 orphaned instance | ~$8/mo (**terminate to save** — see [Infrastructure Audit](docs/architecture.md#infrastructure-audit)) |
 | S3 (1.3GB) | ~$0.03/mo |
-| **Total** | **~$8/mo** |
+| **Total** | **~$16/mo** (→ ~$8/mo after cleanup) |
 
 ## Pre-merge checks
 

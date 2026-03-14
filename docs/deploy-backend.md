@@ -24,10 +24,11 @@ Updates the running Docker container on EC2 with the latest image.
 ```
 
 **Prerequisites:**
-- EC2 instance with tag `Name=bombest-beats`
+- **Exactly one** running EC2 instance with tag `Name=bombest-beats` (if multiple exist, terminate the orphaned one first — see [Infrastructure Audit](architecture.md#infrastructure-audit))
 - Instance has IAM role with SSM (`AmazonSSMManagedInstanceCore`) — set `ATTACH_SSM_ROLE=1` when creating with `setup-ec2-aws-cli.sh`
 - Your AWS CLI user has `ssm:SendCommand` (see §3)
 - S3 env vars in `/home/ec2-user/.env.bombest` on the instance
+- S3 bucket locked down — run `./setup-s3-simple.sh` if not already done (see [Infrastructure Audit](architecture.md#infrastructure-audit))
 
 ---
 

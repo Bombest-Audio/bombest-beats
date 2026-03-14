@@ -23,15 +23,19 @@ CLOUDFRONT_DIST_ID=E1RBYOEP5K0UI3 ./scripts/deploy-frontend.sh
 
 | Item | Value |
 |------|-------|
-| S3 bucket | `bombest-beats-web` |
+| S3 bucket | `bombest-beats-web` (**region: us-east-1**) |
 | S3 path | `/beats/` |
 | CloudFront dist ID | `E1RBYOEP5K0UI3` |
+| CloudFront aliases | `beats-app.bom.best`, `bom.best` |
+| ViewerProtocolPolicy | Currently `allow-all` — **should be `redirect-to-https`** (see [Infrastructure Audit](architecture.md#infrastructure-audit)) |
 
 Override via `FRONTEND_BUCKET` and `FRONTEND_PATH` env vars.
 
 ## CloudFront 403 on /beats/
 
 If `https://beats-app.bom.best/beats/` returns 403, see [cloudfront-403-fix.md](cloudfront-403-fix.md). A CloudFront Function rewrites `/beats` and `/beats/` to `/beats/index.html`. The custom domain requires an ACM cert and alias; add the DNS validation CNAME in Cloudflare, then run `./scripts/cloudfront-add-alias.sh` (PR #5).
+
+> **ACM cert coverage:** The ACM cert (us-east-1) covers `bom.best` and `www.bom.best`. The `beats-app.bom.best` subdomain works because Cloudflare's edge certificate covers `*.bom.best` — Cloudflare terminates TLS at the edge and connects to CloudFront using the CloudFront domain name.
 
 ## bom.best DNS not resolving
 

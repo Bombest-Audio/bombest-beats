@@ -37,6 +37,20 @@ If SSM fails, the script prints a block to paste into EC2 Instance Connect. See 
 2. `ATTACH_SSM_ROLE=1 ./setup-ec2-aws-cli.sh [REGION]` — create t3.micro instance (free tier)
 3. SSH in, set S3 env vars in `.env.bombest`, run `./run-bombest-beats.sh`
 
+## S3 bucket security: setup-s3-simple.sh
+
+Configures the `bombest-beats-music` S3 bucket with correct security settings. **Run this if the bucket has public access enabled** (see [Infrastructure Audit](architecture.md#infrastructure-audit)).
+
+```bash
+./setup-s3-simple.sh
+```
+
+Creates the bucket if missing, enables Block Public Access, removes any public bucket policy, sets CORS for GET/HEAD, enables SSE-S3 encryption, and enables Versioning.
+
+## Deprecated: deploy-ec2.sh
+
+> **Do not use.** This script references the old Docker image (`thomasphillips3/...`) and is superseded by `deploy-to-ec2.sh` (which uses `tomdabomb2u/bombest-beats`).
+
 ## Cloudflare DNS (required for web app)
 
 Point **beats.bom.best** at your EC2 public IP so the web app can reach the API:
