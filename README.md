@@ -1,6 +1,6 @@
 # Bombest Beats
 
-A cross-platform music streaming application with Android, iOS, and web clients connecting to a self-hosted Beets backend with AWS failover.
+A cross-platform music streaming application with Android, iOS, and web clients connecting to a Beets backend hosted on AWS EC2.
 
 ## Architecture Overview
 
@@ -15,32 +15,32 @@ A cross-platform music streaming application with Android, iOS, and web clients 
                     ┌────────────┴────────────┐
                     │   Cloudflare (Proxied)  │
                     │   beats.bom.best        │
+                    │   beats-aws.bom.best     │
                     └────────────┬────────────┘
                                  │
-            ┌────────────────────┼────────────────────┐
-            ▼                                         ▼
-┌─────────────────────┐                 ┌─────────────────────┐
-│  Home Server        │                 │  AWS EC2 (Failover) │
-│  (Cloudflare Tunnel)│                 │  beats-aws.bom.best │
-│  bombest-beats      │                 │  44.249.110.172     │
-└─────────────────────┘                 └─────────────────────┘
-            │                                         │
-            └───────────────┬─────────────────────────┘
-                            ▼
-                ┌─────────────────────┐
-                │   AWS S3 Storage    │
-                │   bombest-beats-    │
-                │   music             │
-                └─────────────────────┘
+                                 ▼
+                    ┌─────────────────────┐
+                    │   AWS EC2           │
+                    │   bombest-beats     │
+                    └─────────────┬───────┘
+                                  │
+                                  ▼
+                    ┌─────────────────────┐
+                    │   AWS S3 Storage    │
+                    │   bombest-beats-    │
+                    │   music             │
+                    └─────────────────────┘
 ```
 
 ## Infrastructure
 
 | Component | Value |
 |-----------|-------|
-| Primary URL | `https://bom.best/api/` |
-| Failover URL | `https://beats-aws.bom.best/api/` |
-| S3 Bucket | `s3://bombest-beats-music` |
+| API URL | `https://beats.bom.best/` |
+| Alternate URL | `https://beats-aws.bom.best/` (same EC2 instance; not automatic failover) |
+| S3 Bucket (music) | `s3://bombest-beats-music` (us-west-2) |
+| S3 Bucket (web) | `s3://bombest-beats-web` (us-east-1) |
+| CloudFront dist | `E1RBYOEP5K0UI3` (aliases: `beats-app.bom.best`, `bom.best`) |
 | Docker Image | `tomdabomb2u/bombest-beats:latest` |
 
 Full EC2, S3, tunnel, and admin setup: see [docs/architecture.md](docs/architecture.md).
@@ -52,13 +52,9 @@ Full EC2, S3, tunnel, and admin setup: see [docs/architecture.md](docs/architect
 cd beets-backend && ./venv/bin/python upload_server.py
 ```
 
-### Cloudflare Tunnel
-```bash
-cloudflared tunnel --config cloudflared-config.yml run bombest-beats
-```
-
 ### Deploy to AWS
-- **Primary:** `./deploy-to-ec2.sh [REGION]` — build image, push to Docker Hub, update container on EC2 (requires existing EC2 instance with tag `Name=bombest-beats`).
+- **Backend:** `./deploy-to-ec2.sh [REGION]` — build image, push to Docker Hub, update container on EC2 (requires existing EC2 instance with tag `Name=bombest-beats`).
+- **Frontend:** `./scripts/deploy-frontend.sh` (added in PR #5) — build and deploy bom.best/beats to S3 (`bombest-beats-web`) and CloudFront. Set `CLOUDFRONT_DIST_ID=E1RBYOEP5K0UI3` for cache invalidation.
 - **First-time:** run `./deploy-aws.sh`, then create EC2 via `./setup-ec2-aws-cli.sh`; see [docs/architecture.md](docs/architecture.md).
 
 ### Android
@@ -87,20 +83,24 @@ bombest-beats/
 ├── setup-ec2-aws-cli.sh
 ├── setup-s3.sh           # S3 bucket & music sync
 ├── docs/architecture.md
-└── cloudflared-config.yml
+├── docs/deploy-which-script.md
+├── deploy.sh             # deprecated (home server)
+├── deploy_docker.sh      # deprecated (home server)
+└── cloudflared-config.yml  # deprecated (home server tunnel)
 ```
 
 ## Documentation
 
-Detailed deployment, S3 sync, EC2 admin, and frontend-with-EC2: [docs/architecture.md](docs/architecture.md).
+- [docs/architecture.md](docs/architecture.md) — Deployment, S3 sync, EC2 admin
+- [docs/deploy-which-script.md](docs/deploy-which-script.md) — Deploy script reference
+- [docs/deploy-backend.md](docs/deploy-backend.md) — Backend deploy, nginx CORS, SSM permissions, manual fallback
+- [docs/deploy-frontend.md](docs/deploy-frontend.md) — Frontend deploy (S3/CloudFront)
 
 ## Client Connection (Static Endpoints)
 
-- API base (primary): `https://bom.best/api/`
-- API base (failover): `https://beats-aws.bom.best/api/`
-- Cloudflare tunnel: configured via Cloudflare Zero Trust to route external traffic to the backend (see [docs/architecture.md](docs/architecture.md) for deployment details)
-- DNS hostname served via Cloudflare: `bom.best`
-- Backend health (direct): `http://localhost:5002/health`
+- API base (primary): `https://beats.bom.best/`
+- API base (alternate): `https://beats-aws.bom.best/` (same EC2 instance)
+- DNS hostnames served via Cloudflare; traffic routes to EC2 backend
 
 These endpoints are stable; mobile and web clients can use them as defaults. Clients may optionally override the API base via configuration (e.g. `REACT_APP_API_BASE`) for local or dev testing. Tunnel IDs, credential files, and other infrastructure-specific details are managed via deployment configuration and internal documentation and may change without affecting these public URLs.
 
@@ -116,8 +116,9 @@ These endpoints are stable; mobile and web clients can use them as defaults. Cli
 | Service | Estimated Cost |
 |---------|---------------|
 | EC2 t3.micro | ~$8/mo (or free tier) |
+| EC2 orphaned instance | ~$8/mo (**terminate to save** — see [Infrastructure Audit](docs/architecture.md#infrastructure-audit)) |
 | S3 (1.3GB) | ~$0.03/mo |
-| **Total** | **~$8/mo** |
+| **Total** | **~$16/mo** (→ ~$8/mo after cleanup) |
 
 ## Pre-merge checks
 
