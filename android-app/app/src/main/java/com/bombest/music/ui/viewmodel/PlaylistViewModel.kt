@@ -15,6 +15,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import java.util.concurrent.atomic.AtomicBoolean
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
@@ -25,6 +26,7 @@ class PlaylistViewModel : ViewModel() {
     
     private lateinit var playlistApi: PlaylistApi
     private var authToken: String? = null
+    private val initialized = AtomicBoolean(false)
     
     val playlists = mutableStateListOf<Playlist>()
     val currentPlaylistTracks = mutableStateListOf<Track>()
@@ -34,7 +36,7 @@ class PlaylistViewModel : ViewModel() {
     val currentPlaylistName = mutableStateOf("")
     
     fun initialize(context: Context) {
-        if (::playlistApi.isInitialized) return
+        if (!initialized.compareAndSet(false, true)) return
         viewModelScope.launch {
             authToken = context.authDataStore.data.map { it[AuthPreferences.TOKEN_KEY] }.first()
             android.util.Log.d("PlaylistViewModel", "Loaded auth token: ${if (authToken != null) "present" else "null"}")

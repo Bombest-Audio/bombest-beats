@@ -284,7 +284,9 @@ private fun CanvasBackground(trackId: String) {
                 NetworkModule.simpleOkHttpClient.newCall(req).execute().use { resp ->
                     if (resp.isSuccessful) {
                         val type = resp.header("X-Canvas-Type") ?: "gif"
-                        canvasState = url to type
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                            canvasState = url to type
+                        }
                     }
                 }
             } catch (e: Exception) {
