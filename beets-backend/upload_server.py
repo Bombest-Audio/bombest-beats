@@ -12,7 +12,9 @@ import zipfile
 import traceback
 import wave
 import struct
-from flask import Flask, request, jsonify, send_file
+import time
+import threading
+from flask import Flask, request, jsonify, send_file, Response
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 
@@ -21,6 +23,7 @@ import bcrypt
 import smtplib
 import yaml
 import boto3
+from botocore.config import Config as BotocoreConfig
 from botocore.exceptions import ClientError
 from flask import redirect
 from email.mime.text import MIMEText
@@ -60,7 +63,8 @@ if S3_BUCKET and AWS_ACCESS_KEY and AWS_SECRET_KEY:
             region_name=S3_REGION,
             endpoint_url=S3_ENDPOINT,
             aws_access_key_id=AWS_ACCESS_KEY,
-            aws_secret_access_key=AWS_SECRET_KEY
+            aws_secret_access_key=AWS_SECRET_KEY,
+            config=BotocoreConfig(signature_version='s3v4'),
         )
         print(f"✅ S3 Client initialized for bucket: {S3_BUCKET}")
     except Exception as e:
@@ -143,6 +147,107 @@ def init_track_artwork():
         print(f"track_artwork init: {e}")
 
 ALLOWED_EXTENSIONS = {'mp3', 'wav', 'ogg', 'flac', 'm4a'}
+
+# --- SQLite concurrency helpers ---
+_db_lock = threading.Lock()
+
+def _get_db(db_path=None, timeout=10):
+    """Open a SQLite connection with WAL mode and retry-friendly timeout."""
+    path = db_path or LIBRARY_DB
+    conn = sqlite3.connect(path, timeout=timeout)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=5000")
+    return conn
+
+def _db_retry(fn, max_retries=3, delay=0.3):
+    """Retry a database operation on SQLITE_BUSY / SQLITE_LOCKED."""
+    for attempt in range(max_retries):
+        try:
+            return fn()
+        except sqlite3.OperationalError as e:
+            if 'locked' in str(e).lower() or 'busy' in str(e).lower():
+                if attempt < max_retries - 1:
+                    time.sleep(delay * (attempt + 1))
+                    continue
+            raise
+    return None
+
+
+# --- Import marker for safe track lookup (avoids race condition) ---
+IMPORT_MARKER_FIELD = 'comments'  # beets stores this as 'comments' in items table
+
+def _set_import_marker(filepath, marker):
+    """Write a unique import marker into the audio file's genre field."""
+    try:
+        from mutagen import File
+        from mutagen.wave import WAVE
+        from mutagen.id3 import TCON
+        audio = File(filepath, easy=True)
+        if audio is not None:
+            try:
+                audio['genre'] = marker
+                audio.save()
+                return True
+            except (TypeError, KeyError):
+                # WAV files don't support easy-tag writes; use raw TCON frame instead
+                raw = File(filepath)
+                if isinstance(raw, WAVE):
+                    if raw.tags is None:
+                        raw.add_tags()
+                    raw.tags.add(TCON(encoding=3, text=[marker]))
+                    raw.save()
+                    return True
+    except Exception as e:
+        print(f"Could not set import marker: {e}")
+    return False
+
+def _find_track_by_marker(marker, timeout=10, title_hint=None):
+    """Look up a track by its import marker in the genre field. Retries for up to `timeout` seconds.
+    Falls back to title+artist lookup if the marker was not written (e.g. for WAV files where
+    mutagen easy-mode tag writes are unsupported and beets may not read TCON as genre)."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            conn = _get_db()
+            cursor = conn.cursor()
+            cursor.execute("SELECT id FROM items WHERE genre = ? ORDER BY id DESC LIMIT 1", (marker,))
+            row = cursor.fetchone()
+            conn.close()
+            if row:
+                return row[0]
+        except Exception:
+            pass
+        time.sleep(0.5)
+
+    # Fallback: look up by title + artist (works when marker write failed but metadata tags succeeded)
+    if title_hint:
+        try:
+            normalized_title = title_hint.replace('_', ' ').strip().lower()
+            conn = _get_db()
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT id FROM items WHERE LOWER(TRIM(title)) = ? AND LOWER(TRIM(artist)) = ? ORDER BY id DESC LIMIT 1",
+                (normalized_title, 'thomas phillips')
+            )
+            row = cursor.fetchone()
+            conn.close()
+            if row:
+                return row[0]
+        except Exception as e:
+            print(f"Title-based track lookup failed: {e}")
+    return None
+
+def _clear_import_marker(track_id, genre_value=''):
+    """Clear the import marker from a track after successful lookup."""
+    try:
+        conn = _get_db()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE items SET genre = ? WHERE id = ?", (genre_value, track_id))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"Could not clear import marker: {e}")
+
 
 def allowed_file(filename):
     return '.' in filename and \
@@ -325,66 +430,73 @@ def upload_file():
         
         # Set title metadata before import
         set_audio_title(filepath, track_name)
-        
+
+        # Write a unique import marker so we can find this exact track after import
+        import_marker = f"_import_{uuid.uuid4().hex}"
+        _set_import_marker(filepath, import_marker)
+
         # Run beet import
         try:
             subprocess.run(
-                ['beet', '-c', 'config.yaml', 'import', '-q', '--noautotag', '-s', filepath], 
+                ['beet', '-c', 'config.yaml', 'import', '-q', '--noautotag', '-s', filepath],
                 check=True
             )
-            
-            # Update the title in the database for the most recently added track
-            # Beets doesn't always preserve metadata, so we set it directly
-            formatted_title = track_name.replace('_', ' ').lower()
-            try:
-                conn = sqlite3.connect(LIBRARY_DB)
-                cursor = conn.cursor()
-                # Look up by title to avoid race with concurrent imports
-                cursor.execute("SELECT id FROM items WHERE title = ? ORDER BY id DESC LIMIT 1", (formatted_title,))
-                result = cursor.fetchone()
-                if not result:
-                    cursor.execute("SELECT id FROM items ORDER BY id DESC LIMIT 1")
-                    result = cursor.fetchone()
-                if result:
-                    new_id = result[0]
-                    cursor.execute("UPDATE items SET title = ?, artist = ? WHERE id = ?", (formatted_title, 'thomas phillips', new_id))
-                    conn.commit()
-                conn.close()
-            except Exception as db_err:
-                print(f"Warning: Could not update title in database: {db_err}")
-            
-            # --- S3 Upload ---
-            if s3_client and result:
-                try:
-                    conn = sqlite3.connect(LIBRARY_DB)
-                    cursor = conn.cursor()
-                    cursor.execute("SELECT path FROM items WHERE id = ?", (new_id,))
-                    res = cursor.fetchone()
-                    conn.close()
-                    
-                    if res:
-                        final_path = res[0]
-                        if isinstance(final_path, bytes):
-                            final_path = final_path.decode('utf-8', errors='ignore')
-                            
-                        # Calculate Key
-                        rel_path = os.path.relpath(final_path, start=os.getcwd())
-                        if not rel_path.startswith('..'):
-                            print(f"Uploading to S3: {rel_path}")
-                            s3_client.upload_file(final_path, S3_BUCKET, rel_path)
-                except Exception as s3_err:
-                    print(f"❌ S3 Upload Failed: {s3_err}")
-                    # Non-blocking, we still return success for local import
 
-            
+            # Find the imported track by its unique marker (race-condition-safe)
+            formatted_title = track_name.replace('_', ' ').lower()
+            new_id = _find_track_by_marker(import_marker, timeout=10)
+            s3_warning = None
+
+            if new_id:
+                # Update metadata and clear the import marker
+                try:
+                    conn = _get_db()
+                    cursor = conn.cursor()
+                    cursor.execute("UPDATE items SET title = ?, artist = ?, genre = '' WHERE id = ?",
+                                 (formatted_title, 'thomas phillips', new_id))
+                    conn.commit()
+                    conn.close()
+                except Exception as db_err:
+                    print(f"Warning: Could not update title in database: {db_err}")
+
+                # --- S3 Upload (report failures to frontend) ---
+                if s3_client:
+                    try:
+                        conn = _get_db()
+                        cursor = conn.cursor()
+                        cursor.execute("SELECT path FROM items WHERE id = ?", (new_id,))
+                        res = cursor.fetchone()
+                        conn.close()
+
+                        if res:
+                            final_path = res[0]
+                            if isinstance(final_path, bytes):
+                                final_path = final_path.decode('utf-8', errors='replace')
+
+                            rel_path = os.path.relpath(final_path, start=os.getcwd())
+                            if not rel_path.startswith('..'):
+                                print(f"Uploading to S3: {rel_path}")
+                                s3_client.upload_file(final_path, S3_BUCKET, rel_path)
+                    except Exception as s3_err:
+                        print(f"❌ S3 Upload Failed: {s3_err}")
+                        s3_warning = f"Track imported locally but S3 sync failed: {s3_err}"
+            else:
+                print(f"⚠️ Could not find imported track by marker: {import_marker}")
+
+
             # Clean up uploaded file
             if os.path.exists(filepath):
                 os.remove(filepath)
-            
-            return jsonify({
+
+            response = {
                 'message': f'Successfully uploaded "{track_name}"',
-                'track_name': track_name
-            }), 200
+                'track_name': track_name,
+                'track_id': new_id,
+            }
+            if s3_warning:
+                response['s3_warning'] = s3_warning
+
+            return jsonify(response), 200
         except subprocess.CalledProcessError as e:
             return jsonify({'error': f'Import failed: {str(e)}'}), 500
         except Exception as e:
@@ -462,14 +574,28 @@ def _set_audio_metadata(filepath, title, artist, album):
     """Set title, artist, album on audio file before import."""
     try:
         from mutagen import File
+        from mutagen.wave import WAVE
+        from mutagen.id3 import TIT2, TPE1, TALB
+        formatted_title = title.replace('_', ' ').lower()
         audio = File(filepath, easy=True)
         if audio is not None:
-            formatted_title = title.replace('_', ' ').lower()
-            audio['title'] = formatted_title
-            audio['artist'] = artist
-            audio['album'] = album
-            audio.save()
-            return True
+            try:
+                audio['title'] = formatted_title
+                audio['artist'] = artist
+                audio['album'] = album
+                audio.save()
+                return True
+            except (TypeError, KeyError):
+                # WAV files don't support easy-tag writes; use raw ID3 frames instead
+                raw = File(filepath)
+                if isinstance(raw, WAVE):
+                    if raw.tags is None:
+                        raw.add_tags()
+                    raw.tags.add(TIT2(encoding=3, text=[formatted_title]))
+                    raw.tags.add(TPE1(encoding=3, text=[artist]))
+                    raw.tags.add(TALB(encoding=3, text=[album]))
+                    raw.save()
+                    return True
     except Exception as e:
         print(f"Could not set metadata: {e}")
     return False
@@ -560,103 +686,9 @@ def upload_folder():
         else:
             return jsonify({'error': 'Provide "file" (zip) or "files"/"files[]" (multiple files)'}), 400
 
-        audio_files, images_by_dir = _scan_for_audio_and_images(extract_root)
-        if not audio_files:
-            return jsonify({'error': 'No audio files found (mp3, wav, ogg, flac, m4a)'}), 400
-
-        results = {'imported': [], 'failed': [], 'skipped': [], 'needs_art_selection': []}
-
-        for audio_path in audio_files:
-            track_name = get_track_name(os.path.basename(audio_path))
-            existing = check_duplicate(track_name)
-            if existing:
-                results['skipped'].append({'file': os.path.basename(audio_path), 'reason': 'duplicate'})
-                continue
-
-            album = _derive_metadata_from_path(audio_path, extract_root)
-            _set_audio_metadata(audio_path, track_name, 'thomas phillips', album)
-
-            try:
-                subprocess.run(
-                    ['beet', '-c', os.path.join(BEETS_DIR, 'config.yaml'), 'import', '-q', '--noautotag', '-s', audio_path],
-                    check=True, cwd=BEETS_DIR
-                )
-            except subprocess.CalledProcessError as e:
-                results['failed'].append({'file': os.path.basename(audio_path), 'reason': str(e)})
-                continue
-
-            # Get newly imported track id (look up by title to avoid race with concurrent imports)
-            formatted_title = track_name.replace('_', ' ').lower()
-            conn = sqlite3.connect(LIBRARY_DB)
-            cursor = conn.cursor()
-            cursor.execute("SELECT id FROM items WHERE title = ? ORDER BY id DESC LIMIT 1", (formatted_title,))
-            row = cursor.fetchone()
-            if not row:
-                cursor.execute("SELECT id FROM items ORDER BY id DESC LIMIT 1")
-                row = cursor.fetchone()
-            conn.close()
-            if not row:
-                results['failed'].append({'file': os.path.basename(audio_path), 'reason': 'no track id'})
-                continue
-
-            new_id = row[0]
-            conn = sqlite3.connect(LIBRARY_DB)
-            cursor = conn.cursor()
-            cursor.execute("UPDATE items SET title = ?, artist = ?, album = ? WHERE id = ?",
-                          (formatted_title, 'thomas phillips', album, new_id))
-            conn.commit()
-            conn.close()
-
-            # Match and store artwork
-            covers, canvases = _match_images_to_audio(audio_path, images_by_dir)
-            if covers:
-                if len(covers) == 1:
-                    _insert_track_artwork(new_id, covers[0], 'cover', is_primary=1)
-                else:
-                    candidates = []
-                    for i, c in enumerate(covers):
-                        rel = _insert_track_artwork(new_id, c, 'cover', is_primary=0, suffix=i)
-                        if rel:
-                            candidates.append({
-                                'path': rel,
-                                'display_name': os.path.basename(c)
-                            })
-                    if candidates:
-                        results['needs_art_selection'].append({
-                            'track_id': new_id,
-                            'track_name': formatted_title,
-                            'candidates': candidates
-                        })
-            if canvases:
-                _insert_track_artwork(new_id, canvases[0], 'canvas', is_primary=0)
-
-            # S3 upload if configured
-            if s3_client:
-                try:
-                    conn = sqlite3.connect(LIBRARY_DB)
-                    cursor = conn.cursor()
-                    cursor.execute("SELECT path FROM items WHERE id = ?", (new_id,))
-                    res = cursor.fetchone()
-                    conn.close()
-                    if res:
-                        final_path = res[0]
-                        if isinstance(final_path, bytes):
-                            final_path = final_path.decode('utf-8', errors='ignore')
-                        rel_path = os.path.relpath(final_path, start=os.getcwd())
-                        if not rel_path.startswith('..'):
-                            s3_client.upload_file(final_path, S3_BUCKET, rel_path)
-                except Exception as s3_err:
-                    print(f"S3 upload failed for {new_id}: {s3_err}")
-
-            results['imported'].append({'track_name': track_name, 'id': new_id})
-
-        return jsonify({
-            'message': f"Imported {len(results['imported'])} tracks",
-            'imported': results['imported'],
-            'failed': results['failed'],
-            'skipped': results['skipped'],
-            'needs_art_selection': results['needs_art_selection']
-        }), 200
+        album_override = (request.form.get('album') or '').strip() or None
+        result, status_code = _import_from_directory(extract_root, album_override=album_override)
+        return jsonify(result), status_code
 
     except Exception as e:
         traceback.print_exc()
@@ -668,6 +700,312 @@ def upload_folder():
                 shutil.rmtree(work_dir)
             except Exception:
                 pass
+
+
+def _import_from_directory(extract_root, album_override=None):
+    """Shared import logic: scan a directory for audio/images, run beets import, return results dict.
+    Used by both upload_folder (direct upload) and upload_process (presigned S3 flow).
+    album_override: if provided, use this album name instead of deriving from path."""
+    audio_files, images_by_dir = _scan_for_audio_and_images(extract_root)
+    if not audio_files:
+        return {'error': 'No audio files found (mp3, wav, ogg, flac, m4a)'}, 400
+
+    results = {'imported': [], 'failed': [], 'skipped': [], 'needs_art_selection': [], 's3_warnings': []}
+
+    for audio_path in audio_files:
+        track_name = get_track_name(os.path.basename(audio_path))
+        existing = check_duplicate(track_name)
+        if existing:
+            results['skipped'].append({'file': os.path.basename(audio_path), 'reason': 'duplicate'})
+            continue
+
+        derived = _derive_metadata_from_path(audio_path, extract_root)
+        album = album_override if album_override else derived
+        _set_audio_metadata(audio_path, track_name, 'thomas phillips', album)
+
+        # Write unique import marker for safe post-import lookup
+        import_marker = f"_import_{uuid.uuid4().hex}"
+        _set_import_marker(audio_path, import_marker)
+
+        try:
+            subprocess.run(
+                ['beet', '-c', os.path.join(BEETS_DIR, 'config.yaml'), 'import', '-q', '--noautotag', '-s', audio_path],
+                check=True, cwd=BEETS_DIR
+            )
+        except subprocess.CalledProcessError as e:
+            results['failed'].append({'file': os.path.basename(audio_path), 'reason': str(e)})
+            continue
+
+        # Find the imported track by its unique marker (race-condition-safe)
+        # title_hint is used as fallback when marker write fails (e.g. WAV files)
+        new_id = _find_track_by_marker(import_marker, timeout=10, title_hint=track_name)
+        if not new_id:
+            results['failed'].append({'file': os.path.basename(audio_path), 'reason': 'could not locate imported track'})
+            continue
+
+        formatted_title = track_name.replace('_', ' ').lower()
+        def _update_metadata():
+            conn = _get_db()
+            cursor = conn.cursor()
+            cursor.execute("UPDATE items SET title = ?, artist = ?, album = ?, genre = '' WHERE id = ?",
+                          (formatted_title, 'thomas phillips', album, new_id))
+            conn.commit()
+            conn.close()
+        _db_retry(_update_metadata)
+
+        covers, canvases = _match_images_to_audio(audio_path, images_by_dir)
+        if covers:
+            if len(covers) == 1:
+                _insert_track_artwork(new_id, covers[0], 'cover', is_primary=1)
+            else:
+                candidates = []
+                for i, c in enumerate(covers):
+                    rel = _insert_track_artwork(new_id, c, 'cover', is_primary=0, suffix=i)
+                    if rel:
+                        candidates.append({
+                            'path': rel,
+                            'display_name': os.path.basename(c)
+                        })
+                if candidates:
+                    results['needs_art_selection'].append({
+                        'track_id': new_id,
+                        'track_name': formatted_title,
+                        'candidates': candidates
+                    })
+        if canvases:
+            _insert_track_artwork(new_id, canvases[0], 'canvas', is_primary=0)
+
+        # S3 upload with error reporting (non-blocking but tracked)
+        if s3_client:
+            try:
+                conn = _get_db()
+                cursor = conn.cursor()
+                cursor.execute("SELECT path FROM items WHERE id = ?", (new_id,))
+                res = cursor.fetchone()
+                conn.close()
+                if res:
+                    final_path = res[0]
+                    if isinstance(final_path, bytes):
+                        final_path = final_path.decode('utf-8', errors='replace')
+                    rel_path = os.path.relpath(final_path, start=os.getcwd())
+                    if not rel_path.startswith('..'):
+                        s3_client.upload_file(final_path, S3_BUCKET, rel_path)
+            except Exception as s3_err:
+                print(f"S3 upload failed for {new_id}: {s3_err}")
+                results['s3_warnings'].append({'track_id': new_id, 'error': str(s3_err)})
+
+        results['imported'].append({'track_name': track_name, 'id': new_id})
+
+    response = {
+        'message': f"Imported {len(results['imported'])} tracks",
+        'imported': results['imported'],
+        'failed': results['failed'],
+        'skipped': results['skipped'],
+        'needs_art_selection': results['needs_art_selection'],
+    }
+    if results['s3_warnings']:
+        response['s3_warnings'] = results['s3_warnings']
+
+    return response, 200
+
+
+# --- Presigned URL Upload (bypasses Cloudflare body size limit) ---
+# Track active presigned sessions: {session_id: {'created_at': timestamp, 'keys': [...]}}
+_presign_sessions = {}
+_presign_sessions_lock = threading.Lock()
+PRESIGN_SESSION_TTL = 3600  # 1 hour
+PRESIGN_MAX_FILES = 200     # Max files per session
+MAX_FILENAME_LENGTH = 255   # Max individual filename length
+
+# --- Async process jobs ---
+# Jobs: {job_id: {'status': 'processing'|'done'|'error', 'result': ..., 'status_code': ..., 'error': ..., 'created_at': float}}
+_process_jobs = {}
+_process_jobs_lock = threading.Lock()
+_PROCESS_JOB_TTL = 7200  # 2 hours
+
+def _cleanup_expired_jobs():
+    """Remove stale completed/errored jobs older than TTL."""
+    cutoff = time.time() - _PROCESS_JOB_TTL
+    with _process_jobs_lock:
+        expired = [jid for jid, j in _process_jobs.items() if j.get('created_at', 0) < cutoff]
+        for jid in expired:
+            del _process_jobs[jid]
+
+def _cleanup_expired_sessions():
+    """Remove expired presigned sessions from memory."""
+    now = time.time()
+    with _presign_sessions_lock:
+        expired = [sid for sid, info in _presign_sessions.items()
+                   if now - info['created_at'] > PRESIGN_SESSION_TTL]
+        for sid in expired:
+            del _presign_sessions[sid]
+
+
+@app.route('/upload/presign', methods=['POST'])
+@admin_required()
+def upload_presign():
+    """Generate presigned S3 PUT URLs so the browser/app can upload files directly to S3."""
+    if not s3_client:
+        return jsonify({'error': 'S3 is not configured on this server'}), 501
+
+    data = request.get_json(silent=True) or {}
+    filenames = data.get('filenames', [])
+    if not filenames:
+        return jsonify({'error': 'Provide "filenames": ["file1.wav", ...]'}), 400
+
+    if len(filenames) > PRESIGN_MAX_FILES:
+        return jsonify({'error': f'Too many files ({len(filenames)}). Max is {PRESIGN_MAX_FILES}.'}), 400
+
+    # Validate filenames
+    for fn in filenames:
+        if len(fn) > MAX_FILENAME_LENGTH:
+            return jsonify({'error': f'Filename too long: {fn[:50]}...'}), 400
+
+    # Cleanup expired sessions periodically
+    _cleanup_expired_sessions()
+
+    session_id = str(uuid.uuid4())
+    urls = []
+    session_keys = []
+    for fn in filenames:
+        safe_fn = secure_filename(fn) or f"file_{uuid.uuid4().hex[:8]}"
+        key = f"uploads/{session_id}/{safe_fn}"
+        try:
+            presigned_url = s3_client.generate_presigned_url(
+                'put_object',
+                Params={'Bucket': S3_BUCKET, 'Key': key},
+                ExpiresIn=PRESIGN_SESSION_TTL,
+            )
+            urls.append({'filename': fn, 'url': presigned_url, 'key': key})
+            session_keys.append(key)
+        except Exception as e:
+            return jsonify({'error': f'Failed to generate presigned URL: {e}'}), 500
+
+    # Register this session
+    with _presign_sessions_lock:
+        _presign_sessions[session_id] = {
+            'created_at': time.time(),
+            'keys': session_keys,
+        }
+
+    return jsonify({'session_id': session_id, 'urls': urls}), 200
+
+
+def _cleanup_s3_session(session_id, keys):
+    """Clean up S3 staging objects for a session (best-effort)."""
+    if not s3_client:
+        return
+    for key in keys:
+        try:
+            s3_client.delete_object(Bucket=S3_BUCKET, Key=key)
+        except Exception as e:
+            print(f"S3 cleanup failed for {key}: {e}")
+    # Remove session tracking
+    with _presign_sessions_lock:
+        _presign_sessions.pop(session_id, None)
+
+
+def _run_process_job(job_id, session_id, keys, work_dir, prefix, album_override=None):
+    """Background worker: download S3 files and run import pipeline."""
+    try:
+        for key in keys:
+            rel = key[len(prefix):]
+            local_path = os.path.join(work_dir, rel)
+            os.makedirs(os.path.dirname(local_path), exist_ok=True)
+            s3_client.download_file(S3_BUCKET, key, local_path)
+
+        result, status_code = _import_from_directory(work_dir, album_override=album_override)
+        _cleanup_s3_session(session_id, keys)
+
+        with _process_jobs_lock:
+            _process_jobs[job_id]['status'] = 'done'
+            _process_jobs[job_id]['result'] = result
+            _process_jobs[job_id]['status_code'] = status_code
+
+    except Exception as e:
+        traceback.print_exc()
+        _cleanup_s3_session(session_id, keys)
+        with _process_jobs_lock:
+            _process_jobs[job_id]['status'] = 'error'
+            _process_jobs[job_id]['error'] = str(e)
+    finally:
+        if work_dir and os.path.isdir(work_dir):
+            try:
+                shutil.rmtree(work_dir)
+            except Exception as cleanup_err:
+                print(f"Warning: temp dir cleanup failed: {cleanup_err}")
+
+
+@app.route('/upload/process', methods=['POST'])
+@admin_required()
+def upload_process():
+    """Start async import: download files from S3 staging and run import pipeline in background.
+    Returns 202 with job_id immediately; poll /upload/status/<job_id> for completion."""
+    if not s3_client:
+        return jsonify({'error': 'S3 is not configured on this server'}), 501
+
+    data = request.get_json(silent=True) or {}
+    session_id = data.get('session_id', '')
+    keys = data.get('keys', [])
+    album_override = data.get('album', '').strip() or None
+    if not session_id or not keys:
+        return jsonify({'error': 'Provide "session_id" and "keys"'}), 400
+
+    # Validate session exists and hasn't expired
+    with _presign_sessions_lock:
+        session_info = _presign_sessions.get(session_id)
+    if session_info:
+        age = time.time() - session_info['created_at']
+        if age > PRESIGN_SESSION_TTL:
+            _cleanup_s3_session(session_id, keys)
+            return jsonify({'error': 'Upload session has expired. Please upload again.'}), 410
+
+    # Validate all keys belong to this session
+    prefix = f"uploads/{session_id}/"
+    for k in keys:
+        if not k.startswith(prefix):
+            return jsonify({'error': f'Key does not belong to session: {k}'}), 400
+
+    _cleanup_expired_jobs()
+
+    job_id = str(uuid.uuid4())
+    work_dir = tempfile.mkdtemp()
+
+    with _process_jobs_lock:
+        _process_jobs[job_id] = {'status': 'processing', 'created_at': time.time()}
+
+    thread = threading.Thread(
+        target=_run_process_job,
+        args=(job_id, session_id, keys, work_dir, prefix, album_override),
+        daemon=True,
+    )
+    thread.start()
+
+    return jsonify({'job_id': job_id, 'status': 'processing'}), 202
+
+
+@app.route('/upload/status/<job_id>', methods=['GET'])
+@admin_required()
+def upload_status(job_id):
+    """Poll the status of an async /upload/process job."""
+    with _process_jobs_lock:
+        job = _process_jobs.get(job_id)
+
+    if not job:
+        return jsonify({'error': 'Job not found or expired'}), 404
+
+    status = job['status']
+    if status == 'processing':
+        return jsonify({'status': 'processing'}), 202
+
+    # Job finished — remove from store and return result
+    with _process_jobs_lock:
+        _process_jobs.pop(job_id, None)
+
+    if status == 'done':
+        return jsonify({'status': 'done', **job['result']}), job.get('status_code', 200)
+
+    return jsonify({'status': 'error', 'error': job.get('error', 'Unknown error')}), 500
 
 
 @app.route('/upload/folder/confirm-art', methods=['POST'])
@@ -758,6 +1096,39 @@ def remove_duplicates():
         return jsonify({'error': f'Failed to remove duplicates: {str(e)}'}), 500
 
 
+def _update_audio_tags(filepath, title=None, artist=None, album=None):
+    """Write metadata tags to an audio file, with raw-ID3 fallback for WAV files."""
+    try:
+        from mutagen import File
+        from mutagen.wave import WAVE
+        from mutagen.id3 import TIT2, TPE1, TALB
+        audio = File(filepath, easy=True)
+        if audio is None:
+            return
+        try:
+            if title is not None:
+                audio['title'] = title
+            if artist is not None:
+                audio['artist'] = artist
+            if album is not None:
+                audio['album'] = album
+            audio.save()
+        except (TypeError, KeyError):
+            raw = File(filepath)
+            if isinstance(raw, WAVE):
+                if raw.tags is None:
+                    raw.add_tags()
+                if title is not None:
+                    raw.tags.add(TIT2(encoding=3, text=[title]))
+                if artist is not None:
+                    raw.tags.add(TPE1(encoding=3, text=[artist]))
+                if album is not None:
+                    raw.tags.add(TALB(encoding=3, text=[album]))
+                raw.save()
+    except Exception as e:
+        print(f"Warning: Could not update audio file metadata for {filepath}: {e}")
+
+
 @app.route('/track/<int:track_id>', methods=['PUT'])
 def update_track(track_id):
     """Update track metadata in database and audio file"""
@@ -806,19 +1177,7 @@ def update_track(track_id):
         
         # Update audio file metadata
         if os.path.exists(track_path):
-            try:
-                from mutagen import File
-                audio = File(track_path, easy=True)
-                if audio is not None:
-                    if title is not None:
-                        audio['title'] = title
-                    if artist is not None:
-                        audio['artist'] = artist
-                    if album is not None:
-                        audio['album'] = album
-                    audio.save()
-            except Exception as e:
-                print(f"Warning: Could not update audio file metadata: {e}")
+            _update_audio_tags(track_path, title=title, artist=artist, album=album)
         
         return jsonify({
             'message': 'Track updated successfully',
@@ -922,17 +1281,7 @@ def batch_update_tracks():
             
             # Update audio file metadata
             if os.path.exists(track_path):
-                try:
-                    from mutagen import File
-                    audio = File(track_path, easy=True)
-                    if audio is not None:
-                        if artist:
-                            audio['artist'] = artist
-                        if album:
-                            audio['album'] = album
-                        audio.save()
-                except Exception as e:
-                    print(f"Warning: Could not update audio file metadata for {track_id}: {e}")
+                _update_audio_tags(track_path, artist=artist, album=album)
         
         conn.commit()
         conn.close()
@@ -1673,7 +2022,10 @@ def passkey_register_verify():
     except Exception as e:
         if current_user_id in passkey_challenges:
             del passkey_challenges[current_user_id]
-        return jsonify({'error': str(e)}), 400
+        err_msg = str(e)
+        if 'already registered' in err_msg.lower() or 'credentials already' in err_msg.lower():
+            err_msg = 'This passkey is already registered to your account. Try a different device or passkey, or remove the existing one first.'
+        return jsonify({'error': err_msg}), 400
 
 @app.route('/auth/passkey/login/options', methods=['POST'])
 def passkey_login_options():
@@ -2512,33 +2864,31 @@ def stream_track(track_id):
         if isinstance(file_path, bytes):
             file_path = file_path.decode('utf-8', errors='ignore')
 
-        # --- S3 Strategy ---
+        # --- S3 Strategy: proxy stream so browser gets same-origin response (no CORS on S3) ---
         if s3_client:
-            # Assumes file structure in S3 mirrors local 'music/' folder
-            # Key: music/Artist/Album/File.mp3
-            # We try to determine the relative path from the current working directory to form the key
             try:
-                # If path is absolute, make it relative to CWD (app root)
                 rel_path = os.path.relpath(file_path, start=os.getcwd())
-                if rel_path.startswith('..'):
-                    # Fallback if outside root, maybe just use basename?
-                    # For now, let's assume standard structure: ./music/...
-                    # If outside, we can't easily guess key without DB storing S3 key.
-                    # Fallback to local serve.
-                    pass 
-                else:
-                    # Generate Presigned URL
+                if not rel_path.startswith('..'):
+                    range_header = request.headers.get('Range')
+                    params = {'Bucket': S3_BUCKET, 'Key': rel_path}
+                    if range_header:
+                        params['Range'] = range_header
                     try:
-                        url = s3_client.generate_presigned_url(
-                            'get_object',
-                            Params={'Bucket': S3_BUCKET, 'Key': rel_path},
-                            ExpiresIn=3600 # 1 hour link
-                        )
-                        return redirect(url)
+                        resp = s3_client.get_object(**params)
+                        body = resp['Body']
+                        content_type = resp.get('ContentType') or mimetypes.guess_type(rel_path)[0] or 'application/octet-stream'
+                        if rel_path.lower().endswith('.wav'):
+                            content_type = 'audio/x-wav'
+                        status = resp.get('ResponseMetadata', {}).get('HTTPStatusCode', 200)
+                        headers = {}
+                        if 'ContentLength' in resp:
+                            headers['Content-Length'] = str(resp['ContentLength'])
+                        if 'ContentRange' in resp:
+                            headers['Content-Range'] = resp['ContentRange']
+                        return Response(body, status=status, mimetype=content_type, headers=headers, direct_passthrough=True)
                     except ClientError as e:
-                        print(f"S3 Gen URL Error: {e}")
-                        # Fallback to local
-            except ValueError:
+                        print(f"S3 get_object error: {e}")
+            except (ValueError, OSError):
                 pass
 
         # --- Local Strategy ---
