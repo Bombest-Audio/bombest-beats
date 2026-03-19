@@ -50,8 +50,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // Progress State
     val currentPosition = mutableStateOf(0L)
     val duration = mutableStateOf(0L)
-    
-    // Loops
+
+    // A-B Loop State
+    val loopStartMs = mutableStateOf<Long?>(null)
+    val loopEndMs = mutableStateOf<Long?>(null)
+
+    // Internal coroutine jobs
     private var updateProgressJob: kotlinx.coroutines.Job? = null
     private val scope = viewModelScope
     
@@ -379,7 +383,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 currentMediaItem.value = mediaItem
                 currentPosition.value = 0L // Reset immediately to prevent UI flash
                 updateDuration()
-                
+                clearLoop() // Clear A-B loop when track changes
+
                 // Fetch waveform for new track
                 mediaItem?.mediaId?.toIntOrNull()?.let { trackId ->
                     fetchWaveform(trackId)
@@ -432,7 +437,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 mediaBrowser?.let {
                     currentPosition.value = it.currentPosition
                 }
-                delay(500) // Update every 500ms
+                // A-B loop: seek back to start when end is reached
+                val end = loopEndMs.value
+                val start = loopStartMs.value
+                if (end != null && start != null && currentPosition.value >= end) {
+                    seekTo(start)
+                }
+                delay(100) // Tighter poll so overshoot is minimal
             }
         }
     }
@@ -448,7 +459,44 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         mediaBrowser?.seekTo(positionMs)
         currentPosition.value = positionMs
     }
-    
+
+    fun setLoopStart() {
+        val pos = currentPosition.value
+        val dur = duration.value
+        if (dur <= 0L) return
+        loopStartMs.value = pos
+        // Auto-set end to track end if not yet set
+        if (loopEndMs.value == null) {
+            loopEndMs.value = dur
+        }
+        // If new start >= existing end, push end forward
+        val end = loopEndMs.value
+        if (end != null && pos >= end) {
+            loopEndMs.value = minOf(pos + 10_000L, dur)
+        }
+    }
+
+    fun setLoopEnd() {
+        val pos = currentPosition.value
+        val dur = duration.value
+        if (dur <= 0L) return
+        loopEndMs.value = pos
+        // Auto-set start to 0 if not yet set
+        if (loopStartMs.value == null) {
+            loopStartMs.value = 0L
+        }
+        // If new end <= existing start, push start back
+        val start = loopStartMs.value
+        if (start != null && pos <= start) {
+            loopStartMs.value = maxOf(pos - 10_000L, 0L)
+        }
+    }
+
+    fun clearLoop() {
+        loopStartMs.value = null
+        loopEndMs.value = null
+    }
+
     fun stop() {
         mediaBrowser?.stop()
         stopProgressLoop()

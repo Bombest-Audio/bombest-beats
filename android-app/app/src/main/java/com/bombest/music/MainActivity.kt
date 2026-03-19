@@ -443,7 +443,12 @@ fun MainContent(
                         onShare(title, artist)
                     },
                     onRegisterPasskey = onRegisterPasskey,
-                    onClose = { isPlayerOpen = false }
+                    onClose = { isPlayerOpen = false },
+                    loopStartMs = viewModel.loopStartMs.value,
+                    loopEndMs = viewModel.loopEndMs.value,
+                    onSetLoopStart = viewModel::setLoopStart,
+                    onSetLoopEnd = viewModel::setLoopEnd,
+                    onClearLoop = viewModel::clearLoop
                 )
             }
         }

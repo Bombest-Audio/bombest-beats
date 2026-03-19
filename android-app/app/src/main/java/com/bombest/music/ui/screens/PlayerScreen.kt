@@ -11,6 +11,7 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
@@ -27,6 +28,7 @@ import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -87,6 +89,11 @@ fun PlayerScreen(
     onShare: () -> Unit = {},
     onRegisterPasskey: () -> Unit = {},
     onClose: () -> Unit,
+    loopStartMs: Long? = null,
+    loopEndMs: Long? = null,
+    onSetLoopStart: () -> Unit = {},
+    onSetLoopEnd: () -> Unit = {},
+    onClearLoop: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     // Full Screen Background - Graffiti theme deep navy
@@ -131,7 +138,17 @@ fun PlayerScreen(
 
             TimeRow(formatDuration(currentPosition), formatDuration(duration))
 
-            Spacer(Modifier.height(32.dp))
+            Spacer(Modifier.height(12.dp))
+
+            LoopControls(
+                loopStartMs = loopStartMs,
+                loopEndMs = loopEndMs,
+                onSetLoopStart = onSetLoopStart,
+                onSetLoopEnd = onSetLoopEnd,
+                onClearLoop = onClearLoop
+            )
+
+            Spacer(Modifier.height(20.dp))
 
             MidControlsRow(
                 isFavorite = isFavorite,
@@ -482,6 +499,103 @@ fun TimeRow(start: String, end: String) {
     ) {
         Text(text = start, fontSize = 11.sp, color = Color.White.copy(alpha = 0.7f))
         Text(text = end, fontSize = 11.sp, color = Color.White.copy(alpha = 0.7f))
+    }
+}
+
+@Composable
+fun LoopControls(
+    loopStartMs: Long?,
+    loopEndMs: Long?,
+    onSetLoopStart: () -> Unit,
+    onSetLoopEnd: () -> Unit,
+    onClearLoop: () -> Unit
+) {
+    val loopActive = loopStartMs != null && loopEndMs != null
+    val accentColor = Color(0xFFC27CFF)
+    val inactiveColor = Color.White.copy(alpha = 0.5f)
+
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        // Loop marker label when active
+        if (loopActive) {
+            Text(
+                text = "Loop: ${formatDuration(loopStartMs!!)} – ${formatDuration(loopEndMs!!)}",
+                fontSize = 11.sp,
+                color = accentColor,
+                modifier = Modifier.padding(bottom = 6.dp)
+            )
+        }
+
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Set Start button
+            OutlinedButton(
+                onClick = onSetLoopStart,
+                shape = RoundedCornerShape(20.dp),
+                border = BorderStroke(
+                    1.dp,
+                    if (loopStartMs != null) accentColor else inactiveColor
+                ),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                modifier = Modifier.height(30.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Icon(
+                        imageVector = Icons.Default.SkipPrevious,
+                        contentDescription = null,
+                        tint = if (loopStartMs != null) accentColor else inactiveColor,
+                        modifier = Modifier.size(13.dp)
+                    )
+                    Text(
+                        text = if (loopStartMs != null) "A: ${formatDuration(loopStartMs)}" else "Set A",
+                        fontSize = 11.sp,
+                        color = if (loopStartMs != null) accentColor else inactiveColor
+                    )
+                }
+            }
+
+            // Set End button
+            OutlinedButton(
+                onClick = onSetLoopEnd,
+                shape = RoundedCornerShape(20.dp),
+                border = BorderStroke(
+                    1.dp,
+                    if (loopEndMs != null) accentColor else inactiveColor
+                ),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                modifier = Modifier.height(30.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        text = if (loopEndMs != null) "B: ${formatDuration(loopEndMs)}" else "Set B",
+                        fontSize = 11.sp,
+                        color = if (loopEndMs != null) accentColor else inactiveColor
+                    )
+                    Icon(
+                        imageVector = Icons.Default.SkipNext,
+                        contentDescription = null,
+                        tint = if (loopEndMs != null) accentColor else inactiveColor,
+                        modifier = Modifier.size(13.dp)
+                    )
+                }
+            }
+
+            // Clear button — only visible when loop is active
+            if (loopActive) {
+                IconButton(
+                    onClick = onClearLoop,
+                    modifier = Modifier.size(30.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Clear Loop",
+                        tint = Color.White.copy(alpha = 0.6f),
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+        }
     }
 }
 
