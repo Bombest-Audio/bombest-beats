@@ -33,13 +33,19 @@ aws s3api put-public-access-block --bucket "$BUCKET" --public-access-block-confi
 echo "Clearing bucket policy (private)..."
 aws s3api delete-bucket-policy --bucket "$BUCKET" || true
 
-echo "Enabling CORS (GET/HEAD) for private clients..."
+echo "Enabling CORS (GET/HEAD/PUT) for private clients..."
 cat > /tmp/s3-cors.json <<'CORS'
 {
   "CORSRules": [
     {
-      "AllowedOrigins": ["*"],
-      "AllowedMethods": ["GET", "HEAD"],
+      "AllowedOrigins": [
+        "https://bom.best",
+        "https://www.bom.best",
+        "https://beats-app.bom.best",
+        "https://d37qdccady5d3d.cloudfront.net",
+        "http://localhost:3000"
+      ],
+      "AllowedMethods": ["GET", "HEAD", "PUT"],
       "AllowedHeaders": ["*"],
       "ExposeHeaders": ["ETag"],
       "MaxAgeSeconds": 3000
