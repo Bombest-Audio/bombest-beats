@@ -536,7 +536,9 @@ private suspend fun tryPresignedUpload(
                             uploadedKeys.add(key)
                             completed++
                         }
-                        onProgress(completed, total, "Uploading $completed/$total...")
+                        withContext(Dispatchers.Main) {
+                            onProgress(completed, total, "Uploading $completed/$total...")
+                        }
                     } finally {
                         if (tempFile.exists() && !tempFile.delete()) {
                             Log.w(TAG, "Failed to delete S3 temp file: ${tempFile.absolutePath}")
