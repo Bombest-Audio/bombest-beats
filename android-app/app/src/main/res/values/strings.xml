@@ -1,3 +1,5 @@
 <resources>
     <string name="app_name">Bombest Beats</string>
+    <string name="brand_name">Bombest Beats</string>
+    <string name="streaming_from_brand">Streaming from Bombest Audio</string>
 </resources>
