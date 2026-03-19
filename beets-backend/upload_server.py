@@ -14,7 +14,7 @@ import wave
 import struct
 import time
 import threading
-from flask import Flask, request, jsonify, send_file
+from flask import Flask, request, jsonify, send_file, Response
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 
@@ -23,6 +23,7 @@ import bcrypt
 import smtplib
 import yaml
 import boto3
+from botocore.config import Config as BotocoreConfig
 from botocore.exceptions import ClientError
 from flask import redirect
 from email.mime.text import MIMEText
@@ -62,7 +63,8 @@ if S3_BUCKET and AWS_ACCESS_KEY and AWS_SECRET_KEY:
             region_name=S3_REGION,
             endpoint_url=S3_ENDPOINT,
             aws_access_key_id=AWS_ACCESS_KEY,
-            aws_secret_access_key=AWS_SECRET_KEY
+            aws_secret_access_key=AWS_SECRET_KEY,
+            config=BotocoreConfig(signature_version='s3v4'),
         )
         print(f"✅ S3 Client initialized for bucket: {S3_BUCKET}")
     except Exception as e:
@@ -175,20 +177,34 @@ def _db_retry(fn, max_retries=3, delay=0.3):
 IMPORT_MARKER_FIELD = 'comments'  # beets stores this as 'comments' in items table
 
 def _set_import_marker(filepath, marker):
-    """Write a unique import marker into the audio file's comment field."""
+    """Write a unique import marker into the audio file's genre field."""
     try:
         from mutagen import File
+        from mutagen.wave import WAVE
+        from mutagen.id3 import TCON
         audio = File(filepath, easy=True)
         if audio is not None:
-            audio['genre'] = marker  # Use genre field as import marker (overwritten after lookup)
-            audio.save()
-            return True
+            try:
+                audio['genre'] = marker
+                audio.save()
+                return True
+            except (TypeError, KeyError):
+                # WAV files don't support easy-tag writes; use raw TCON frame instead
+                raw = File(filepath)
+                if isinstance(raw, WAVE):
+                    if raw.tags is None:
+                        raw.add_tags()
+                    raw.tags.add(TCON(encoding=3, text=[marker]))
+                    raw.save()
+                    return True
     except Exception as e:
         print(f"Could not set import marker: {e}")
     return False
 
-def _find_track_by_marker(marker, timeout=10):
-    """Look up a track by its import marker in the genre field. Retries for up to `timeout` seconds."""
+def _find_track_by_marker(marker, timeout=10, title_hint=None):
+    """Look up a track by its import marker in the genre field. Retries for up to `timeout` seconds.
+    Falls back to title+artist lookup if the marker was not written (e.g. for WAV files where
+    mutagen easy-mode tag writes are unsupported and beets may not read TCON as genre)."""
     deadline = time.time() + timeout
     while time.time() < deadline:
         try:
@@ -202,6 +218,23 @@ def _find_track_by_marker(marker, timeout=10):
         except Exception:
             pass
         time.sleep(0.5)
+
+    # Fallback: look up by title + artist (works when marker write failed but metadata tags succeeded)
+    if title_hint:
+        try:
+            normalized_title = title_hint.replace('_', ' ').strip().lower()
+            conn = _get_db()
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT id FROM items WHERE LOWER(TRIM(title)) = ? AND LOWER(TRIM(artist)) = ? ORDER BY id DESC LIMIT 1",
+                (normalized_title, 'thomas phillips')
+            )
+            row = cursor.fetchone()
+            conn.close()
+            if row:
+                return row[0]
+        except Exception as e:
+            print(f"Title-based track lookup failed: {e}")
     return None
 
 def _clear_import_marker(track_id, genre_value=''):
@@ -541,14 +574,28 @@ def _set_audio_metadata(filepath, title, artist, album):
     """Set title, artist, album on audio file before import."""
     try:
         from mutagen import File
+        from mutagen.wave import WAVE
+        from mutagen.id3 import TIT2, TPE1, TALB
+        formatted_title = title.replace('_', ' ').lower()
         audio = File(filepath, easy=True)
         if audio is not None:
-            formatted_title = title.replace('_', ' ').lower()
-            audio['title'] = formatted_title
-            audio['artist'] = artist
-            audio['album'] = album
-            audio.save()
-            return True
+            try:
+                audio['title'] = formatted_title
+                audio['artist'] = artist
+                audio['album'] = album
+                audio.save()
+                return True
+            except (TypeError, KeyError):
+                # WAV files don't support easy-tag writes; use raw ID3 frames instead
+                raw = File(filepath)
+                if isinstance(raw, WAVE):
+                    if raw.tags is None:
+                        raw.add_tags()
+                    raw.tags.add(TIT2(encoding=3, text=[formatted_title]))
+                    raw.tags.add(TPE1(encoding=3, text=[artist]))
+                    raw.tags.add(TALB(encoding=3, text=[album]))
+                    raw.save()
+                    return True
     except Exception as e:
         print(f"Could not set metadata: {e}")
     return False
@@ -639,7 +686,8 @@ def upload_folder():
         else:
             return jsonify({'error': 'Provide "file" (zip) or "files"/"files[]" (multiple files)'}), 400
 
-        result, status_code = _import_from_directory(extract_root)
+        album_override = (request.form.get('album') or '').strip() or None
+        result, status_code = _import_from_directory(extract_root, album_override=album_override)
         return jsonify(result), status_code
 
     except Exception as e:
@@ -654,9 +702,10 @@ def upload_folder():
                 pass
 
 
-def _import_from_directory(extract_root):
+def _import_from_directory(extract_root, album_override=None):
     """Shared import logic: scan a directory for audio/images, run beets import, return results dict.
-    Used by both upload_folder (direct upload) and upload_process (presigned S3 flow)."""
+    Used by both upload_folder (direct upload) and upload_process (presigned S3 flow).
+    album_override: if provided, use this album name instead of deriving from path."""
     audio_files, images_by_dir = _scan_for_audio_and_images(extract_root)
     if not audio_files:
         return {'error': 'No audio files found (mp3, wav, ogg, flac, m4a)'}, 400
@@ -670,7 +719,8 @@ def _import_from_directory(extract_root):
             results['skipped'].append({'file': os.path.basename(audio_path), 'reason': 'duplicate'})
             continue
 
-        album = _derive_metadata_from_path(audio_path, extract_root)
+        derived = _derive_metadata_from_path(audio_path, extract_root)
+        album = album_override if album_override else derived
         _set_audio_metadata(audio_path, track_name, 'thomas phillips', album)
 
         # Write unique import marker for safe post-import lookup
@@ -687,7 +737,8 @@ def _import_from_directory(extract_root):
             continue
 
         # Find the imported track by its unique marker (race-condition-safe)
-        new_id = _find_track_by_marker(import_marker, timeout=10)
+        # title_hint is used as fallback when marker write fails (e.g. WAV files)
+        new_id = _find_track_by_marker(import_marker, timeout=10, title_hint=track_name)
         if not new_id:
             results['failed'].append({'file': os.path.basename(audio_path), 'reason': 'could not locate imported track'})
             continue
@@ -766,6 +817,20 @@ PRESIGN_SESSION_TTL = 3600  # 1 hour
 PRESIGN_MAX_FILES = 200     # Max files per session
 MAX_FILENAME_LENGTH = 255   # Max individual filename length
 
+# --- Async process jobs ---
+# Jobs: {job_id: {'status': 'processing'|'done'|'error', 'result': ..., 'status_code': ..., 'error': ..., 'created_at': float}}
+_process_jobs = {}
+_process_jobs_lock = threading.Lock()
+_PROCESS_JOB_TTL = 7200  # 2 hours
+
+def _cleanup_expired_jobs():
+    """Remove stale completed/errored jobs older than TTL."""
+    cutoff = time.time() - _PROCESS_JOB_TTL
+    with _process_jobs_lock:
+        expired = [jid for jid, j in _process_jobs.items() if j.get('created_at', 0) < cutoff]
+        for jid in expired:
+            del _process_jobs[jid]
+
 def _cleanup_expired_sessions():
     """Remove expired presigned sessions from memory."""
     now = time.time()
@@ -840,16 +905,49 @@ def _cleanup_s3_session(session_id, keys):
         _presign_sessions.pop(session_id, None)
 
 
+def _run_process_job(job_id, session_id, keys, work_dir, prefix, album_override=None):
+    """Background worker: download S3 files and run import pipeline."""
+    try:
+        for key in keys:
+            rel = key[len(prefix):]
+            local_path = os.path.join(work_dir, rel)
+            os.makedirs(os.path.dirname(local_path), exist_ok=True)
+            s3_client.download_file(S3_BUCKET, key, local_path)
+
+        result, status_code = _import_from_directory(work_dir, album_override=album_override)
+        _cleanup_s3_session(session_id, keys)
+
+        with _process_jobs_lock:
+            _process_jobs[job_id]['status'] = 'done'
+            _process_jobs[job_id]['result'] = result
+            _process_jobs[job_id]['status_code'] = status_code
+
+    except Exception as e:
+        traceback.print_exc()
+        _cleanup_s3_session(session_id, keys)
+        with _process_jobs_lock:
+            _process_jobs[job_id]['status'] = 'error'
+            _process_jobs[job_id]['error'] = str(e)
+    finally:
+        if work_dir and os.path.isdir(work_dir):
+            try:
+                shutil.rmtree(work_dir)
+            except Exception as cleanup_err:
+                print(f"Warning: temp dir cleanup failed: {cleanup_err}")
+
+
 @app.route('/upload/process', methods=['POST'])
 @admin_required()
 def upload_process():
-    """Download files from S3 staging area and run the import pipeline."""
+    """Start async import: download files from S3 staging and run import pipeline in background.
+    Returns 202 with job_id immediately; poll /upload/status/<job_id> for completion."""
     if not s3_client:
         return jsonify({'error': 'S3 is not configured on this server'}), 501
 
     data = request.get_json(silent=True) or {}
     session_id = data.get('session_id', '')
     keys = data.get('keys', [])
+    album_override = data.get('album', '').strip() or None
     if not session_id or not keys:
         return jsonify({'error': 'Provide "session_id" and "keys"'}), 400
 
@@ -868,36 +966,46 @@ def upload_process():
         if not k.startswith(prefix):
             return jsonify({'error': f'Key does not belong to session: {k}'}), 400
 
-    work_dir = None
-    try:
-        work_dir = tempfile.mkdtemp()
+    _cleanup_expired_jobs()
 
-        # Download each file from S3 to work_dir, preserving relative paths
-        for key in keys:
-            rel = key[len(prefix):]  # filename after session prefix
-            local_path = os.path.join(work_dir, rel)
-            os.makedirs(os.path.dirname(local_path), exist_ok=True)
-            s3_client.download_file(S3_BUCKET, key, local_path)
+    job_id = str(uuid.uuid4())
+    work_dir = tempfile.mkdtemp()
 
-        result, status_code = _import_from_directory(work_dir)
+    with _process_jobs_lock:
+        _process_jobs[job_id] = {'status': 'processing', 'created_at': time.time()}
 
-        # Always clean up staging objects from S3 (success or partial failure)
-        _cleanup_s3_session(session_id, keys)
+    thread = threading.Thread(
+        target=_run_process_job,
+        args=(job_id, session_id, keys, work_dir, prefix, album_override),
+        daemon=True,
+    )
+    thread.start()
 
-        return jsonify(result), status_code
+    return jsonify({'job_id': job_id, 'status': 'processing'}), 202
 
-    except Exception as e:
-        traceback.print_exc()
-        # Clean up orphaned S3 files on failure
-        _cleanup_s3_session(session_id, keys)
-        return jsonify({'error': str(e)}), 500
 
-    finally:
-        if work_dir and os.path.isdir(work_dir):
-            try:
-                shutil.rmtree(work_dir)
-            except Exception as cleanup_err:
-                print(f"Warning: temp dir cleanup failed: {cleanup_err}")
+@app.route('/upload/status/<job_id>', methods=['GET'])
+@admin_required()
+def upload_status(job_id):
+    """Poll the status of an async /upload/process job."""
+    with _process_jobs_lock:
+        job = _process_jobs.get(job_id)
+
+    if not job:
+        return jsonify({'error': 'Job not found or expired'}), 404
+
+    status = job['status']
+    if status == 'processing':
+        return jsonify({'status': 'processing'}), 202
+
+    # Job finished — remove from store and return result
+    with _process_jobs_lock:
+        _process_jobs.pop(job_id, None)
+
+    if status == 'done':
+        return jsonify({'status': 'done', **job['result']}), job.get('status_code', 200)
+
+    return jsonify({'status': 'error', 'error': job.get('error', 'Unknown error')}), 500
 
 
 @app.route('/upload/folder/confirm-art', methods=['POST'])
@@ -988,6 +1096,39 @@ def remove_duplicates():
         return jsonify({'error': f'Failed to remove duplicates: {str(e)}'}), 500
 
 
+def _update_audio_tags(filepath, title=None, artist=None, album=None):
+    """Write metadata tags to an audio file, with raw-ID3 fallback for WAV files."""
+    try:
+        from mutagen import File
+        from mutagen.wave import WAVE
+        from mutagen.id3 import TIT2, TPE1, TALB
+        audio = File(filepath, easy=True)
+        if audio is None:
+            return
+        try:
+            if title is not None:
+                audio['title'] = title
+            if artist is not None:
+                audio['artist'] = artist
+            if album is not None:
+                audio['album'] = album
+            audio.save()
+        except (TypeError, KeyError):
+            raw = File(filepath)
+            if isinstance(raw, WAVE):
+                if raw.tags is None:
+                    raw.add_tags()
+                if title is not None:
+                    raw.tags.add(TIT2(encoding=3, text=[title]))
+                if artist is not None:
+                    raw.tags.add(TPE1(encoding=3, text=[artist]))
+                if album is not None:
+                    raw.tags.add(TALB(encoding=3, text=[album]))
+                raw.save()
+    except Exception as e:
+        print(f"Warning: Could not update audio file metadata for {filepath}: {e}")
+
+
 @app.route('/track/<int:track_id>', methods=['PUT'])
 def update_track(track_id):
     """Update track metadata in database and audio file"""
@@ -1036,19 +1177,7 @@ def update_track(track_id):
         
         # Update audio file metadata
         if os.path.exists(track_path):
-            try:
-                from mutagen import File
-                audio = File(track_path, easy=True)
-                if audio is not None:
-                    if title is not None:
-                        audio['title'] = title
-                    if artist is not None:
-                        audio['artist'] = artist
-                    if album is not None:
-                        audio['album'] = album
-                    audio.save()
-            except Exception as e:
-                print(f"Warning: Could not update audio file metadata: {e}")
+            _update_audio_tags(track_path, title=title, artist=artist, album=album)
         
         return jsonify({
             'message': 'Track updated successfully',
@@ -1152,17 +1281,7 @@ def batch_update_tracks():
             
             # Update audio file metadata
             if os.path.exists(track_path):
-                try:
-                    from mutagen import File
-                    audio = File(track_path, easy=True)
-                    if audio is not None:
-                        if artist:
-                            audio['artist'] = artist
-                        if album:
-                            audio['album'] = album
-                        audio.save()
-                except Exception as e:
-                    print(f"Warning: Could not update audio file metadata for {track_id}: {e}")
+                _update_audio_tags(track_path, artist=artist, album=album)
         
         conn.commit()
         conn.close()
@@ -1903,7 +2022,10 @@ def passkey_register_verify():
     except Exception as e:
         if current_user_id in passkey_challenges:
             del passkey_challenges[current_user_id]
-        return jsonify({'error': str(e)}), 400
+        err_msg = str(e)
+        if 'already registered' in err_msg.lower() or 'credentials already' in err_msg.lower():
+            err_msg = 'This passkey is already registered to your account. Try a different device or passkey, or remove the existing one first.'
+        return jsonify({'error': err_msg}), 400
 
 @app.route('/auth/passkey/login/options', methods=['POST'])
 def passkey_login_options():
@@ -2742,33 +2864,31 @@ def stream_track(track_id):
         if isinstance(file_path, bytes):
             file_path = file_path.decode('utf-8', errors='ignore')
 
-        # --- S3 Strategy ---
+        # --- S3 Strategy: proxy stream so browser gets same-origin response (no CORS on S3) ---
         if s3_client:
-            # Assumes file structure in S3 mirrors local 'music/' folder
-            # Key: music/Artist/Album/File.mp3
-            # We try to determine the relative path from the current working directory to form the key
             try:
-                # If path is absolute, make it relative to CWD (app root)
                 rel_path = os.path.relpath(file_path, start=os.getcwd())
-                if rel_path.startswith('..'):
-                    # Fallback if outside root, maybe just use basename?
-                    # For now, let's assume standard structure: ./music/...
-                    # If outside, we can't easily guess key without DB storing S3 key.
-                    # Fallback to local serve.
-                    pass 
-                else:
-                    # Generate Presigned URL
+                if not rel_path.startswith('..'):
+                    range_header = request.headers.get('Range')
+                    params = {'Bucket': S3_BUCKET, 'Key': rel_path}
+                    if range_header:
+                        params['Range'] = range_header
                     try:
-                        url = s3_client.generate_presigned_url(
-                            'get_object',
-                            Params={'Bucket': S3_BUCKET, 'Key': rel_path},
-                            ExpiresIn=3600 # 1 hour link
-                        )
-                        return redirect(url)
+                        resp = s3_client.get_object(**params)
+                        body = resp['Body']
+                        content_type = resp.get('ContentType') or mimetypes.guess_type(rel_path)[0] or 'application/octet-stream'
+                        if rel_path.lower().endswith('.wav'):
+                            content_type = 'audio/x-wav'
+                        status = resp.get('ResponseMetadata', {}).get('HTTPStatusCode', 200)
+                        headers = {}
+                        if 'ContentLength' in resp:
+                            headers['Content-Length'] = str(resp['ContentLength'])
+                        if 'ContentRange' in resp:
+                            headers['Content-Range'] = resp['ContentRange']
+                        return Response(body, status=status, mimetype=content_type, headers=headers, direct_passthrough=True)
                     except ClientError as e:
-                        print(f"S3 Gen URL Error: {e}")
-                        # Fallback to local
-            except ValueError:
+                        print(f"S3 get_object error: {e}")
+            except (ValueError, OSError):
                 pass
 
         # --- Local Strategy ---
