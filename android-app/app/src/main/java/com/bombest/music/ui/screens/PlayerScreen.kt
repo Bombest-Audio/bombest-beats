@@ -10,6 +10,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -91,6 +93,7 @@ fun PlayerScreen(
     onClose: () -> Unit,
     loopStartMs: Long? = null,
     loopEndMs: Long? = null,
+    bpm: Float = 0f,
     onSetLoopStart: () -> Unit = {},
     onSetLoopEnd: () -> Unit = {},
     onClearLoop: () -> Unit = {},
@@ -114,74 +117,83 @@ fun PlayerScreen(
     ) {
         // Canvas background (GIF/video like Spotify Canvas)
         CanvasBackground(trackId = currentMediaItem.mediaId)
-        // Content
+        val scrollState = rememberScrollState()
+        // Middle section scrolls so play/pause/transport never clip off-screen on short displays.
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 24.dp, vertical = 24.dp)
-                .windowInsetsPadding(WindowInsets.safeDrawing), // Ensure content doesn't overlap system bars
+                .padding(horizontal = 24.dp, vertical = 16.dp)
+                .windowInsetsPadding(WindowInsets.safeDrawing),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            TopRow(onClose = onClose, onRegisterPasskey = onRegisterPasskey)
-
-            Spacer(Modifier.height(16.dp))
-
-            ArtworkWithProgress(
-                imageSize = 300.dp, // Slightly larger for impact
-                currentPosition = currentPosition,
-                duration = duration,
-                onSeek = onSeek,
-                artworkUri = currentMediaItem.mediaMetadata.artworkUri
-            )
-
-            Spacer(Modifier.height(24.dp))
-
-            TimeRow(formatDuration(currentPosition), formatDuration(duration))
-
-            Spacer(Modifier.height(12.dp))
-
-            LoopControls(
-                loopStartMs = loopStartMs,
-                loopEndMs = loopEndMs,
-                onSetLoopStart = onSetLoopStart,
-                onSetLoopEnd = onSetLoopEnd,
-                onClearLoop = onClearLoop
-            )
-
-            Spacer(Modifier.height(20.dp))
-
-            MidControlsRow(
-                isFavorite = isFavorite,
-                isDownloaded = isDownloaded,
-                onFavorite = onFavorite,
-                onDownload = onDownload,
-                onRemoveDownload = onRemoveDownload,
-                onShare = onShare
-            )
-
-            Spacer(Modifier.height(32.dp))
-
-            // Graffiti Waveform Visualizer
-            Box(
+            Column(
                 modifier = Modifier
+                    .weight(1f)
                     .fillMaxWidth()
-                    .height(120.dp)
+                    .verticalScroll(scrollState),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                GraffitiWaveformVisualizer(
-                    amplitudes = amplitudes,
-                    isPlaying = isPlaying,
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
+                TopRow(onClose = onClose, onRegisterPasskey = onRegisterPasskey)
 
-            Spacer(Modifier.weight(1f)) // Push controls to bottom
+                Spacer(Modifier.height(16.dp))
+
+                ArtworkWithProgress(
+                    imageSize = 300.dp,
+                    currentPosition = currentPosition,
+                    duration = duration,
+                    onSeek = onSeek,
+                    artworkUri = currentMediaItem.mediaMetadata.artworkUri
+                )
+
+                Spacer(Modifier.height(24.dp))
+
+                TimeRow(formatDuration(currentPosition), formatDuration(duration))
+
+                Spacer(Modifier.height(12.dp))
+
+                LoopControls(
+                    loopStartMs = loopStartMs,
+                    loopEndMs = loopEndMs,
+                    bpm = bpm,
+                    onSetLoopStart = onSetLoopStart,
+                    onSetLoopEnd = onSetLoopEnd,
+                    onClearLoop = onClearLoop
+                )
+
+                Spacer(Modifier.height(20.dp))
+
+                MidControlsRow(
+                    isFavorite = isFavorite,
+                    isDownloaded = isDownloaded,
+                    onFavorite = onFavorite,
+                    onDownload = onDownload,
+                    onRemoveDownload = onRemoveDownload,
+                    onShare = onShare
+                )
+
+                Spacer(Modifier.height(24.dp))
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(120.dp)
+                ) {
+                    GraffitiWaveformVisualizer(
+                        amplitudes = amplitudes,
+                        isPlaying = isPlaying,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+
+                Spacer(Modifier.height(16.dp))
+            }
 
             SongInfo(
                 title = currentMediaItem.mediaMetadata.title?.toString() ?: "Unknown",
                 artist = currentMediaItem.mediaMetadata.artist?.toString() ?: "Unknown Artist"
             )
 
-            Spacer(Modifier.height(32.dp))
+            Spacer(Modifier.height(16.dp))
 
             TransportControls(
                 isPlaying = isPlaying,
@@ -193,8 +205,8 @@ fun PlayerScreen(
                 isShuffleEnabled = isShuffleEnabled,
                 repeatMode = repeatMode
             )
-            
-            Spacer(Modifier.height(32.dp))
+
+            Spacer(Modifier.height(8.dp))
         }
     }
 }
@@ -510,6 +522,7 @@ fun TimeRow(start: String, end: String) {
 fun LoopControls(
     loopStartMs: Long?,
     loopEndMs: Long?,
+    bpm: Float = 0f,
     onSetLoopStart: () -> Unit,
     onSetLoopEnd: () -> Unit,
     onClearLoop: () -> Unit
@@ -519,6 +532,15 @@ fun LoopControls(
     val inactiveColor = Color.White.copy(alpha = 0.5f)
 
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        // BPM badge + snap indicator
+        if (bpm > 0f) {
+            Text(
+                text = "${bpm.toInt()} BPM · snap to bar",
+                fontSize = 10.sp,
+                color = accentColor.copy(alpha = 0.7f),
+                modifier = Modifier.padding(bottom = 4.dp)
+            )
+        }
         // Loop marker label when active
         if (loopActive) {
             Text(
@@ -541,13 +563,13 @@ fun LoopControls(
                     1.dp,
                     if (loopStartMs != null) accentColor else inactiveColor
                 ),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                modifier = Modifier.height(30.dp)
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                modifier = Modifier.heightIn(min = 36.dp)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     Icon(
                         imageVector = Icons.Default.SkipPrevious,
-                        contentDescription = null,
+                        contentDescription = "Set loop start",
                         tint = if (loopStartMs != null) accentColor else inactiveColor,
                         modifier = Modifier.size(13.dp)
                     )
@@ -567,8 +589,8 @@ fun LoopControls(
                     1.dp,
                     if (loopEndMs != null) accentColor else inactiveColor
                 ),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                modifier = Modifier.height(30.dp)
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                modifier = Modifier.heightIn(min = 36.dp)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(
@@ -578,7 +600,7 @@ fun LoopControls(
                     )
                     Icon(
                         imageVector = Icons.Default.SkipNext,
-                        contentDescription = null,
+                        contentDescription = "Set loop end",
                         tint = if (loopEndMs != null) accentColor else inactiveColor,
                         modifier = Modifier.size(13.dp)
                     )
@@ -589,7 +611,7 @@ fun LoopControls(
             if (loopActive) {
                 IconButton(
                     onClick = onClearLoop,
-                    modifier = Modifier.size(30.dp)
+                    modifier = Modifier.size(40.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Default.Close,

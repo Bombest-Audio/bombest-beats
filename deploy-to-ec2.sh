@@ -26,6 +26,10 @@ echo "=== 2. Deploy container to EC2 ($REGION) ==="
 "$SCRIPT_DIR/deploy-container-to-ec2.sh" "$REGION"
 
 echo ""
-echo "Done. Backend is live on EC2."
+echo "=== 3. Deploy nginx config to EC2 ($REGION) ==="
+"$SCRIPT_DIR/deploy-nginx-to-ec2.sh" "$REGION"
+
+echo ""
+echo "Done. Backend + nginx are live on EC2."
 echo ""
 echo "Frontend: Run ./scripts/deploy-frontend.sh to deploy bom.best/beats to S3/CloudFront."

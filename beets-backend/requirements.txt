@@ -17,6 +17,7 @@ mediafile==0.13.0
 musicbrainzngs==0.7.1
 mutagen==1.47.0
 numpy>=1.24.4
+librosa>=0.10.0
 platformdirs==4.5.1
 PyJWT==2.10.1
 PyYAML==6.0.3

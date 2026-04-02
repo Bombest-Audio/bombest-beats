@@ -24,8 +24,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.bombest.music.ui.theme.BombestPlaylistRootBackground
+import com.bombest.music.ui.theme.BombestRed
+import com.bombest.music.ui.theme.BombestTopAppBarNavy
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import android.net.Uri
@@ -64,12 +69,12 @@ fun PlaylistsScreen(
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color(0xFF15192A),
+                    containerColor = BombestTopAppBarNavy,
                     titleContentColor = Color.White
                 )
             )
         },
-        containerColor = Color(0xFF0A0D14)
+        containerColor = BombestPlaylistRootBackground
     ) { padding ->
         Box(
             modifier = Modifier
@@ -77,15 +82,23 @@ fun PlaylistsScreen(
                 .padding(padding)
         ) {
             if (isLoading) {
-                CircularProgressIndicator(
-                    modifier = Modifier.align(Alignment.Center),
-                    color = Color(0xFFE90060)
-                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .semantics { contentDescription = "Loading playlists" }
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.align(Alignment.Center),
+                        color = BombestRed
+                    )
+                }
             } else if (playlists.isEmpty()) {
                 Text(
                     text = "No playlists yet.\nTap + to create one!",
                     color = Color.Gray,
-                    modifier = Modifier.align(Alignment.Center)
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .semantics { contentDescription = "No playlists yet. Tap add to create one." }
                 )
             } else {
                 LazyColumn(

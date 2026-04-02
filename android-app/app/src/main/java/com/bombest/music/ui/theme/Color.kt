@@ -16,6 +16,13 @@ val BombestBorder = Color(0xFF2D3250)       // Border color
 val BombestTextPrimary = Color(0xFFFFFFFF)  // White text
 val BombestTextSecondary = Color(0xFF9CA3AF) // Faded concrete gray
 
+// Auth / scaffold (login, register, playlist chrome) — use instead of ad-hoc hex in screens
+val BombestLoginScaffoldBackground = Color(0xFF15192A)
+val BombestCardElevated = Color(0xFF1E2235)
+val BombestBrandOrange = Color(0xFFFF7A00)
+val BombestPlaylistRootBackground = Color(0xFF0A0D14)
+val BombestTopAppBarNavy = Color(0xFF15192A)
+
 // Graffiti gradient colors
 val GraffitiOrange = Color(0xFFFF6B35)      // Fiery orange
 val GraffitiMagenta = Color(0xFFE90060)     // Magenta

@@ -2,9 +2,11 @@ package com.bombest.music.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -12,7 +14,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -24,7 +25,10 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import com.bombest.music.ui.theme.BombestBrandOrange
+import com.bombest.music.ui.theme.BombestCardElevated
+import com.bombest.music.ui.theme.BombestLoginScaffoldBackground
+import com.bombest.music.ui.theme.BombestRed
 
 @Composable
 fun LoginScreen(
@@ -43,18 +47,24 @@ fun LoginScreen(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(Color(0xFF15192A)),
+            .background(BombestLoginScaffoldBackground)
+            .imePadding(),
         contentAlignment = Alignment.Center
     ) {
-        Card(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(24.dp),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = Color(0xFF1E2235)
-            )
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 24.dp, vertical = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = BombestCardElevated
+                )
+            ) {
             Column(
                 modifier = Modifier.padding(32.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
@@ -62,14 +72,13 @@ fun LoginScreen(
                 // Title
                 Text(
                     text = "Bombest Beats",
-                    fontSize = 28.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFFFF7A00)
+                    style = MaterialTheme.typography.titleLarge,
+                    color = BombestBrandOrange
                 )
                 
                 Text(
                     text = "Welcome Back",
-                    fontSize = 16.sp,
+                    style = MaterialTheme.typography.bodyLarge,
                     color = Color.White.copy(alpha = 0.6f),
                     modifier = Modifier.padding(top = 8.dp, bottom = 24.dp)
                 )
@@ -81,7 +90,7 @@ fun LoginScreen(
                             .fillMaxWidth()
                             .padding(bottom = 16.dp),
                         colors = CardDefaults.cardColors(
-                            containerColor = Color(0xFFE90060).copy(alpha = 0.2f)
+                            containerColor = BombestRed.copy(alpha = 0.2f)
                         ),
                         shape = RoundedCornerShape(8.dp)
                     ) {
@@ -101,10 +110,10 @@ fun LoginScreen(
                     label = { Text("Username") },
                     modifier = Modifier.fillMaxWidth(),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = Color(0xFFE90060),
+                        focusedBorderColor = BombestRed,
                         unfocusedBorderColor = Color.White.copy(alpha = 0.2f),
-                        focusedLabelColor = Color(0xFFE90060),
-                        cursorColor = Color(0xFFE90060)
+                        focusedLabelColor = BombestRed,
+                        cursorColor = BombestRed
                     ),
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
@@ -131,10 +140,10 @@ fun LoginScreen(
                         }
                     },
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = Color(0xFFE90060),
+                        focusedBorderColor = BombestRed,
                         unfocusedBorderColor = Color.White.copy(alpha = 0.2f),
-                        focusedLabelColor = Color(0xFFE90060),
-                        cursorColor = Color(0xFFE90060)
+                        focusedLabelColor = BombestRed,
+                        cursorColor = BombestRed
                     ),
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(
@@ -170,7 +179,7 @@ fun LoginScreen(
                             .fillMaxSize()
                             .background(
                                 brush = Brush.horizontalGradient(
-                                    colors = listOf(Color(0xFFFF7A00), Color(0xFFE90060))
+                                    colors = listOf(BombestBrandOrange, BombestRed)
                                 ),
                                 shape = RoundedCornerShape(8.dp)
                             ),
@@ -242,9 +251,10 @@ fun LoginScreen(
                 TextButton(onClick = onNavigateToRegister) {
                     Text(
                         text = "Don't have an account? Register",
-                        color = Color(0xFFE90060)
+                        color = BombestRed
                     )
                 }
+            }
             }
         }
     }

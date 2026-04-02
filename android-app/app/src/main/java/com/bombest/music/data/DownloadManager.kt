@@ -9,7 +9,11 @@ import androidx.media3.database.StandaloneDatabaseProvider
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
+import androidx.media3.common.util.BitmapLoader
+import androidx.media3.datasource.DataSourceBitmapLoader
 import androidx.media3.datasource.okhttp.OkHttpDataSource
+import androidx.media3.session.CacheBitmapLoader
+import com.google.common.util.concurrent.MoreExecutors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -18,6 +22,7 @@ import okhttp3.OkHttpClient
 import java.io.File
 import java.io.FileOutputStream
 import java.net.URL
+import java.util.concurrent.Executors
 
 private val Context.downloadDataStore by preferencesDataStore(name = "downloads")
 
@@ -92,6 +97,24 @@ class DownloadManager private constructor(private val context: Context) {
             .setCache(cache)
             .setUpstreamDataSourceFactory(upstreamFactory)
             .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+    }
+
+    /**
+     * MediaSession / Android Auto artwork loader. Uses the same OkHttp client as streaming
+     * (User-Agent, optional Bearer) so CDN/WAF behavior matches audio requests; the default
+     * [DataSourceBitmapLoader] constructor uses a different HTTP stack and often fails to load art.
+     */
+    fun createSessionBitmapLoader(): BitmapLoader {
+        val executor = MoreExecutors.listeningDecorator(
+            Executors.newSingleThreadExecutor { r ->
+                Thread(r, "bombest-artwork-loader").apply { isDaemon = true }
+            }
+        )
+        val httpFactory = OkHttpDataSource.Factory(okHttpClient)
+            .setDefaultRequestProperties(
+                mapOf("User-Agent" to "BombestBeats-Android")
+            )
+        return CacheBitmapLoader(DataSourceBitmapLoader(executor, httpFactory))
     }
     
     // Downloads folder (persistent, not auto-evicted)

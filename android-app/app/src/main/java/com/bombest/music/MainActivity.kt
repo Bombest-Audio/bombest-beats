@@ -446,6 +446,7 @@ fun MainContent(
                     onClose = { isPlayerOpen = false },
                     loopStartMs = viewModel.loopStartMs.value,
                     loopEndMs = viewModel.loopEndMs.value,
+                    bpm = viewModel.bpm.value,
                     onSetLoopStart = viewModel::setLoopStart,
                     onSetLoopEnd = viewModel::setLoopEnd,
                     onClearLoop = viewModel::clearLoop

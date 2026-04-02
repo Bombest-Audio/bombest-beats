@@ -15,6 +15,16 @@ data class WaveformResponse(
     val track_id: Int
 )
 
+// Response model for beat/bar detection
+data class BeatsResponse(
+    val bpm: Float,
+    val beat_times: List<Float>,
+    val bar_times: List<Float>,
+    val beats_per_bar: Int,
+    val duration: Float,
+    val track_id: Int
+)
+
 // Dashboard models
 data class TopTrack(
     val id: Int,
@@ -54,6 +64,11 @@ interface MusicApi {
     suspend fun getWaveform(
         @Path("trackId") trackId: Int
     ): WaveformResponse
+
+    @GET("track/{trackId}/beats")
+    suspend fun getBeats(
+        @Path("trackId") trackId: Int
+    ): BeatsResponse
     
     @GET("metrics/dashboard")
     suspend fun getDashboardStats(

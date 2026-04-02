@@ -1,3 +1,4 @@
+import base64
 import errno
 import os
 import mimetypes
@@ -30,6 +31,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
 from functools import wraps
+from urllib.parse import urlparse
 
 app = Flask(__name__)
 # Load config for JWT
@@ -405,6 +407,61 @@ def get_waveform(track_id):
     
     return jsonify(waveform_data)
 
+
+def detect_beats(audio_path, beats_per_bar=4):
+    """Detect BPM, beat times, and bar boundaries using librosa."""
+    try:
+        import librosa
+        y, sr = librosa.load(audio_path, sr=22050, mono=True)
+        tempo, beat_frames = librosa.beat.beat_track(y=y, sr=sr)
+        bpm = float(tempo) if not hasattr(tempo, '__len__') else float(tempo[0])
+        beat_times = librosa.frames_to_time(beat_frames, sr=sr).tolist()
+        # Group beats into bars
+        bar_times = [beat_times[i] for i in range(0, len(beat_times), beats_per_bar)]
+        # Add track end as final bar boundary
+        duration = float(len(y) / sr)
+        if bar_times and bar_times[-1] < duration - 0.5:
+            bar_times.append(duration)
+        return {
+            'bpm': round(bpm, 1),
+            'beat_times': [round(t, 3) for t in beat_times],
+            'bar_times': [round(t, 3) for t in bar_times],
+            'beats_per_bar': beats_per_bar,
+            'duration': round(duration, 3),
+        }
+    except Exception as e:
+        print(f"Beat detection error: {e}")
+        return None
+
+
+@app.route('/track/<int:track_id>/beats', methods=['GET'])
+def get_beats(track_id):
+    """Get or generate beat/bar grid for a track. Cached as JSON."""
+    beats_file = os.path.join(WAVEFORM_FOLDER, f'{track_id}_beats.json')
+
+    if os.path.exists(beats_file):
+        with open(beats_file, 'r') as f:
+            return jsonify(json.load(f))
+
+    track_path = get_track_path(track_id)
+    if not track_path:
+        return jsonify({'error': 'Track not found'}), 404
+    if isinstance(track_path, bytes):
+        track_path = track_path.decode('utf-8')
+    if not os.path.exists(track_path):
+        return jsonify({'error': 'Audio file not found'}), 404
+
+    beats_data = detect_beats(track_path)
+    if beats_data is None:
+        return jsonify({'error': 'Beat detection failed'}), 500
+
+    beats_data['track_id'] = track_id
+    with open(beats_file, 'w') as f:
+        json.dump(beats_data, f)
+
+    return jsonify(beats_data)
+
+
 @app.route('/upload', methods=['POST'])
 @admin_required()
 def upload_file():
@@ -690,7 +747,8 @@ def upload_folder():
             return jsonify({'error': 'Provide "file" (zip) or "files"/"files[]" (multiple files)'}), 400
 
         album_override = (request.form.get('album') or '').strip() or None
-        result, status_code = _import_from_directory(extract_root, album_override=album_override)
+        user_id = get_jwt_identity()
+        result, status_code = _import_from_directory(extract_root, album_override=album_override, user_id=user_id)
         return jsonify(result), status_code
 
     except Exception as e:
@@ -705,10 +763,11 @@ def upload_folder():
                 pass
 
 
-def _import_from_directory(extract_root, album_override=None):
+def _import_from_directory(extract_root, album_override=None, user_id=None):
     """Shared import logic: scan a directory for audio/images, run beets import, return results dict.
     Used by both upload_folder (direct upload) and upload_process (presigned S3 flow).
-    album_override: if provided, use this album name instead of deriving from path."""
+    album_override: if provided, use this album name instead of deriving from path.
+    user_id: if provided with album_override, auto-create a playlist from imported tracks."""
     audio_files, images_by_dir = _scan_for_audio_and_images(extract_root)
     if not audio_files:
         return {'error': 'No audio files found (mp3, wav, ogg, flac, m4a)'}, 400
@@ -717,6 +776,10 @@ def _import_from_directory(extract_root, album_override=None):
 
     for audio_path in audio_files:
         track_name = get_track_name(os.path.basename(audio_path))
+        formatted_check = track_name.replace('_', ' ').strip().lower()
+        if not formatted_check:
+            results['skipped'].append({'file': os.path.basename(audio_path), 'reason': 'could not determine track name'})
+            continue
         existing = check_duplicate(track_name)
         if existing:
             results['skipped'].append({'file': os.path.basename(audio_path), 'reason': 'duplicate'})
@@ -799,6 +862,24 @@ def _import_from_directory(extract_root, album_override=None):
 
         results['imported'].append({'track_name': track_name, 'id': new_id})
 
+    # Auto-create playlist from album upload
+    playlist_info = None
+    if album_override and user_id and results['imported']:
+        try:
+            conn = sqlite3.connect(USERS_DB)
+            cursor = conn.cursor()
+            cursor.execute("INSERT INTO playlists (name, user_id, is_public) VALUES (?, ?, 1)",
+                           (album_override, int(user_id)))
+            playlist_id = cursor.lastrowid
+            for i, track in enumerate(results['imported']):
+                cursor.execute("INSERT INTO playlist_tracks (playlist_id, track_id, position) VALUES (?, ?, ?)",
+                               (playlist_id, track['id'], i + 1))
+            conn.commit()
+            conn.close()
+            playlist_info = {'id': playlist_id, 'name': album_override, 'count': len(results['imported'])}
+        except Exception as e:
+            print(f"Warning: failed to auto-create playlist: {e}")
+
     response = {
         'message': f"Imported {len(results['imported'])} tracks",
         'imported': results['imported'],
@@ -808,6 +889,8 @@ def _import_from_directory(extract_root, album_override=None):
     }
     if results['s3_warnings']:
         response['s3_warnings'] = results['s3_warnings']
+    if playlist_info:
+        response['playlist'] = playlist_info
 
     return response, 200
 
@@ -908,7 +991,7 @@ def _cleanup_s3_session(session_id, keys):
         _presign_sessions.pop(session_id, None)
 
 
-def _run_process_job(job_id, session_id, keys, work_dir, prefix, album_override=None):
+def _run_process_job(job_id, session_id, keys, work_dir, prefix, album_override=None, user_id=None):
     """Background worker: download S3 files and run import pipeline."""
     try:
         for key in keys:
@@ -917,7 +1000,7 @@ def _run_process_job(job_id, session_id, keys, work_dir, prefix, album_override=
             os.makedirs(os.path.dirname(local_path), exist_ok=True)
             s3_client.download_file(S3_BUCKET, key, local_path)
 
-        result, status_code = _import_from_directory(work_dir, album_override=album_override)
+        result, status_code = _import_from_directory(work_dir, album_override=album_override, user_id=user_id)
         _cleanup_s3_session(session_id, keys)
 
         with _process_jobs_lock:
@@ -951,6 +1034,7 @@ def upload_process():
     session_id = data.get('session_id', '')
     keys = data.get('keys', [])
     album_override = data.get('album', '').strip() or None
+    user_id = get_jwt_identity()
     if not session_id or not keys:
         return jsonify({'error': 'Provide "session_id" and "keys"'}), 400
 
@@ -979,7 +1063,7 @@ def upload_process():
 
     thread = threading.Thread(
         target=_run_process_job,
-        args=(job_id, session_id, keys, work_dir, prefix, album_override),
+        args=(job_id, session_id, keys, work_dir, prefix, album_override, user_id),
         daemon=True,
     )
     thread.start()
@@ -1214,16 +1298,38 @@ def delete_track(track_id):
         cursor.execute("DELETE FROM items WHERE id = ?", (track_id,))
         conn.commit()
         conn.close()
+
+        # Clean up playlist references
+        try:
+            users_conn = sqlite3.connect(USERS_DB)
+            users_cursor = users_conn.cursor()
+            users_cursor.execute("DELETE FROM playlist_tracks WHERE track_id = ?", (track_id,))
+            users_conn.commit()
+            users_conn.close()
+        except Exception as e:
+            print(f"Warning: playlist_tracks cleanup failed for track {track_id}: {e}")
         
         # Delete waveform cache
         waveform_file = os.path.join(WAVEFORM_FOLDER, f'{track_id}.json')
         if os.path.exists(waveform_file):
             os.remove(waveform_file)
-        
-        # Optionally delete file from disk (comment out if you want to keep files)
-        # if os.path.exists(track_path):
-        #     os.remove(track_path)
-        
+
+        # Delete local file
+        if os.path.exists(track_path):
+            try:
+                os.remove(track_path)
+            except Exception as e:
+                print(f"Warning: could not delete local file {track_path}: {e}")
+
+        # Delete from S3
+        if s3_client:
+            try:
+                rel_path = os.path.relpath(track_path, start=os.getcwd())
+                if not rel_path.startswith('..'):
+                    s3_client.delete_object(Bucket=S3_BUCKET, Key=rel_path)
+            except Exception as e:
+                print(f"Warning: S3 delete failed for track {track_id}: {e}")
+
         return jsonify({
             'message': 'Track deleted successfully',
             'track_id': track_id
@@ -1407,7 +1513,7 @@ def get_library():
         cursor = conn.cursor()
         try:
             cursor.execute(
-                "SELECT id, title, artist, album, album_id, path FROM items ORDER BY track ASC, id ASC"
+                "SELECT id, title, artist, album, album_id, path, bpm FROM items ORDER BY track ASC, id ASC"
             )
             rows = cursor.fetchall()
         except sqlite3.OperationalError as e:
@@ -1436,6 +1542,7 @@ def get_library():
                 'album_id': row['album_id'],
                 'path': path_key,
                 'stream_url': f'/stream/{item_id}',
+                'bpm': row['bpm'] or 0,
             }
             if item_id in canvas_track_ids:
                 item['canvas_url'] = f'/track/{item_id}/canvas'
@@ -1563,19 +1670,17 @@ def delete_loop(loop_id):
         conn.close()
         return jsonify({'error': 'Loop not found'}), 404
         
-    if row[0] != current_user_id: # And not admin FIXME
+    cursor.execute("SELECT role FROM users WHERE id = ?", (current_user_id,))
+    role_row = cursor.fetchone()
+    user_role = role_row[0] if role_row else 'user'
+    if row[0] != current_user_id and user_role != 'admin':
         conn.close()
         return jsonify({'error': 'Unauthorized'}), 403
-        
+
     cursor.execute('DELETE FROM loop_points WHERE id = ?', (loop_id,))
     conn.commit()
     conn.close()
     return jsonify({'message': 'Loop deleted'}), 200
-
-# Fix path to be absolute or relative to known location
-# We know it's in ~/bombest-beats/beets-backend/music/library.db
-# os.getcwd() is where we run script from.
-LIBRARY_DB = os.path.join(os.getcwd(), 'music', 'library.db')
 
 @app.route('/tracks/<int:track_id>/lyrics', methods=['GET'])
 @jwt_required()
@@ -1701,10 +1806,13 @@ def delete_comment(comment_id):
         conn.close()
         return jsonify({'error': 'Comment not found'}), 404
         
-    if row[0] != current_user_id: # And not admin FIXME
+    cursor.execute("SELECT role FROM users WHERE id = ?", (current_user_id,))
+    role_row = cursor.fetchone()
+    user_role = role_row[0] if role_row else 'user'
+    if row[0] != current_user_id and user_role != 'admin':
         conn.close()
         return jsonify({'error': 'Unauthorized'}), 403
-        
+
     cursor.execute('DELETE FROM comments WHERE id = ?', (comment_id,))
     conn.commit()
     conn.close()
@@ -1859,7 +1967,6 @@ def me():
     return jsonify({'error': 'User not found'}), 404
 
 # ==================== PASSKEY / WEBAUTHN ====================
-import base64
 from webauthn import (
     generate_registration_options,
     verify_registration_response,
@@ -1881,8 +1988,6 @@ RP_ORIGIN_WEB = "https://beats.bom.best"
 # Android origin: android:apk-key-hash:<base64url of SHA256 fingerprint>
 # SHA256: 2C:A4:5B:A8:27:2C:C9:57:F9:AC:0D:DA:85:D5:F1:CF:D9:DF:F8:49:34:C8:58:52:4B:C4:34:5B:30:99:36:E8
 # Convert hex to bytes then base64url
-import base64
-from urllib.parse import urlparse
 _android_sha256_hex = "2CA45BA8272CC957F9AC0DDA85D5F1CFD9DFF84934C858524BC4345B309936E8"
 _android_sha256_bytes = bytes.fromhex(_android_sha256_hex)
 RP_ORIGIN_ANDROID = "android:apk-key-hash:" + base64.urlsafe_b64encode(_android_sha256_bytes).decode().rstrip('=')

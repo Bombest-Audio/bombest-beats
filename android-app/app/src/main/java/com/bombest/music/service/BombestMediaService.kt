@@ -16,8 +16,10 @@ import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
 import com.bombest.music.MainActivity
 import com.bombest.music.R
+import com.bombest.music.data.AuthPreferences
 import com.bombest.music.data.DownloadManager
 import com.bombest.music.data.MetricsManager
+import com.bombest.music.data.authDataStore
 import com.bombest.music.data.repository.MusicRepository
 import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
@@ -26,8 +28,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.guava.future
+import kotlinx.coroutines.runBlocking
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 
 class BombestMediaService : MediaLibraryService() {
@@ -68,19 +73,28 @@ class BombestMediaService : MediaLibraryService() {
             .setUsage(androidx.media3.common.C.USAGE_MEDIA)
             .build()
             
-        // Load Control (Optimized Buffering for faster track transitions)
+        // Load control: prior settings (1.5s / 3s) caused underruns on cellular → choppy audio.
+        // Align closer to ExoPlayer defaults for stable streaming; min buffer keeps headroom.
         val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
             .setBufferDurationsMs(
-                15_000,  // Min Buffer (reduced from 40s for faster start)
-                60_000,  // Max Buffer (reduced from 120s)
-                1_500,   // Buffer for playback (reduced from 4s - faster start)
-                3_000    // Buffer for rebuffer (reduced from 5s)
+                30_000,
+                120_000,
+                3_000,
+                5_000
             )
-            .setPrioritizeTimeOverSizeThresholds(true) // Prioritize time for smoother playback
+            .setPrioritizeTimeOverSizeThresholds(true)
             .build()
         
         // Initialize DownloadManager for caching
         val downloadManager = DownloadManager.getInstance(this)
+        runBlocking {
+            try {
+                val token = authDataStore.data.map { it[AuthPreferences.TOKEN_KEY] }.first()
+                downloadManager.setAuthToken(token)
+            } catch (_: Exception) {
+                // ignore — stream/art are public; token only affects optional headers
+            }
+        }
         
         // Initialize MetricsManager
         MetricsManager.init(this)
@@ -129,10 +143,8 @@ class BombestMediaService : MediaLibraryService() {
             }
         })
         
-        // Create a BitmapLoader for loading artwork
-        val bitmapLoader = androidx.media3.session.CacheBitmapLoader(
-            androidx.media3.datasource.DataSourceBitmapLoader(this)
-        )
+        // Same OkHttp + User-Agent as streaming so session/Android Auto can load artwork behind CDNs
+        val bitmapLoader = downloadManager.createSessionBitmapLoader()
         
         // Custom commands for shuffle/repeat
         val shuffleCommand = SessionCommand(ACTION_TOGGLE_SHUFFLE, Bundle.EMPTY)

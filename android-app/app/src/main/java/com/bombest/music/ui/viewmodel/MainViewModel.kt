@@ -55,6 +55,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val loopStartMs = mutableStateOf<Long?>(null)
     val loopEndMs = mutableStateOf<Long?>(null)
 
+    // Beat grid for bar-snapping loops
+    val barTimesMs = mutableStateOf<List<Long>>(emptyList())
+    val bpm = mutableStateOf(0f)
+
     // Internal coroutine jobs
     private var updateProgressJob: kotlinx.coroutines.Job? = null
     private val scope = viewModelScope
@@ -140,7 +144,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 override fun onFftDataCapture(visualizer: android.media.audiofx.Visualizer?, fft: ByteArray?, samplingRate: Int) {
                      // Not using FFT - waveform is more reliable
                 }
-            }, android.media.audiofx.Visualizer.getMaxCaptureRate(), true, false) // waveform=true, fft=false
+            },
+                // Max rate hammers CPU and can contend with ExoPlayer; use same compromise as AudioVisualizer
+                android.media.audiofx.Visualizer.getMaxCaptureRate() * 2 / 3,
+                true,
+                false
+            ) // waveform=true, fft=false
             
             visualizer?.enabled = true
             android.util.Log.d("MainViewModel", "Visualizer enabled: ${visualizer?.enabled}")
@@ -155,7 +164,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // Throttling & Simulation
     private var lastVisualizerUpdate = 0L
-    private val VISUALIZER_UPDATE_INTERVAL = 30L // ~33fps for smoother updates
+    private val VISUALIZER_UPDATE_INTERVAL = 50L // ~20fps — less main-thread churn vs audio decode
     private var isVisualizerActive = false
     private var simulationJob: kotlinx.coroutines.Job? = null
 
@@ -275,6 +284,36 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private fun fetchBeats(trackId: Int) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val response = api.getBeats(trackId)
+                barTimesMs.value = response.bar_times.map { (it * 1000).toLong() }
+                bpm.value = response.bpm
+            } catch (e: Exception) {
+                android.util.Log.e("MainViewModel", "Failed to fetch beats", e)
+                barTimesMs.value = emptyList()
+                bpm.value = 0f
+            }
+        }
+    }
+
+    /** Snap a position (ms) to the nearest bar boundary. */
+    private fun snapToBarMs(posMs: Long): Long {
+        val bars = barTimesMs.value
+        if (bars.isEmpty()) return posMs
+        var closest = bars[0]
+        var minDist = kotlin.math.abs(posMs - closest)
+        for (bar in bars) {
+            val dist = kotlin.math.abs(posMs - bar)
+            if (dist < minDist) {
+                minDist = dist
+                closest = bar
+            }
+        }
+        return closest
+    }
+
     private fun startWaveformAnimationLoop() {
         if (simulationJob?.isActive == true) return
         simulationJob = viewModelScope.launch(Dispatchers.Default) {
@@ -385,9 +424,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 updateDuration()
                 clearLoop() // Clear A-B loop when track changes
 
-                // Fetch waveform for new track
+                // Fetch waveform and beat grid for new track
                 mediaItem?.mediaId?.toIntOrNull()?.let { trackId ->
                     fetchWaveform(trackId)
+                    fetchBeats(trackId)
                 }
             }
 
@@ -461,7 +501,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun setLoopStart() {
-        val pos = currentPosition.value
+        val pos = snapToBarMs(currentPosition.value)
         val dur = duration.value
         if (dur <= 0L) return
         loopStartMs.value = pos
@@ -477,7 +517,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun setLoopEnd() {
-        val pos = currentPosition.value
+        val pos = snapToBarMs(currentPosition.value)
         val dur = duration.value
         if (dur <= 0L) return
         loopEndMs.value = pos
@@ -619,16 +659,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val snapshot = playlist.toList()
             val index = snapshot.indexOfFirst { it.mediaId == mediaItem.mediaId }
             if (index != -1) {
-                // Only set media items if the player's queue doesn't match our playlist
-                val playerCount = browser.mediaItemCount
-                val playlistMatch = playerCount == snapshot.size &&
-                    (0 until playerCount).all { i ->
-                        browser.getMediaItemAt(i).mediaId == snapshot[i].mediaId
-                    }
-                if (!playlistMatch) {
-                    browser.setMediaItems(snapshot)
-                }
-                browser.seekTo(index, 0)
+                // Always set items with the target index atomically to avoid
+                // a race between async setMediaItems and seekTo.
+                browser.setMediaItems(snapshot, index, 0)
                 browser.prepare()
                 browser.play()
             } else {
