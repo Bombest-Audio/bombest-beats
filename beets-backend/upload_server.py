@@ -19,7 +19,7 @@ from flask import Flask, request, jsonify, send_file, Response
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 
-from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
+from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity, get_jwt
 import bcrypt
 import smtplib
 import yaml
@@ -94,6 +94,70 @@ def admin_required():
             return fn(*args, **kwargs)
         return decorator
     return wrapper
+
+
+def _jwt_role():
+    try:
+        return (get_jwt() or {}).get('role')
+    except Exception:
+        return None
+
+
+def ensure_playlist_schema(conn):
+    """Ensure playlists.user_id exists; backfill public catalog rows (user_id NULL) as is_public."""
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA table_info(playlists)")
+    columns = [col[1] for col in cursor.fetchall()]
+    if 'user_id' not in columns:
+        cursor.execute("ALTER TABLE playlists ADD COLUMN user_id INTEGER")
+    if 'is_public' not in columns:
+        cursor.execute("ALTER TABLE playlists ADD COLUMN is_public INTEGER DEFAULT 0")
+    conn.commit()
+    cursor.execute("UPDATE playlists SET is_public = 1 WHERE user_id IS NULL AND IFNULL(is_system, 0) = 0")
+    cursor.execute("UPDATE playlists SET is_public = 1 WHERE IFNULL(is_system, 0) = 1")
+    conn.commit()
+
+
+def get_playlist_row_dict(cursor, playlist_id):
+    cursor.execute(
+        "SELECT id, name, user_id, is_public, is_system FROM playlists WHERE id = ?",
+        (playlist_id,),
+    )
+    row = cursor.fetchone()
+    if not row:
+        return None
+    return {
+        'id': row[0],
+        'name': row[1],
+        'user_id': row[2],
+        'is_public': int(row[3] or 0),
+        'is_system': bool(row[4]) if row[4] is not None else False,
+    }
+
+
+def playlist_visible_to_user(pl, jwt_uid, jwt_role):
+    """Who may list/open a playlist (GET list, GET tracks, GET art). Admin sees all."""
+    if jwt_role == 'admin':
+        return True
+    if pl['is_system'] or pl['is_public']:
+        return True
+    if jwt_uid is None:
+        return False
+    if pl['user_id'] is not None and int(pl['user_id']) == int(jwt_uid):
+        return True
+    return False
+
+
+def playlist_editable_by_user(pl, jwt_uid, jwt_role):
+    """Who may mutate playlist rows and membership. Catalog (user_id NULL) is admin-only."""
+    if jwt_role == 'admin':
+        return True
+    if jwt_uid is None:
+        return False
+    if pl['user_id'] is not None and int(pl['user_id']) == int(jwt_uid):
+        return True
+    return False
+
 
 # Persist playlists: set DATA_DIR to a path that is volume-mounted (e.g. /app/data in Docker).
 # users.db lives in DATA_DIR; library and music stay under cwd/music so image content is used.
@@ -2407,10 +2471,14 @@ def apple_association():
 # --- Playlist Routes ---
 
 @app.route('/playlists', methods=['GET'])
+@jwt_required(optional=True)
 def get_playlists():
-    """Get all playlists"""
+    """List playlists: public/system for everyone; logged-in users also see their private playlists; admin sees all."""
     try:
+        jwt_uid = get_jwt_identity()
+        jwt_role = _jwt_role()
         conn = sqlite3.connect(USERS_DB)
+        ensure_playlist_schema(conn)
         cursor = conn.cursor()
         # Ensure art_path column exists
         cursor.execute("PRAGMA table_info(playlists)")
@@ -2428,15 +2496,41 @@ def get_playlists():
                 "ON playlists(share_token) WHERE share_token IS NOT NULL"
             )
             conn.commit()
-        cursor.execute("SELECT id, name, created_at, is_system, art_path, share_token FROM playlists ORDER BY created_at DESC")
+
+        if jwt_role == 'admin':
+            cursor.execute(
+                "SELECT id, name, created_at, is_system, art_path, share_token, user_id, IFNULL(is_public,0) "
+                "FROM playlists ORDER BY created_at DESC"
+            )
+        elif jwt_uid is not None:
+            cursor.execute(
+                "SELECT id, name, created_at, is_system, art_path, share_token, user_id, IFNULL(is_public,0) "
+                "FROM playlists WHERE IFNULL(is_public,0) = 1 OR IFNULL(is_system,0) = 1 OR user_id = ? "
+                "ORDER BY created_at DESC",
+                (int(jwt_uid),),
+            )
+        else:
+            cursor.execute(
+                "SELECT id, name, created_at, is_system, art_path, share_token, user_id, IFNULL(is_public,0) "
+                "FROM playlists WHERE IFNULL(is_public,0) = 1 OR IFNULL(is_system,0) = 1 "
+                "ORDER BY created_at DESC"
+            )
+            params = ()
+
         playlists = []
         for row in cursor.fetchall():
-            pl = {'id': row[0], 'name': row[1], 'created_at': row[2], 'is_system': bool(row[3])}
+            pl = {
+                'id': row[0],
+                'name': row[1],
+                'created_at': row[2],
+                'is_system': bool(row[3]),
+                'user_id': row[6],
+                'is_public': bool(row[7]),
+            }
             art_path = row[4] if len(row) > 4 else None
             pl['art_url'] = f"/playlists/{pl['id']}/art" if art_path else None
             pl['share_token'] = row[5] if len(row) > 5 else None
             playlists.append(pl)
-        # Get track counts for each playlist
         for pl in playlists:
             cursor.execute("SELECT COUNT(*) FROM playlist_tracks WHERE playlist_id = ?", (pl['id'],))
             pl['count'] = cursor.fetchone()[0]
@@ -2446,64 +2540,105 @@ def get_playlists():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/playlists', methods=['POST'])
+@jwt_required()
 def create_playlist():
-    """Create a new playlist. Admin can set is_public=True to publish to all users."""
+    """Create a playlist. Non-admin: private, owned by JWT user. Admin: optional is_public catalog (user_id NULL)."""
     try:
+        uid = int(get_jwt_identity())
+        role = _jwt_role() or 'user'
         data = request.get_json()
         name = data.get('name')
-        is_public = data.get('is_public', False)
+        is_public = bool(data.get('is_public', False))
         if not name:
             return jsonify({'error': 'Name is required'}), 400
-            
+        if role != 'admin':
+            is_public = False
+
         conn = sqlite3.connect(USERS_DB)
+        ensure_playlist_schema(conn)
         cursor = conn.cursor()
-        
-        # Check if is_public column exists, add if not
         cursor.execute("PRAGMA table_info(playlists)")
         columns = [col[1] for col in cursor.fetchall()]
         if 'is_public' not in columns:
             cursor.execute("ALTER TABLE playlists ADD COLUMN is_public INTEGER DEFAULT 0")
             conn.commit()
-        
-        cursor.execute("INSERT INTO playlists (name, is_public) VALUES (?, ?)", (name, 1 if is_public else 0))
+
+        if role == 'admin' and is_public:
+            cursor.execute("INSERT INTO playlists (name, is_public, user_id) VALUES (?, 1, NULL)", (name,))
+            ret_uid = None
+            out_public = True
+        else:
+            cursor.execute("INSERT INTO playlists (name, is_public, user_id) VALUES (?, 0, ?)", (name, uid))
+            ret_uid = uid
+            out_public = False
         playlist_id = cursor.lastrowid
         conn.commit()
         conn.close()
-        
-        return jsonify({'id': playlist_id, 'name': name, 'count': 0, 'is_public': is_public}), 201
+
+        return jsonify({
+            'id': playlist_id,
+            'name': name,
+            'count': 0,
+            'is_public': out_public,
+            'user_id': ret_uid,
+        }), 201
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 @app.route('/playlists/<int:playlist_id>', methods=['PUT'])
+@jwt_required()
 def update_playlist(playlist_id):
-    """Rename a playlist"""
+    """Rename a playlist (owner or admin)."""
     try:
         data = request.get_json()
         name = data.get('name')
         if not name:
             return jsonify({'error': 'Name is required'}), 400
-            
+
         conn = sqlite3.connect(USERS_DB)
+        ensure_playlist_schema(conn)
         cursor = conn.cursor()
+        pl = get_playlist_row_dict(cursor, playlist_id)
+        if not pl:
+            conn.close()
+            return jsonify({'error': 'Not found'}), 404
+        uid = get_jwt_identity()
+        role = _jwt_role()
+        if not playlist_editable_by_user(pl, uid, role):
+            conn.close()
+            return jsonify({'error': 'Forbidden'}), 403
+
         cursor.execute("UPDATE playlists SET name = ? WHERE id = ?", (name, playlist_id))
         conn.commit()
         conn.close()
-        
+
         return jsonify({'success': True})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 @app.route('/playlists/<int:playlist_id>', methods=['DELETE'])
+@jwt_required()
 def delete_playlist(playlist_id):
-    """Delete a playlist"""
+    """Delete a playlist (owner or admin)."""
     try:
         conn = sqlite3.connect(USERS_DB)
+        ensure_playlist_schema(conn)
         cursor = conn.cursor()
+        pl = get_playlist_row_dict(cursor, playlist_id)
+        if not pl:
+            conn.close()
+            return jsonify({'error': 'Not found'}), 404
+        uid = get_jwt_identity()
+        role = _jwt_role()
+        if not playlist_editable_by_user(pl, uid, role):
+            conn.close()
+            return jsonify({'error': 'Forbidden'}), 403
+
         cursor.execute("DELETE FROM playlist_tracks WHERE playlist_id = ?", (playlist_id,))
         cursor.execute("DELETE FROM playlists WHERE id = ?", (playlist_id,))
         conn.commit()
         conn.close()
-        
+
         return jsonify({'success': True})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -2517,7 +2652,17 @@ def share_playlist(playlist_id):
     """Generate a share token for a playlist. Returns share_url for sharing with others."""
     try:
         conn = sqlite3.connect(USERS_DB)
+        ensure_playlist_schema(conn)
         cursor = conn.cursor()
+        pl = get_playlist_row_dict(cursor, playlist_id)
+        if not pl:
+            conn.close()
+            return jsonify({'error': 'Playlist not found'}), 404
+        uid = get_jwt_identity()
+        role = _jwt_role()
+        if not playlist_editable_by_user(pl, uid, role):
+            conn.close()
+            return jsonify({'error': 'Forbidden'}), 403
         cursor.execute("PRAGMA table_info(playlists)")
         columns = [col[1] for col in cursor.fetchall()]
         if 'share_token' not in columns:
@@ -2549,7 +2694,17 @@ def unshare_playlist(playlist_id):
     """Revoke sharing for a playlist."""
     try:
         conn = sqlite3.connect(USERS_DB)
+        ensure_playlist_schema(conn)
         cursor = conn.cursor()
+        pl = get_playlist_row_dict(cursor, playlist_id)
+        if not pl:
+            conn.close()
+            return jsonify({'error': 'Not found'}), 404
+        uid = get_jwt_identity()
+        role = _jwt_role()
+        if not playlist_editable_by_user(pl, uid, role):
+            conn.close()
+            return jsonify({'error': 'Forbidden'}), 403
         cursor.execute("UPDATE playlists SET share_token = NULL WHERE id = ?", (playlist_id,))
         conn.commit()
         conn.close()
@@ -2636,11 +2791,19 @@ def allowed_image_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_IMAGE_EXTENSIONS
 
 @app.route('/playlists/<int:playlist_id>/art', methods=['GET'])
+@jwt_required(optional=True)
 def get_playlist_art(playlist_id):
     """Serve playlist cover image if set"""
     try:
         conn = sqlite3.connect(USERS_DB)
+        ensure_playlist_schema(conn)
         cursor = conn.cursor()
+        pl = get_playlist_row_dict(cursor, playlist_id)
+        jwt_uid = get_jwt_identity()
+        jwt_role = _jwt_role()
+        if not pl or not playlist_visible_to_user(pl, jwt_uid, jwt_role):
+            conn.close()
+            return '', 404
         cursor.execute("PRAGMA table_info(playlists)")
         columns = [col[1] for col in cursor.fetchall()]
         if 'art_path' not in columns:
@@ -2662,9 +2825,23 @@ def get_playlist_art(playlist_id):
         return '', 404
 
 @app.route('/playlists/<int:playlist_id>/art', methods=['PUT', 'POST'])
+@jwt_required()
 def set_playlist_art(playlist_id):
     """Upload playlist cover image (multipart form, file key 'image' or first file)"""
     try:
+        conn = sqlite3.connect(USERS_DB)
+        ensure_playlist_schema(conn)
+        cursor = conn.cursor()
+        pl = get_playlist_row_dict(cursor, playlist_id)
+        if not pl:
+            conn.close()
+            return jsonify({'error': 'Not found'}), 404
+        uid = get_jwt_identity()
+        role = _jwt_role()
+        if not playlist_editable_by_user(pl, uid, role):
+            conn.close()
+            return jsonify({'error': 'Forbidden'}), 403
+        conn.close()
         if 'file' not in request.files and 'image' not in request.files:
             # Some clients send as first key
             files = list(request.files.keys())
@@ -2701,16 +2878,24 @@ def set_playlist_art(playlist_id):
         return jsonify({'error': str(e)}), 500
 
 @app.route('/playlists/<int:playlist_id>/tracks', methods=['GET'])
+@jwt_required(optional=True)
 def get_playlist_tracks(playlist_id):
     """Get tracks for a playlist with full metadata"""
     try:
-        # Get track IDs from playlist DB
         conn = sqlite3.connect(USERS_DB)
+        ensure_playlist_schema(conn)
         cursor = conn.cursor()
+        pl = get_playlist_row_dict(cursor, playlist_id)
+        jwt_uid = get_jwt_identity()
+        jwt_role = _jwt_role()
+        if not pl or not playlist_visible_to_user(pl, jwt_uid, jwt_role):
+            conn.close()
+            return jsonify({'error': 'Not found'}), 404
+
         cursor.execute("SELECT track_id FROM playlist_tracks WHERE playlist_id = ? ORDER BY position ASC", (playlist_id,))
         track_ids = [row[0] for row in cursor.fetchall()]
         conn.close()
-        
+
         if not track_ids:
             return jsonify({'tracks': []})
 
@@ -2753,15 +2938,26 @@ def get_playlist_tracks(playlist_id):
         return jsonify({'error': str(e)}), 500
 
 @app.route('/playlists/<int:playlist_id>/tracks', methods=['POST'])
+@jwt_required()
 def add_tracks_to_playlist(playlist_id):
     """Add tracks to playlist"""
     try:
         data = request.get_json()
         track_ids = data.get('track_ids', [])
-        
+
         conn = sqlite3.connect(USERS_DB)
+        ensure_playlist_schema(conn)
         cursor = conn.cursor()
-        
+        pl = get_playlist_row_dict(cursor, playlist_id)
+        if not pl:
+            conn.close()
+            return jsonify({'error': 'Not found'}), 404
+        uid = get_jwt_identity()
+        role = _jwt_role()
+        if not playlist_editable_by_user(pl, uid, role):
+            conn.close()
+            return jsonify({'error': 'Forbidden'}), 403
+
         # Get current max position
         cursor.execute("SELECT MAX(position) FROM playlist_tracks WHERE playlist_id = ?", (playlist_id,))
         result = cursor.fetchone()
@@ -2784,15 +2980,26 @@ def add_tracks_to_playlist(playlist_id):
         return jsonify({'error': str(e)}), 500
 
 @app.route('/playlists/<int:playlist_id>/tracks', methods=['DELETE'])
+@jwt_required()
 def remove_tracks_from_playlist(playlist_id):
     """Remove tracks from playlist"""
     try:
         data = request.get_json()
         track_ids = data.get('track_ids', [])
-        
+
         conn = sqlite3.connect(USERS_DB)
+        ensure_playlist_schema(conn)
         cursor = conn.cursor()
-        
+        pl = get_playlist_row_dict(cursor, playlist_id)
+        if not pl:
+            conn.close()
+            return jsonify({'error': 'Not found'}), 404
+        uid = get_jwt_identity()
+        role = _jwt_role()
+        if not playlist_editable_by_user(pl, uid, role):
+            conn.close()
+            return jsonify({'error': 'Forbidden'}), 403
+
         placeholders = ','.join('?' for _ in track_ids)
         cursor.execute(f"DELETE FROM playlist_tracks WHERE playlist_id = ? AND track_id IN ({placeholders})", 
                       (playlist_id, *track_ids))
@@ -2805,6 +3012,7 @@ def remove_tracks_from_playlist(playlist_id):
         return jsonify({'error': str(e)}), 500
 
 @app.route('/playlists/system/init', methods=['POST'])
+@admin_required()
 def initialize_system_playlists():
     """Initialize All Songs and Favorites system playlists"""
     try:
@@ -2863,15 +3071,26 @@ def initialize_system_playlists():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/playlists/<int:playlist_id>/reorder', methods=['PUT'])
+@jwt_required()
 def reorder_playlist_tracks(playlist_id):
     """Reorder tracks in playlist"""
     try:
         data = request.get_json()
         track_ids = data.get('track_ids', [])  # New ordered list
-        
+
         conn = sqlite3.connect(USERS_DB)
+        ensure_playlist_schema(conn)
         cursor = conn.cursor()
-        
+        pl = get_playlist_row_dict(cursor, playlist_id)
+        if not pl:
+            conn.close()
+            return jsonify({'error': 'Not found'}), 404
+        uid = get_jwt_identity()
+        role = _jwt_role()
+        if not playlist_editable_by_user(pl, uid, role):
+            conn.close()
+            return jsonify({'error': 'Forbidden'}), 403
+
         # Delete all existing positions
         cursor.execute("DELETE FROM playlist_tracks WHERE playlist_id = ?", (playlist_id,))
         
@@ -2891,17 +3110,25 @@ def reorder_playlist_tracks(playlist_id):
         return jsonify({'error': str(e)}), 500
 
 @app.route('/playlists/<int:playlist_id>/search', methods=['GET'])
+@jwt_required(optional=True)
 def search_playlist(playlist_id):
     """Search within playlist"""
     try:
         query = request.args.get('q', '').lower()
-        
+
         if not query:
             return jsonify({'tracks': []})
-        
+
         conn = sqlite3.connect(USERS_DB)
+        ensure_playlist_schema(conn)
         cursor = conn.cursor()
-        
+        pl = get_playlist_row_dict(cursor, playlist_id)
+        jwt_uid = get_jwt_identity()
+        jwt_role = _jwt_role()
+        if not pl or not playlist_visible_to_user(pl, jwt_uid, jwt_role):
+            conn.close()
+            return jsonify({'error': 'Not found'}), 404
+
         # Get track IDs from playlist
         cursor.execute("SELECT track_id FROM playlist_tracks WHERE playlist_id = ? ORDER BY position", (playlist_id,))
         track_ids = [row[0] for row in cursor.fetchall()]

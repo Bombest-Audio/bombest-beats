@@ -2,6 +2,7 @@ package com.bombest.music.data
 
 import com.bombest.music.data.api.MusicApi
 import com.bombest.music.data.api.AuthApi
+import com.bombest.music.data.api.PlaylistApi
 import retrofit2.Retrofit
 import retrofit2.converter.moshi.MoshiConverterFactory
 import okhttp3.OkHttpClient
@@ -9,6 +10,7 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.logging.HttpLoggingInterceptor
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Network configuration with automatic failover support.
@@ -156,6 +158,57 @@ object NetworkModule {
 
     val api: MusicApi get() = retrofit.create(MusicApi::class.java)
     val authApi: AuthApi get() = retrofit.create(AuthApi::class.java)
+
+    /** Bearer token for playlist routes; updated when auth/session changes. */
+    private val playlistBearerToken = AtomicReference<String?>(null)
+
+    fun setPlaylistBearerToken(token: String?) {
+        playlistBearerToken.set(token)
+    }
+
+    private val playlistAuthClient: OkHttpClient by lazy {
+        okHttpClient.newBuilder()
+            .addInterceptor { chain ->
+                val t = playlistBearerToken.get()
+                val req = if (!t.isNullOrBlank()) {
+                    chain.request().newBuilder()
+                        .header("Authorization", "Bearer $t")
+                        .build()
+                } else {
+                    chain.request()
+                }
+                chain.proceed(req)
+            }
+            .build()
+    }
+
+    private var playlistRetrofit: Retrofit? = null
+    private var playlistRetrofitBase: String? = null
+
+    /**
+     * Playlist API: same failover/logging stack as [api], plus dynamic Bearer from [setPlaylistBearerToken].
+     * GET /playlists works without a token (public lists); mutations require login.
+     */
+    fun getPlaylistApi(): PlaylistApi {
+        val base = currentBaseUrl
+        if (playlistRetrofit == null || playlistRetrofitBase != base) {
+            playlistRetrofit = Retrofit.Builder()
+                .baseUrl(base)
+                .client(playlistAuthClient)
+                .addConverterFactory(MoshiConverterFactory.create(moshi))
+                .build()
+            playlistRetrofitBase = base
+        }
+        return playlistRetrofit!!.create(PlaylistApi::class.java)
+    }
+
+    /**
+     * @deprecated Use [getPlaylistApi] with [setPlaylistBearerToken].
+     */
+    fun createPlaylistApi(authToken: String?): PlaylistApi {
+        setPlaylistBearerToken(authToken)
+        return getPlaylistApi()
+    }
     
     fun getStreamBaseUrl(): String = currentBaseUrl.dropLast(1) // remove trailing slash
 
