@@ -26,7 +26,7 @@
   5. Sideloaded APK installs cleanly on Pixel device and runs without crashes
   6. All app features work on Pixel: streaming, auth, playback, visualizers, haptics
 
-**Plans**: TBD
+**Plans**: [`.planning/phases/01-release-build/01-PLAN.md`](phases/01-release-build/01-PLAN.md)
 
 ### Phase 2: Store Assets
 **Goal**: Visual assets produced and optimized for Play Store listing
