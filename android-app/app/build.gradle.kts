@@ -1,3 +1,5 @@
+import com.android.build.api.dsl.ApplicationExtension
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -22,10 +24,29 @@ android {
         multiDexEnabled = true
     }
 
+    signingConfigs {
+        val storePath = System.getenv("BOMBEST_RELEASE_STORE_FILE")?.trim().orEmpty()
+        val releaseStorePassword = System.getenv("BOMBEST_RELEASE_STORE_PASSWORD")?.trim().orEmpty()
+        val keyAliasEnv = System.getenv("BOMBEST_RELEASE_KEY_ALIAS")?.trim().orEmpty()
+        val releaseKeyPassword = System.getenv("BOMBEST_RELEASE_KEY_PASSWORD")?.trim().orEmpty()
+        if (storePath.isNotEmpty() && releaseStorePassword.isNotEmpty() && keyAliasEnv.isNotEmpty() && releaseKeyPassword.isNotEmpty()) {
+            val ks = file(storePath)
+            if (ks.isFile) {
+                create("release") {
+                    storeFile = ks
+                    storePassword = releaseStorePassword
+                    keyAlias = keyAliasEnv
+                    keyPassword = releaseKeyPassword
+                }
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            signingConfigs.findByName("release")?.let { signingConfig = it }
         }
     }
     compileOptions {
@@ -97,6 +118,9 @@ dependencies {
 
     implementation("androidx.documentfile:documentfile:1.0.1")
     implementation("androidx.datastore:datastore-preferences:1.0.0")
+    implementation("androidx.work:work-runtime-ktx:2.9.0")
+    implementation("androidx.car.app:app:1.4.0")
+    implementation("androidx.car.app:app-projected:1.4.0")
     implementation("com.google.guava:guava:32.1.3-android")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-guava:1.7.3")
     implementation("androidx.credentials:credentials:1.2.2")
@@ -109,4 +133,22 @@ dependencies {
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
+}
+
+gradle.taskGraph.whenReady {
+    val wantsRelease =
+        hasTask(":app:bundleRelease") ||
+            hasTask(":app:assembleRelease")
+    if (!wantsRelease) return@whenReady
+    val ext = extensions.getByType(ApplicationExtension::class.java)
+    if (ext.signingConfigs.findByName("release") == null) {
+        throw GradleException(
+            "Release signing not configured. Export all of:\n" +
+                "  BOMBEST_RELEASE_STORE_FILE — absolute path to an existing .jks / .keystore\n" +
+                "  BOMBEST_RELEASE_STORE_PASSWORD\n" +
+                "  BOMBEST_RELEASE_KEY_ALIAS\n" +
+                "  BOMBEST_RELEASE_KEY_PASSWORD\n" +
+                "See android-app/RELEASE_SIGNING.md"
+        )
+    }
 }

@@ -42,5 +42,11 @@ beets-backend/waveforms/
 # Local credentials and keys
 .local/
 
+# Release keystores (never commit)
+*.jks
+*.keystore
+keystore.properties
+**/release.keystore
+
 # Plan files (Cursor/agent)
 *.plan.md
