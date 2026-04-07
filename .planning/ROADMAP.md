@@ -11,6 +11,7 @@
 - [ ] **Phase 2: Store Assets** - Create and optimize app icon, feature graphic, screenshots
 - [ ] **Phase 3: Play Store Listing** - Create listing, complete content rating, add privacy policy
 - [ ] **Phase 4: Submission & Publication** - Upload, pass pre-launch review, publish
+- [ ] **Phase 5: E2E UI Tests** - Page objects, method chaining, AAA pattern, P0 regression flows
 
 ## Phase Details
 
@@ -84,10 +85,14 @@
 | SUBM-01 | Phase 4 | Pending |
 | SUBM-02 | Phase 4 | Pending |
 | SUBM-03 | Phase 4 | Pending |
+| TEST-01 | Phase 5 | Pending |
+| TEST-02 | Phase 5 | Pending |
+| TEST-03 | Phase 5 | Pending |
+| TEST-04 | Phase 5 | Pending |
 
 **Coverage:**
-- v1 requirements: 15 total
-- Mapped to phases: 15
+- v1 requirements: 19 total
+- Mapped to phases: 19
 - Unmapped: 0 ✓
 
 ## Progress
@@ -98,6 +103,20 @@
 | 2. Store Assets | Not started | — |
 | 3. Play Store Listing | Not started | — |
 | 4. Submission & Publication | Not started | — |
+| 5. E2E UI Tests | Not started | — |
+
+### Phase 5: E2E UI Tests
+**Goal**: P0 end-to-end UI test suite guards against regressions using page objects, method chaining, and arrange-act-assert pattern
+**Depends on**: Phase 1
+**Requirements**: TEST-01, TEST-02, TEST-03, TEST-04
+**Success criteria** (what must be TRUE):
+  1. Page object class exists for each P0 screen (Login, Library, Player, Playlists)
+  2. P0 flows pass: Login→Library→Play, Playlist CRUD, Logout
+  3. All tests use method chaining and AAA (Arrange/Act/Assert) structure
+  4. Tests compile and run via `./gradlew connectedAndroidTest` with 0 failures
+  5. No test flakiness on 3 consecutive runs
+
+**Plans**: TBD
 
 ---
 

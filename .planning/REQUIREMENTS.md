@@ -35,6 +35,13 @@
 - [ ] **SUBM-02**: App passes Play Console pre-launch report (no critical issues)
 - [ ] **SUBM-03**: App published to public Play Store and installable by anyone with the link
 
+### Testing
+
+- [ ] **TEST-01**: P0 Login flow E2E test passes (valid credentials → Library screen visible)
+- [ ] **TEST-02**: P0 Playback flow E2E test passes (Library → select track → player controls visible)
+- [ ] **TEST-03**: P0 Playlist CRUD flow E2E test passes (create → add track → delete)
+- [ ] **TEST-04**: Page objects implement method chaining and AAA pattern for all P0 screens
+
 ## v2 Requirements
 
 ### Distribution
@@ -76,12 +83,16 @@
 | SUBM-01 | Phase 4 | Pending |
 | SUBM-02 | Phase 4 | Pending |
 | SUBM-03 | Phase 4 | Pending |
+| TEST-01 | Phase 5 | Pending |
+| TEST-02 | Phase 5 | Pending |
+| TEST-03 | Phase 5 | Pending |
+| TEST-04 | Phase 5 | Pending |
 
 **Coverage:**
-- v1 requirements: 15 total
-- Mapped to phases: 15
+- v1 requirements: 19 total
+- Mapped to phases: 19
 - Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-03-30*
-*Last updated: 2026-03-30 after initial definition*
+*Last updated: 2026-04-07 after Phase 5 added*

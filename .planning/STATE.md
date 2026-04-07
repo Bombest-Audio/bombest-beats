@@ -15,6 +15,7 @@ See: `.planning/PROJECT.md` (updated 2026-03-30)
 | 2 | Store Assets | ○ Pending | — |
 | 3 | Play Store Listing | ○ Pending | — |
 | 4 | Submission & Publication | ○ Pending | — |
+| 5 | E2E UI Tests | ○ Pending | — |
 
 ## Current Position
 
@@ -30,6 +31,12 @@ See: `.planning/PROJECT.md` (updated 2026-03-30)
 ## Notes
 
 (None yet)
+
+## Accumulated Context
+
+### Roadmap Evolution
+
+- Phase 5 added: E2E UI Tests — page objects, method chaining, AAA pattern, P0 regression flows
 
 ## Blockers
 
