@@ -1293,6 +1293,7 @@ def _update_audio_tags(filepath, title=None, artist=None, album=None):
 
 
 @app.route('/track/<int:track_id>', methods=['PUT'])
+@admin_required()
 def update_track(track_id):
     """Update track metadata in database and audio file"""
     try:
@@ -1416,6 +1417,7 @@ def delete_track(track_id):
 
 
 @app.route('/tracks/batch', methods=['PUT'])
+@admin_required()
 def batch_update_tracks():
     """Update multiple tracks with the same metadata"""
     try:
@@ -1480,6 +1482,7 @@ def batch_update_tracks():
         return jsonify({'error': f'Failed to batch update tracks: {str(e)}'}), 500
 
 @app.route('/tracks/reorder', methods=['PUT'])
+@admin_required()
 def reorder_tracks():
     """Update track order based on list of IDs"""
     try:
@@ -1504,6 +1507,7 @@ def reorder_tracks():
         return jsonify({'error': f'Failed to reorder tracks: {str(e)}'}), 500
 
 @app.route('/tracks/batch', methods=['DELETE'])
+@admin_required()
 def batch_delete_tracks():
     """Delete multiple tracks from database and optionally from disk"""
     try:
