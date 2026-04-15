@@ -1,7 +1,9 @@
 package com.bombest.music.data
 
 import android.content.Context
+import android.net.Uri
 import android.util.Log
+import androidx.media3.common.MimeTypes
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -71,12 +73,15 @@ class DownloadManager private constructor(private val context: Context) {
         SimpleCache(cacheDir, cacheEvictor, databaseProvider)
     }
     
-    // OkHttp client with auth token and extended timeouts for mobile networks
+    // OkHttp client with auth token, extended timeouts, and an explicit connection pool.
+    // Pool size 10 supports concurrent streaming + preloading (default is 5).
+    // 5-min keep-alive reuses the TLS connection between track transitions.
     private val okHttpClient: OkHttpClient by lazy {
         OkHttpClient.Builder()
             .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
             .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
             .writeTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+            .connectionPool(okhttp3.ConnectionPool(10, 5, java.util.concurrent.TimeUnit.MINUTES))
             .addInterceptor { chain ->
                 val request = chain.request().newBuilder()
                 cachedToken?.let { token ->
@@ -96,7 +101,8 @@ class DownloadManager private constructor(private val context: Context) {
         CacheDataSource.Factory()
             .setCache(cache)
             .setUpstreamDataSourceFactory(upstreamFactory)
-            .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+            // No FLAG_IGNORE_CACHE_ON_ERROR: serve stale cached bytes during transient
+            // network errors rather than failing immediately → fewer buffer underruns.
     }
 
     /**
@@ -146,6 +152,45 @@ class DownloadManager private constructor(private val context: Context) {
      */
     fun getDownloadFile(trackId: String): File {
         return File(downloadsDir, "$trackId.mp3")
+    }
+
+    /**
+     * True if a non-empty local file exists (sync). Prefer this for playback routing;
+     * DataStore may be briefly out of sync with disk.
+     */
+    fun hasLocalTrackFile(trackId: String): Boolean {
+        val f = getDownloadFile(trackId)
+        return f.isFile && f.length() > 8_192L
+    }
+
+    /**
+     * Offline-first: [file://] when a download exists, otherwise the HTTPS stream URL.
+     */
+    fun playbackUriForTrack(trackId: String, streamUrl: String): Uri {
+        return if (hasLocalTrackFile(trackId)) {
+            Uri.fromFile(getDownloadFile(trackId))
+        } else {
+            Uri.parse(streamUrl)
+        }
+    }
+
+    /**
+     * MIME type for ExoPlayer: local downloads are stored as .mp3; remote uses library path.
+     */
+    fun mimeTypeForPlayback(trackId: String, pathFromApi: String?): String {
+        if (hasLocalTrackFile(trackId)) return MimeTypes.AUDIO_MPEG
+        return mimeForPath(pathFromApi)
+    }
+
+    private fun mimeForPath(path: String?): String {
+        if (path.isNullOrBlank()) return MimeTypes.AUDIO_MPEG
+        return when {
+            path.endsWith(".wav", true) -> MimeTypes.AUDIO_WAV
+            path.endsWith(".flac", true) -> MimeTypes.AUDIO_FLAC
+            path.endsWith(".m4a", true) || path.endsWith(".aac", true) -> MimeTypes.AUDIO_AAC
+            path.endsWith(".ogg", true) -> MimeTypes.AUDIO_OGG
+            else -> MimeTypes.AUDIO_MPEG
+        }
     }
     
     /**
@@ -212,11 +257,7 @@ class DownloadManager private constructor(private val context: Context) {
      * Get the URI for playback - uses local file if downloaded, otherwise stream URL.
      */
     suspend fun getPlaybackUri(trackId: String, streamUrl: String): String {
-        return if (isDownloaded(trackId)) {
-            getDownloadFile(trackId).toURI().toString()
-        } else {
-            streamUrl
-        }
+        return playbackUriForTrack(trackId, streamUrl).toString()
     }
     
     /**

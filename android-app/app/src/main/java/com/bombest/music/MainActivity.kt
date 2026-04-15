@@ -250,7 +250,7 @@ fun MainContent(
                         LibraryScreen(
                             playlist = viewModel.playlist,
                             currentMediaItem = viewModel.currentMediaItem.value,
-                            onTrackClick = { item -> 
+                            onTrackClick = { item ->
                                 if (item.mediaId == "playlists") {
                                     // Switch to Playlists screen for rich UI
                                     playlistViewModel.loadPlaylists()
@@ -260,12 +260,15 @@ fun MainContent(
                                     viewModel.browseId(item.mediaId)
                                 } else {
                                     // Play track
-                                    viewModel.playMedia(item) 
+                                    viewModel.playMedia(item)
                                 }
                             },
                             isRefreshing = viewModel.isRefreshing.value,
                             onRefresh = { viewModel.refreshLibrary() },
-                            onDelete = { item -> viewModel.playlist.remove(item) }
+                            onDelete = { item -> viewModel.playlist.remove(item) },
+                            libraryState = viewModel.libraryState.value,
+                            playbackError = viewModel.playbackError.value,
+                            onDismissError = { viewModel.playbackError.value = null }
                         )
                         
                         // Handle back button for library navigation
@@ -491,7 +494,8 @@ fun MainContent(
                     bpm = viewModel.bpm.value,
                     onSetLoopStart = viewModel::setLoopStart,
                     onSetLoopEnd = viewModel::setLoopEnd,
-                    onClearLoop = viewModel::clearLoop
+                    onClearLoop = viewModel::clearLoop,
+                    isBuffering = viewModel.isBuffering.value
                 )
             }
         }

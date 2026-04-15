@@ -42,7 +42,12 @@ class MusicRepository(private val context: android.content.Context) {
     }
     
     fun getStreamUrl(trackId: Int): String {
-        return "${NetworkModule.getStreamBaseUrl()}/stream/$trackId"
+        // Always request AAC 256 kbps for remote streams:
+        //   - WAV/FLAC/OGG (~800–1400 kbps) are transcoded server-side to 256 kbps AAC
+        //   - 5x smaller payload → buffer fills faster → fewer underruns on cellular/Android Auto
+        //   - AAC triggers hardware audio offload on Android (WAV/FLAC do not)
+        //   - MP3/AAC originals are served unchanged (server skips transcode)
+        return "${NetworkModule.getStreamBaseUrl()}/stream/$trackId?format=aac&bitrate=256"
     }
     
     fun getTrackArtUrl(trackId: Int): String {

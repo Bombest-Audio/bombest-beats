@@ -3175,6 +3175,86 @@ def search_playlist(playlist_id):
         print(f"Error searching playlist: {e}")
         return jsonify({'error': str(e)}), 500
 
+# Formats that need transcoding to AAC for mobile playback.
+# MP3 and AAC/M4A already have hardware offload support — serve as-is.
+_TRANSCODE_EXTS = {'.wav', '.flac', '.ogg', '.aiff', '.aif'}
+
+# Max source size for on-the-fly transcode. Guards /tmp when the source lives in S3
+# and must be downloaded locally so ffmpeg can seek (FLAC header parsing needs seek).
+MAX_TRANSCODE_SOURCE_BYTES = int(os.environ.get('MAX_TRANSCODE_SOURCE_BYTES', 200 * 1024 * 1024))
+
+
+def _should_transcode(file_path, fmt):
+    ext = os.path.splitext(file_path)[1].lower()
+    # Always transcode non-AAC/MP3 formats so all clients get fragmented MP4.
+    # Explicit ?format=aac also triggers it, but the default for WAV/FLAC/OGG
+    # is to transcode rather than serving raw files that most players can't stream.
+    if ext in _TRANSCODE_EXTS:
+        return True
+    return fmt == 'aac' and ext in _TRANSCODE_EXTS
+
+
+def _transcode_generator(file_path, bitrate='256k'):
+    """Yield fragmented MP4 (AAC-LC) chunks by piping file_path through ffmpeg.
+
+    Fragmented MP4 rather than raw ADTS because:
+    - The 'empty_moov' atom lets ExoPlayer know the codec and duration immediately,
+      so Android Auto can display a progress bar and album art without waiting for EOF.
+    - 'frag_keyframe' writes a fragment boundary at every keyframe so the stream is
+      playable from any fragment without seeking the whole file.
+    - ExoPlayer correctly reports isCurrentMediaItemSeekable=true for frag MP4,
+      so onPlayerError can safely seek to resume position on transient errors.
+    """
+    cmd = [
+        'ffmpeg', '-y', '-i', file_path,
+        '-vn',
+        '-c:a', 'aac',
+        '-b:a', bitrate,
+        '-movflags', 'frag_keyframe+empty_moov+faststart',
+        '-f', 'mp4',
+        'pipe:1'
+    ]
+    # Capture stderr to a tempfile so we can surface transcode errors for triage.
+    # A PIPE would deadlock because we read stdout incrementally and never drain stderr.
+    stderr_fd, stderr_path = tempfile.mkstemp(prefix='ffmpeg_stderr_', suffix='.log')
+    proc = None
+    try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=stderr_fd)
+        os.close(stderr_fd)
+        stderr_fd = -1
+        while True:
+            chunk = proc.stdout.read(65536)
+            if not chunk:
+                break
+            yield chunk
+    finally:
+        if proc is not None:
+            # Client may have disconnected mid-stream — don't let ffmpeg hang on a closed pipe.
+            if proc.poll() is None:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait()
+            if proc.returncode not in (0, -15):  # 0 = OK, -15 = SIGTERM from our kill path
+                try:
+                    with open(stderr_path, 'r', errors='replace') as f:
+                        tail = f.read()[-2000:]
+                    print(f"ffmpeg exit {proc.returncode} for {file_path}: {tail}")
+                except OSError:
+                    pass
+        if stderr_fd >= 0:
+            try:
+                os.close(stderr_fd)
+            except OSError:
+                pass
+        try:
+            os.unlink(stderr_path)
+        except OSError:
+            pass
+
+
 @app.route('/stream/<int:track_id>', methods=['GET'])
 def stream_track(track_id):
     """Stream audio file directly from upload server to bypass beets CORS issues"""
@@ -3188,54 +3268,104 @@ def stream_track(track_id):
         if not result:
             return jsonify({'error': 'Track not found'}), 404
 
-        # Beets stores absolute path, or relative to library directory
-        # In our container/setup, it's usually absolute
         file_path = result[0]
-        
-        # Security check: Ensure file is within music directory?
-        # For now, trust the DB as it's internal.
-        
-        # Decode bytes if needed (sqlite sometimes returns bytes for text fields if messed up)
         if isinstance(file_path, bytes):
             file_path = file_path.decode('utf-8', errors='ignore')
 
-        # --- S3 Strategy: proxy stream so browser gets same-origin response (no CORS on S3) ---
+        # ?format=aac&bitrate=256 — requested by Android client for hardware-offload-compatible
+        # streaming. WAV/FLAC/OGG are transcoded on-the-fly; MP3/AAC pass through unchanged.
+        fmt = request.args.get('format', '').lower()
+        raw_bitrate = request.args.get('bitrate', '256')
+        try:
+            bitrate = f"{int(raw_bitrate)}k"
+        except ValueError:
+            bitrate = '256k'
+
+        # --- Local Strategy (preferred — avoids S3 download for transcode) ---
+        if os.path.exists(file_path):
+            if _should_transcode(file_path, fmt):
+                return Response(
+                    _transcode_generator(file_path, bitrate),
+                    mimetype='audio/mp4',
+                    headers={'Accept-Ranges': 'none'}
+                )
+            mime_type, _ = mimetypes.guess_type(file_path)
+            if file_path.lower().endswith('.wav') and (not mime_type or mime_type == 'application/octet-stream'):
+                mime_type = 'audio/x-wav'
+            return send_file(file_path, mimetype=mime_type, conditional=True)
+
+        # --- S3 Fallback (file not on local disk) ---
         if s3_client:
             try:
                 rel_path = os.path.relpath(file_path, start=os.getcwd())
                 if not rel_path.startswith('..'):
-                    range_header = request.headers.get('Range')
-                    params = {'Bucket': S3_BUCKET, 'Key': rel_path}
-                    if range_header:
-                        params['Range'] = range_header
-                    try:
-                        resp = s3_client.get_object(**params)
-                        body = resp['Body']
-                        content_type = resp.get('ContentType') or mimetypes.guess_type(rel_path)[0] or 'application/octet-stream'
-                        if rel_path.lower().endswith('.wav'):
-                            content_type = 'audio/x-wav'
-                        status = resp.get('ResponseMetadata', {}).get('HTTPStatusCode', 200)
-                        headers = {}
-                        if 'ContentLength' in resp:
-                            headers['Content-Length'] = str(resp['ContentLength'])
-                        if 'ContentRange' in resp:
-                            headers['Content-Range'] = resp['ContentRange']
-                        return Response(body, status=status, mimetype=content_type, headers=headers, direct_passthrough=True)
-                    except ClientError as e:
-                        print(f"S3 get_object error: {e}")
+                    if _should_transcode(rel_path, fmt):
+                        # Cap source size before downloading — a 500 MB FLAC would fill /tmp.
+                        # head_object is cheap and lets us 413 cleanly rather than failing mid-download.
+                        try:
+                            head = s3_client.head_object(Bucket=S3_BUCKET, Key=rel_path)
+                            content_length = int(head.get('ContentLength') or 0)
+                        except ClientError as e:
+                            print(f"S3 head_object error (transcode): {e}")
+                            return jsonify({'error': 'S3 error'}), 502
+                        if content_length > MAX_TRANSCODE_SOURCE_BYTES:
+                            return jsonify({
+                                'error': 'Source file too large to transcode',
+                                'limit_bytes': MAX_TRANSCODE_SOURCE_BYTES,
+                            }), 413
+
+                        # Download to temp file so ffmpeg can seek (needed for FLAC header parsing)
+                        ext = os.path.splitext(rel_path)[1] or '.wav'
+                        tmp_fd, tmp_path = tempfile.mkstemp(suffix=ext)
+                        os.close(tmp_fd)
+                        try:
+                            resp = s3_client.get_object(Bucket=S3_BUCKET, Key=rel_path)
+                            with open(tmp_path, 'wb') as f:
+                                shutil.copyfileobj(resp['Body'], f)
+                        except ClientError as e:
+                            os.unlink(tmp_path)
+                            print(f"S3 get_object error (transcode): {e}")
+                            return jsonify({'error': 'S3 error'}), 502
+
+                        def generate_s3_transcode():
+                            try:
+                                yield from _transcode_generator(tmp_path, bitrate)
+                            finally:
+                                try:
+                                    os.unlink(tmp_path)
+                                except OSError:
+                                    pass
+
+                        return Response(
+                            generate_s3_transcode(),
+                            mimetype='audio/mp4',
+                            headers={'Accept-Ranges': 'none'}
+                        )
+                    else:
+                        # Original format — pass through with range support
+                        range_header = request.headers.get('Range')
+                        params = {'Bucket': S3_BUCKET, 'Key': rel_path}
+                        if range_header:
+                            params['Range'] = range_header
+                        try:
+                            resp = s3_client.get_object(**params)
+                            body = resp['Body']
+                            content_type = resp.get('ContentType') or mimetypes.guess_type(rel_path)[0] or 'application/octet-stream'
+                            if rel_path.lower().endswith('.wav'):
+                                content_type = 'audio/x-wav'
+                            status = resp.get('ResponseMetadata', {}).get('HTTPStatusCode', 200)
+                            headers = {}
+                            if 'ContentLength' in resp:
+                                headers['Content-Length'] = str(resp['ContentLength'])
+                            if 'ContentRange' in resp:
+                                headers['Content-Range'] = resp['ContentRange']
+                            return Response(body, status=status, mimetype=content_type, headers=headers, direct_passthrough=True)
+                        except ClientError as e:
+                            print(f"S3 get_object error: {e}")
             except (ValueError, OSError):
                 pass
 
-        # --- Local Strategy ---
-        if not os.path.exists(file_path):
-             return jsonify({'error': 'File not found on disk'}), 404
-
-        mime_type, _ = mimetypes.guess_type(file_path)
-        # Force WAV if mime guess fails or is generic
-        if file_path.lower().endswith('.wav') and (not mime_type or mime_type == 'application/octet-stream'):
-            mime_type = 'audio/x-wav'
-            
-        return send_file(file_path, mimetype=mime_type, conditional=True)
+        return jsonify({'error': 'File not found'}), 404
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -3742,9 +3872,282 @@ def get_dashboard_metrics():
         'users': users
     })
 
+# --- Performance Metrics + CloudWatch ---
+
+_cloudwatch_client = None
+
+def _get_cloudwatch():
+    global _cloudwatch_client
+    if _cloudwatch_client is None:
+        _cloudwatch_client = boto3.client(
+            'cloudwatch',
+            region_name=os.environ.get('AWS_REGION', 'us-west-2')
+        )
+    return _cloudwatch_client
+
+
+def _emit_perf_metrics(events):
+    """Emit CloudWatch custom metrics for a batch of performance events. Best-effort."""
+    try:
+        cw = _get_cloudwatch()
+        metric_data = []
+        for ev in events:
+            t = ev.get('event_type', '')
+            fmt = ev.get('format') or 'unknown'
+            conn = ev.get('connection') or 'unknown'
+
+            if t == 'AudioUnderrun':
+                metric_data += [
+                    {
+                        'MetricName': 'AudioUnderrunCount',
+                        'Dimensions': [{'Name': 'Format', 'Value': fmt},
+                                       {'Name': 'Connection', 'Value': conn}],
+                        'Value': 1, 'Unit': 'Count'
+                    },
+                    {
+                        'MetricName': 'BufferLevelAtUnderrunMs',
+                        'Dimensions': [{'Name': 'Format', 'Value': fmt}],
+                        'Value': float(ev.get('buffer_ms') or 0), 'Unit': 'Milliseconds'
+                    },
+                ]
+            elif t == 'BandwidthSample':
+                kbps = float(ev.get('bitrate_kbps') or 0)
+                if kbps > 0:
+                    metric_data.append({
+                        'MetricName': 'BandwidthKbps',
+                        'Dimensions': [{'Name': 'Connection', 'Value': conn}],
+                        'Value': kbps, 'Unit': 'Kilobits/Second'
+                    })
+            elif t == 'LoadError':
+                metric_data.append({
+                    'MetricName': 'LoadErrorCount',
+                    'Dimensions': [{'Name': 'ErrorType', 'Value': ev.get('error_type') or 'Unknown'},
+                                   {'Name': 'Format', 'Value': fmt}],
+                    'Value': 1, 'Unit': 'Count'
+                })
+            elif t == 'OffloadState':
+                metric_data.append({
+                    'MetricName': 'OffloadEngaged',
+                    'Dimensions': [{'Name': 'Format', 'Value': fmt}],
+                    'Value': 1.0 if ev.get('sleeping') else 0.0, 'Unit': 'Count'
+                })
+
+        # CloudWatch max 20 metric data points per call
+        for i in range(0, len(metric_data), 20):
+            cw.put_metric_data(
+                Namespace='BombestBeats/Playback',
+                MetricData=metric_data[i:i + 20]
+            )
+    except Exception as e:
+        print(f"CloudWatch emit error (non-fatal): {e}")
+
+
+def ensure_cloudwatch_dashboard():
+    """Create or update the BombestBeats-Playback CloudWatch dashboard. Idempotent."""
+    try:
+        cw = _get_cloudwatch()
+        dashboard_body = json.dumps({
+            "widgets": [
+                {
+                    "type": "metric", "x": 0, "y": 0, "width": 12, "height": 6,
+                    "properties": {
+                        "title": "Audio Underruns by Format",
+                        "metrics": [
+                            ["BombestBeats/Playback", "AudioUnderrunCount", "Format", "mp3", "Connection", "wifi"],
+                            [".", ".", ".", "mp3", ".", "cellular"],
+                            [".", ".", ".", "flac", ".", "wifi"],
+                            [".", ".", ".", "flac", ".", "cellular"],
+                            [".", ".", ".", "wav", ".", "wifi"],
+                            [".", ".", ".", "wav", ".", "cellular"],
+                            [".", ".", ".", "aac", ".", "wifi"],
+                            [".", ".", ".", "aac", ".", "cellular"],
+                        ],
+                        "period": 300, "stat": "Sum", "view": "timeSeries",
+                        "region": os.environ.get('AWS_REGION', 'us-west-2')
+                    }
+                },
+                {
+                    "type": "metric", "x": 12, "y": 0, "width": 12, "height": 6,
+                    "properties": {
+                        "title": "Bandwidth kbps (WiFi vs Cellular)",
+                        "metrics": [
+                            ["BombestBeats/Playback", "BandwidthKbps", "Connection", "wifi"],
+                            [".", ".", ".", "cellular"],
+                        ],
+                        "period": 300, "stat": "Average", "view": "timeSeries",
+                        "region": os.environ.get('AWS_REGION', 'us-west-2')
+                    }
+                },
+                {
+                    "type": "metric", "x": 0, "y": 6, "width": 12, "height": 6,
+                    "properties": {
+                        "title": "Load Errors by Type",
+                        "metrics": [
+                            ["BombestBeats/Playback", "LoadErrorCount", "ErrorType", "SocketTimeoutException", "Format", "mp3"],
+                            [".", ".", ".", "SocketTimeoutException", ".", "flac"],
+                            [".", ".", ".", "HttpDataSourceException", ".", "mp3"],
+                            [".", ".", ".", "HttpDataSourceException", ".", "flac"],
+                            [".", ".", ".", "UnknownHostException", ".", "mp3"],
+                        ],
+                        "period": 300, "stat": "Sum", "view": "timeSeries",
+                        "region": os.environ.get('AWS_REGION', 'us-west-2')
+                    }
+                },
+                {
+                    "type": "metric", "x": 12, "y": 6, "width": 12, "height": 6,
+                    "properties": {
+                        "title": "Audio Offload Engagement by Format (1=sleeping, 0=CPU)",
+                        "metrics": [
+                            ["BombestBeats/Playback", "OffloadEngaged", "Format", "mp3"],
+                            [".", ".", ".", "flac"],
+                            [".", ".", ".", "wav"],
+                            [".", ".", ".", "aac"],
+                        ],
+                        "period": 300, "stat": "Average", "view": "timeSeries",
+                        "region": os.environ.get('AWS_REGION', 'us-west-2')
+                    }
+                },
+            ]
+        })
+        cw.put_dashboard(DashboardName='BombestBeats-Playback', DashboardBody=dashboard_body)
+        print("CloudWatch dashboard 'BombestBeats-Playback' created/updated")
+    except Exception as e:
+        print(f"Dashboard setup error (non-fatal): {e}")
+
+
+@app.route('/metrics/performance', methods=['POST'])
+@jwt_required()
+def batch_record_perf():
+    """Receive batched playback performance events from the Android app."""
+    try:
+        user_id = get_jwt_identity()
+        data = request.get_json() or {}
+        events = data.get('events', [])
+
+        if not events:
+            return jsonify({'message': 'No events'}), 200
+
+        conn = sqlite3.connect(USERS_DB)
+        cursor = conn.cursor()
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS performance_events (
+                id INTEGER PRIMARY KEY,
+                event_type TEXT,
+                track_id TEXT,
+                format TEXT,
+                connection TEXT,
+                buffer_ms REAL,
+                elapsed_since_feed_ms REAL,
+                error_type TEXT,
+                error_message TEXT,
+                bitrate_kbps REAL,
+                bytes_loaded INTEGER,
+                load_time_ms INTEGER,
+                sleeping INTEGER,
+                user_id INTEGER,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
+        for ev in events:
+            cursor.execute('''
+                INSERT INTO performance_events
+                (event_type, track_id, format, connection, buffer_ms, elapsed_since_feed_ms,
+                 error_type, error_message, bitrate_kbps, bytes_loaded, load_time_ms, sleeping, user_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                ev.get('event_type'), ev.get('track_id'), ev.get('format'), ev.get('connection'),
+                ev.get('buffer_ms'), ev.get('elapsed_since_feed_ms'),
+                ev.get('error_type'), ev.get('error_message'),
+                ev.get('bitrate_kbps'), ev.get('bytes_loaded'), ev.get('load_time_ms'),
+                1 if ev.get('sleeping') else (0 if ev.get('sleeping') is not None else None),
+                user_id
+            ))
+
+        conn.commit()
+        conn.close()
+
+        _emit_perf_metrics(events)
+
+        return jsonify({'message': f'Recorded {len(events)} perf events'}), 201
+
+    except Exception as e:
+        print(f"Performance metrics error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+# Cache S3 reachability for ~60s so external probes (ALB, Docker HEALTHCHECK, Cloudflare)
+# don't turn this endpoint into a per-minute S3 billing source. Re-probed sooner on failure
+# so recovery is observable promptly.
+_S3_HEALTH_TTL_OK = 60.0
+_S3_HEALTH_TTL_ERR = 5.0
+_s3_health_lock = threading.Lock()
+_s3_health_cache = {'ts': 0.0, 'ok': None}  # ok: True/False/None(unchecked)
+
+
+def _check_s3_health():
+    """Return ('ok'|'error'|'skipped', detail_string_or_None). Cached for TTL."""
+    if not (s3_client and S3_BUCKET):
+        return 'skipped', None
+    now = time.time()
+    with _s3_health_lock:
+        cached_ok = _s3_health_cache['ok']
+        ttl = _S3_HEALTH_TTL_OK if cached_ok else _S3_HEALTH_TTL_ERR
+        if cached_ok is not None and (now - _s3_health_cache['ts']) < ttl:
+            return ('ok' if cached_ok else 'error'), None
+    try:
+        s3_client.list_objects_v2(Bucket=S3_BUCKET, MaxKeys=1)
+        with _s3_health_lock:
+            _s3_health_cache['ts'] = now
+            _s3_health_cache['ok'] = True
+        return 'ok', None
+    except Exception as e:
+        print(f"/health S3 probe failed: {e}")
+        with _s3_health_lock:
+            _s3_health_cache['ts'] = now
+            _s3_health_cache['ok'] = False
+        return 'error', None
+
+
+@app.route('/health', methods=['GET'])
+def health_check():
+    """Health endpoint — checks library DB and S3 reachability.
+
+    Response body intentionally omits raw exception strings to avoid leaking paths,
+    bucket names, or AWS error codes to unauthenticated scanners. Full diagnostics
+    are logged server-side.
+    """
+    checks = {}
+    healthy = True
+
+    # Check library DB
+    try:
+        conn = sqlite3.connect(LIBRARY_DB)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute('SELECT COUNT(*) as cnt FROM items')
+        track_count = cursor.fetchone()['cnt']
+        conn.close()
+        checks['library_db'] = {'status': 'ok', 'track_count': track_count}
+    except Exception as e:
+        print(f"/health library_db probe failed: {e}")
+        checks['library_db'] = {'status': 'error'}
+        healthy = False
+
+    # Check S3 (cached)
+    s3_status, _ = _check_s3_health()
+    checks['s3'] = {'status': s3_status}
+    if s3_status == 'error':
+        healthy = False
+
+    status_code = 200 if healthy else 503
+    return jsonify({'status': 'healthy' if healthy else 'degraded', 'checks': checks}), status_code
+
+
 if __name__ == '__main__':
     # Ensure users.db and tables exist (required for /auth/register, /auth/login, etc.)
     from init_db import init_db
     init_db()
     init_track_artwork()
+    ensure_cloudwatch_dashboard()
     app.run(host='0.0.0.0', port=8338)

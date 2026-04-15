@@ -31,7 +31,7 @@ fi
 
 # SSM command: source env file (if present), pull image, stop/rm existing container, run new one
 # Use semicolons so we can pass one string; SSM requires JSON-escaped parameters
-COMMAND="source /home/ec2-user/.env.bombest 2>/dev/null || true; export S3_BUCKET=\${S3_BUCKET:-bombest-beats-music}; export S3_REGION=\${S3_REGION:-us-west-2}; sudo docker pull $DOCKER_IMAGE; sudo docker stop bombest-beats 2>/dev/null || true; sudo docker rm bombest-beats 2>/dev/null || true; sudo docker run -d --name bombest-beats -p 8338:8338 --restart unless-stopped -v /data/beets:/app/music -e \"S3_BUCKET=\$S3_BUCKET\" -e \"AWS_ACCESS_KEY_ID=\$AWS_ACCESS_KEY_ID\" -e \"AWS_SECRET_ACCESS_KEY=\$AWS_SECRET_ACCESS_KEY\" -e \"S3_REGION=\$S3_REGION\" $DOCKER_IMAGE; echo Container deployed."
+COMMAND="source /home/ec2-user/.env.bombest 2>/dev/null || true; export S3_BUCKET=\${S3_BUCKET:-bombest-beats-music}; export S3_REGION=\${S3_REGION:-us-west-2}; sudo docker system prune -f --filter 'until=24h'; sudo docker pull $DOCKER_IMAGE; sudo docker stop bombest-beats 2>/dev/null || true; sudo docker rm bombest-beats 2>/dev/null || true; sudo docker run -d --name bombest-beats -p 8338:8338 --restart unless-stopped -v /data/beets:/app/music -e \"S3_BUCKET=\$S3_BUCKET\" -e \"AWS_ACCESS_KEY_ID=\$AWS_ACCESS_KEY_ID\" -e \"AWS_SECRET_ACCESS_KEY=\$AWS_SECRET_ACCESS_KEY\" -e \"S3_REGION=\$S3_REGION\" $DOCKER_IMAGE; echo Container deployed."
 
 echo "Sending SSM command (pull + run container)..."
 if command -v jq &>/dev/null; then

@@ -46,6 +46,8 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -97,6 +99,7 @@ fun PlayerScreen(
     onSetLoopStart: () -> Unit = {},
     onSetLoopEnd: () -> Unit = {},
     onClearLoop: () -> Unit = {},
+    isBuffering: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     // Full Screen Background - Graffiti theme deep navy
@@ -137,13 +140,22 @@ fun PlayerScreen(
 
                 Spacer(Modifier.height(16.dp))
 
-                ArtworkWithProgress(
-                    imageSize = 300.dp,
-                    currentPosition = currentPosition,
-                    duration = duration,
-                    onSeek = onSeek,
-                    artworkUri = currentMediaItem.mediaMetadata.artworkUri
-                )
+                Box(contentAlignment = Alignment.Center) {
+                    ArtworkWithProgress(
+                        imageSize = 300.dp,
+                        currentPosition = currentPosition,
+                        duration = duration,
+                        onSeek = onSeek,
+                        artworkUri = currentMediaItem.mediaMetadata.artworkUri
+                    )
+                    if (isBuffering) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(56.dp),
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.85f),
+                            strokeWidth = 3.dp
+                        )
+                    }
+                }
 
                 Spacer(Modifier.height(24.dp))
 
@@ -189,7 +201,9 @@ fun PlayerScreen(
             }
 
             SongInfo(
-                title = currentMediaItem.mediaMetadata.title?.toString() ?: "Unknown",
+                title = currentMediaItem.mediaMetadata.title?.toString()
+                    ?.takeUnless { currentMediaItem.mediaId.startsWith("special:") }
+                    ?: "Unknown",
                 artist = currentMediaItem.mediaMetadata.artist?.toString() ?: "Unknown Artist"
             )
 
@@ -893,7 +907,8 @@ fun PlayButton(isPlaying: Boolean, onClick: () -> Unit) {
                 ),
                 shape = CircleShape
             )
-            .clickable { onClick() },
+            .clickable(onClickLabel = if (isPlaying) "Pause" else "Play") { onClick() }
+            .semantics { contentDescription = if (isPlaying) "Pause" else "Play" },
         contentAlignment = Alignment.Center
     ) {
         Box(

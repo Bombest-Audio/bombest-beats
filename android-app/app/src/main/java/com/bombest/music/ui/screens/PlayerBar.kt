@@ -165,7 +165,9 @@ fun PlayerBar(
                         verticalArrangement = Arrangement.Center
                     ) {
                         Text(
-                            text = currentMediaItem.mediaMetadata.title?.toString() ?: "Unknown",
+                            text = currentMediaItem.mediaMetadata.title?.toString()
+                                ?.takeUnless { currentMediaItem.mediaId.startsWith("special:") }
+                                ?: "Unknown",
                             fontSize = 15.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = Color.White,

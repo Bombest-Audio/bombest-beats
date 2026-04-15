@@ -121,8 +121,7 @@ class PlaylistViewModel : ViewModel() {
         viewModelScope.launch {
             try {
                 val pub = if (userRole.value == "admin") isPublic else false
-                val playlist = playlistApi.createPlaylist(CreatePlaylistRequest(name, pub))
-                playlists.add(0, playlist)
+                playlistApi.createPlaylist(CreatePlaylistRequest(name, pub))
                 loadPlaylists()
                 notifyUser("Playlist created")
             } catch (e: Exception) {

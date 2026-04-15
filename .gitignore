@@ -36,6 +36,9 @@ beets-backend/waveforms/
 *.aac
 *.ogg
 
+# Editor backup files
+*.bak
+
 # macOS specific
 .DS_Store
 

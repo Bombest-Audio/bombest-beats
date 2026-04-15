@@ -33,5 +33,9 @@ RUN mkdir -p uploads waveforms
 # Expose the port
 EXPOSE 8338
 
+# Health check — verifies Flask is responding and can reach library DB + S3
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8338/health')" || exit 1
+
 # Run the server
 CMD ["python", "upload_server.py"]

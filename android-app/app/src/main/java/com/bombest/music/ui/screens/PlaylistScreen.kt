@@ -119,7 +119,7 @@ fun PlaylistsScreen(
                     contentPadding = PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    items(playlists) { playlist ->
+                    items(playlists, key = { it.id }) { playlist ->
                         PlaylistItem(
                             playlist = playlist,
                             onClick = { onPlaylistClick(playlist.id) },
@@ -211,63 +211,73 @@ fun PlaylistItem(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick),
+            .semantics { contentDescription = playlist.name },
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = Color(0xFF1A1D2E))
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
+                .padding(end = 4.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            val artUrl = playlist.art_url?.let { NetworkModule.getStreamBaseUrl() + it }
-            if (artUrl != null) {
-                AsyncImage(
-                    model = artUrl,
-                    contentDescription = null,
-                    modifier = Modifier
-                        .size(48.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                )
-                Spacer(modifier = Modifier.width(12.dp))
-            }
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = playlist.name,
-                    color = Color.White,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Medium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    text = "${playlist.count} tracks",
-                    color = Color.Gray,
-                    fontSize = 14.sp
-                )
-                val badge = when {
-                    playlist.is_public && playlist.user_id == null -> "Published"
-                    playlist.user_id != null && !playlist.is_public -> "Only you"
-                    else -> null
-                }
-                if (badge != null) {
-                    Text(
-                        text = badge,
-                        color = Color(0xFF8899AA),
-                        fontSize = 12.sp
+            // Clickable region: artwork + name/count text
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable(onClick = onClick)
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                val artUrl = playlist.art_url?.let { NetworkModule.getStreamBaseUrl() + it }
+                if (artUrl != null) {
+                    AsyncImage(
+                        model = artUrl,
+                        contentDescription = null,
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clip(RoundedCornerShape(8.dp))
                     )
+                    Spacer(modifier = Modifier.width(12.dp))
+                }
+                Column {
+                    Text(
+                        text = playlist.name,
+                        color = Color.White,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = "${playlist.count} tracks",
+                        color = Color.Gray,
+                        fontSize = 14.sp
+                    )
+                    val badge = when {
+                        playlist.is_public && playlist.user_id == null -> "Published"
+                        playlist.user_id != null && !playlist.is_public -> "Only you"
+                        else -> null
+                    }
+                    if (badge != null) {
+                        Text(
+                            text = badge,
+                            color = Color(0xFF8899AA),
+                            fontSize = 12.sp
+                        )
+                    }
                 }
             }
-            
+
+            // Action buttons outside the clickable zone — directly accessible for UIAutomator
             Row {
                 IconButton(onClick = onPlayClick) {
                     Icon(Icons.Default.PlayArrow, contentDescription = "Play", tint = Color(0xFFE90060))
                 }
                 if (showDelete && !isSystem) {
                     IconButton(onClick = onDelete) {
-                        Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color.Gray)
+                        Icon(Icons.Default.Delete, contentDescription = "Delete ${playlist.name}", tint = Color.Gray)
                     }
                 }
             }
