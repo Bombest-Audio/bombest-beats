@@ -2215,12 +2215,15 @@ def _get_rp_id_and_origin():
     except Exception:
         return RP_ID, RP_ORIGINS
 
-# Store challenges temporarily (in production, use Redis or similar)
-# Values: { key: {'challenge': bytes, 'rp_id': str, 'origins': list} }
-passkey_challenges = {}
+# Passkey challenges must survive across requests (browser POSTs options, then
+# POSTs verify). Previously in-memory — broke multi-instance deployments and
+# leaked on process restart. Now persisted in users.db with a 5-min TTL so
+# stale challenges don't accumulate.
+_PASSKEY_CHALLENGE_TTL_SEC = 5 * 60
+
 
 def init_passkey_table():
-    """Create passkey_credentials table if not exists"""
+    """Create passkey_credentials + passkey_challenges tables if not exists."""
     conn = sqlite3.connect(USERS_DB)
     cursor = conn.cursor()
     cursor.execute('''
@@ -2234,10 +2237,72 @@ def init_passkey_table():
             FOREIGN KEY (user_id) REFERENCES users(id)
         )
     ''')
+    # Key is a string: user_id for register flow, random login_id for login flow.
+    # challenge is bytes (BLOB). origins stored as JSON array.
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS passkey_challenges (
+            challenge_key TEXT PRIMARY KEY,
+            challenge BLOB NOT NULL,
+            rp_id TEXT,
+            origins TEXT,
+            created_at REAL NOT NULL
+        )
+    ''')
     conn.commit()
     conn.close()
 
 init_passkey_table()
+
+
+def _passkey_challenge_set(key, challenge, rp_id, origins):
+    """Store a WebAuthn challenge. Called from options endpoints."""
+    conn = sqlite3.connect(USERS_DB)
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT OR REPLACE INTO passkey_challenges "
+        "(challenge_key, challenge, rp_id, origins, created_at) VALUES (?, ?, ?, ?, ?)",
+        (str(key), challenge, rp_id, json.dumps(origins), time.time()),
+    )
+    conn.commit()
+    conn.close()
+
+
+def _passkey_challenge_get(key):
+    """Return stored challenge dict or None if missing/expired."""
+    conn = sqlite3.connect(USERS_DB)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT challenge, rp_id, origins, created_at FROM passkey_challenges "
+        "WHERE challenge_key = ?",
+        (str(key),),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    if row is None:
+        return None
+    if time.time() - float(row['created_at']) > _PASSKEY_CHALLENGE_TTL_SEC:
+        _passkey_challenge_pop(key)
+        return None
+    try:
+        origins = json.loads(row['origins']) if row['origins'] else []
+    except (TypeError, ValueError):
+        origins = []
+    return {'challenge': row['challenge'], 'rp_id': row['rp_id'], 'origins': origins}
+
+
+def _passkey_challenge_pop(key):
+    """Remove a challenge after use (success or failure)."""
+    conn = sqlite3.connect(USERS_DB)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM passkey_challenges WHERE challenge_key = ?", (str(key),))
+    # Opportunistic sweep of any rows older than the TTL.
+    cursor.execute(
+        "DELETE FROM passkey_challenges WHERE created_at < ?",
+        (time.time() - _PASSKEY_CHALLENGE_TTL_SEC,),
+    )
+    conn.commit()
+    conn.close()
 
 @app.route('/auth/passkey/register/options', methods=['POST'])
 @jwt_required()
@@ -2279,8 +2344,8 @@ def passkey_register_options():
         ),
     )
     
-    # Store challenge and rp context for verification
-    passkey_challenges[str(user['id'])] = {'challenge': options.challenge, 'rp_id': rp_id, 'origins': origins}
+    # Store challenge and rp context for verification (5-min TTL, persisted to users.db)
+    _passkey_challenge_set(str(user['id']), options.challenge, rp_id, origins)
     
     return options_to_json(options)
 
@@ -2291,12 +2356,12 @@ def passkey_register_verify():
     current_user_id = get_jwt_identity()
     data = request.get_json()
     
-    stored = passkey_challenges.get(current_user_id)
+    stored = _passkey_challenge_get(current_user_id)
     if not stored:
         return jsonify({'error': 'No pending registration'}), 400
-    challenge = stored.get('challenge') if isinstance(stored, dict) else stored
-    rp_id = stored.get('rp_id', RP_ID) if isinstance(stored, dict) else RP_ID
-    origins = stored.get('origins', RP_ORIGINS) if isinstance(stored, dict) else RP_ORIGINS
+    challenge = stored['challenge']
+    rp_id = stored.get('rp_id') or RP_ID
+    origins = stored.get('origins') or RP_ORIGINS
     
     try:
         verification = verify_registration_response(
@@ -2322,12 +2387,11 @@ def passkey_register_verify():
         conn.close()
         
         # Clean up challenge
-        del passkey_challenges[current_user_id]
-        
+        _passkey_challenge_pop(current_user_id)
+
         return jsonify({'success': True, 'message': 'Passkey registered successfully'})
     except Exception as e:
-        if current_user_id in passkey_challenges:
-            del passkey_challenges[current_user_id]
+        _passkey_challenge_pop(current_user_id)
         err_msg = str(e)
         if 'already registered' in err_msg.lower() or 'credentials already' in err_msg.lower():
             err_msg = 'This passkey is already registered to your account. Try a different device or passkey, or remove the existing one first.'
@@ -2376,7 +2440,7 @@ def passkey_login_options():
     # Store challenge and rp context (keyed by a random ID for login)
     import secrets
     login_id = secrets.token_urlsafe(16)
-    passkey_challenges[login_id] = {'challenge': options.challenge, 'rp_id': rp_id, 'origins': origins}
+    _passkey_challenge_set(login_id, options.challenge, rp_id, origins)
     
     response = json.loads(options_to_json(options))
     response['loginId'] = login_id
@@ -2388,12 +2452,12 @@ def passkey_login_verify():
     data = request.get_json()
     login_id = data.get('loginId')
     
-    stored = passkey_challenges.get(login_id)
+    stored = _passkey_challenge_get(login_id)
     if not stored:
         return jsonify({'error': 'No pending login'}), 400
-    challenge = stored.get('challenge') if isinstance(stored, dict) else stored
-    rp_id = stored.get('rp_id', RP_ID) if isinstance(stored, dict) else RP_ID
-    origins = stored.get('origins', RP_ORIGINS) if isinstance(stored, dict) else RP_ORIGINS
+    challenge = stored['challenge']
+    rp_id = stored.get('rp_id') or RP_ID
+    origins = stored.get('origins') or RP_ORIGINS
     
     # Find the credential
     credential_id = data.get('id')
@@ -2434,8 +2498,8 @@ def passkey_login_verify():
         conn.close()
         
         # Clean up challenge
-        del passkey_challenges[login_id]
-        
+        _passkey_challenge_pop(login_id)
+
         # Issue JWT pair (access + refresh)
         claims = {'role': cred['role'], 'username': cred['username']}
         access_token = create_access_token(identity=str(cred['user_id']), additional_claims=claims)
@@ -2449,8 +2513,7 @@ def passkey_login_verify():
         })
     except Exception as e:
         conn.close()
-        if login_id in passkey_challenges:
-            del passkey_challenges[login_id]
+        _passkey_challenge_pop(login_id)
         return jsonify({'error': str(e)}), 401
 
 @app.route('/auth/passkey/list', methods=['GET'])
