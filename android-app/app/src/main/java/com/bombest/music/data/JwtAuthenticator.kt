@@ -30,7 +30,13 @@ import java.util.concurrent.TimeUnit
  * Returning `null` from [authenticate] tells OkHttp to propagate the original 401
  * to the caller (who will then trigger the user-facing logout flow).
  */
-class JwtAuthenticator(private val appContext: Context) : Authenticator {
+class JwtAuthenticator(
+    private val appContext: Context,
+    // Overridable in tests so MockWebServer can host the refresh endpoint. In prod this
+    // always resolves to [NetworkModule.getStreamBaseUrl] — i.e. the same primary/failover
+    // host we're hitting for streams.
+    private val baseUrlProvider: () -> String = { NetworkModule.getStreamBaseUrl() },
+) : Authenticator {
 
     /** Separate client for the refresh call — never reuse the authenticated client here. */
     private val refreshClient: OkHttpClient by lazy {
@@ -73,7 +79,7 @@ class JwtAuthenticator(private val appContext: Context) : Authenticator {
     }
 
     private fun tryRefresh(refreshToken: String): String? {
-        val baseUrl = NetworkModule.getStreamBaseUrl()
+        val baseUrl = baseUrlProvider().trimEnd('/')
         val req = Request.Builder()
             .url("$baseUrl/auth/refresh")
             .header("Authorization", "Bearer $refreshToken")

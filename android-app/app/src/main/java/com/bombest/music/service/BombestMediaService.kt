@@ -34,7 +34,9 @@ import com.bombest.music.data.authDataStore
 import com.bombest.music.data.api.Playlist
 import com.bombest.music.data.api.PlaylistApi
 import com.bombest.music.data.api.Track as ApiTrack
+import com.bombest.music.data.cache.AppDatabase
 import com.bombest.music.data.repository.MusicRepository
+import com.bombest.music.data.repository.PlaylistRepository
 import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
@@ -54,6 +56,10 @@ class BombestMediaService : MediaLibraryService() {
 
     private var mediaSession: MediaLibrarySession? = null
     private var playlistApi: PlaylistApi? = null
+    // Rebuilt per call because [playlistApi] is swapped post-auth; the repo is a thin
+    // wrapper so constructing one per request is free (the DAO and DB are singletons).
+    private fun playlistRepo(): PlaylistRepository =
+        PlaylistRepository(playlistApi, AppDatabase.get(this).playlistCacheDao())
     /** Favorites / "Liked songs" system playlist — used for AA root shortcut. */
     private var favoritesPlaylist: Playlist? = null
     private val recentTracksStore by lazy { AutoRecentTracksStore(this) }
@@ -543,19 +549,17 @@ class BombestMediaService : MediaLibraryService() {
                             Futures.immediateFuture(LibraryResult.ofItemList(ImmutableList.copyOf(slice), params))
                         }
                         PLAYLISTS_ID -> {
-                            val api = playlistApi
-                            if (api == null) {
-                                Futures.immediateFuture(LibraryResult.ofItemList(ImmutableList.of(), params))
-                            } else {
-                                serviceScope.future(Dispatchers.IO) {
-                                    try {
-                                        val response = api.getPlaylists()
-                                        val items = response.playlists.map { createPlaylistBrowseItem(it) }
-                                        LibraryResult.ofItemList(ImmutableList.copyOf(items), params)
-                                    } catch (e: Exception) {
-                                        android.util.Log.e("BombestMediaService", "browse playlists", e)
-                                        LibraryResult.ofItemList(ImmutableList.of(), params)
-                                    }
+                            // Cache-aside: repo serves fresh data on success, falls back to
+                            // Room cache on network failure (e.g. Auto on a cellular blackout).
+                            val repo = playlistRepo()
+                            serviceScope.future(Dispatchers.IO) {
+                                try {
+                                    val playlists = repo.getPlaylists()
+                                    val items = playlists.map { createPlaylistBrowseItem(it) }
+                                    LibraryResult.ofItemList(ImmutableList.copyOf(items), params)
+                                } catch (e: Exception) {
+                                    android.util.Log.e("BombestMediaService", "browse playlists", e)
+                                    LibraryResult.ofItemList(ImmutableList.of(), params)
                                 }
                             }
                         }
@@ -571,14 +575,14 @@ class BombestMediaService : MediaLibraryService() {
                         else -> {
                             if (parentId.startsWith("playlist:")) {
                                 val pid = parentId.removePrefix("playlist:").toIntOrNull()
-                                val api = playlistApi
-                                if (pid == null || api == null) {
+                                if (pid == null) {
                                     Futures.immediateFuture(LibraryResult.ofItemList(ImmutableList.of(), params))
                                 } else {
                                     val transcodeForAuto = isAutoController(browser)
+                                    val repo = playlistRepo()
                                     serviceScope.future(Dispatchers.IO) {
                                         try {
-                                            val tracks = api.getPlaylistTracks(pid).tracks
+                                            val tracks = repo.getPlaylistTracks(pid)
                                             val items = tracks.map { buildMediaItemFromApiTrack(it, transcodeForAuto) }
                                             LibraryResult.ofItemList(ImmutableList.copyOf(items), params)
                                         } catch (e: Exception) {
@@ -608,11 +612,10 @@ class BombestMediaService : MediaLibraryService() {
                         favoritesPlaylist?.takeIf { it.id == pid }?.let { pl ->
                             return Futures.immediateFuture(LibraryResult.ofItem(createPlaylistBrowseItem(pl), null))
                         }
-                        val api = playlistApi
-                            ?: return Futures.immediateFuture(LibraryResult.ofError(LibraryResult.RESULT_ERROR_INVALID_STATE, null))
+                        val repo = playlistRepo()
                         return serviceScope.future(Dispatchers.IO) {
                             try {
-                                val pl = api.getPlaylists().playlists.find { it.id == pid }
+                                val pl = repo.getPlaylists().find { it.id == pid }
                                 if (pl != null) LibraryResult.ofItem(createPlaylistBrowseItem(pl), null)
                                 else LibraryResult.ofError(LibraryResult.RESULT_ERROR_BAD_VALUE, null)
                             } catch (e: Exception) {
@@ -849,23 +852,8 @@ class BombestMediaService : MediaLibraryService() {
         return info?.packageName == AUTO_PACKAGE
     }
 
-    /**
-     * Canonical MIME for a remote pass-through stream based on the source's file extension.
-     * Falls back to MPEG (MP3) when the extension is unknown — safest default for the
-     * legacy library where most uploads are MP3 anyway. Must agree with the backend's
-     * `_PASS_THROUGH_CONTENT_TYPE` map (upload_server.py).
-     */
-    private fun inferRemoteMimeType(path: String?): String {
-        val ext = path?.substringAfterLast('.', "")?.lowercase().orEmpty()
-        return when (ext) {
-            "flac" -> androidx.media3.common.MimeTypes.AUDIO_FLAC
-            "mp3" -> androidx.media3.common.MimeTypes.AUDIO_MPEG
-            "m4a", "mp4", "aac" -> androidx.media3.common.MimeTypes.AUDIO_MP4
-            "wav" -> androidx.media3.common.MimeTypes.AUDIO_WAV
-            "ogg", "oga" -> androidx.media3.common.MimeTypes.AUDIO_OGG
-            else -> androidx.media3.common.MimeTypes.AUDIO_MPEG
-        }
-    }
+    /** Delegates to [MimeInference] for unit-testability. */
+    private fun inferRemoteMimeType(path: String?): String = MimeInference.inferRemoteMimeType(path)
 
     private fun slicePage(list: List<MediaItem>, page: Int, pageSize: Int): List<MediaItem> {
         if (list.isEmpty()) return emptyList()
