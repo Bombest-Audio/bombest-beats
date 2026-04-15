@@ -10,6 +10,7 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.logging.HttpLoggingInterceptor
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 
 /**
@@ -25,9 +26,33 @@ object NetworkModule {
     )
     
     private val currentUrlIndex = AtomicInteger(0)
-    
+
+    // Once we've failed over, stay on the failover URL for this cooldown before
+    // auto-retrying the primary. Prevents ping-pong when Cloudflare has a brief
+    // blip but also prevents permanent stickiness if the primary recovers.
+    private const val FAILOVER_COOLDOWN_MS = 5L * 60L * 1000L
+    private val failoverTimestamp = AtomicLong(0L)
+
+    /** If cooldown has elapsed since last failover, reset to primary. */
+    private fun maybeResetAfterCooldown() {
+        val ts = failoverTimestamp.get()
+        if (ts == 0L) return
+        if (System.currentTimeMillis() - ts >= FAILOVER_COOLDOWN_MS) {
+            if (currentUrlIndex.compareAndSet(1, 0)) {
+                failoverTimestamp.set(0L)
+                android.util.Log.i(
+                    "NetworkModule",
+                    "Failover cooldown elapsed; reset to primary: ${BASE_URLS[0]}",
+                )
+            }
+        }
+    }
+
     val currentBaseUrl: String
-        get() = BASE_URLS[currentUrlIndex.get()]
+        get() {
+            maybeResetAfterCooldown()
+            return BASE_URLS[currentUrlIndex.get()]
+        }
 
     private val loggingInterceptor = HttpLoggingInterceptor().apply {
         level = HttpLoggingInterceptor.Level.BASIC
@@ -37,8 +62,11 @@ object NetworkModule {
         .addInterceptor(loggingInterceptor)
         .addInterceptor { chain ->
             val originalRequest = chain.request()
-            // Always start from primary URL for each new request
-            var currentIndex = 0
+            // Start from whichever URL is currently active (primary after cooldown,
+            // failover while sticky). The cooldown reset happens via currentBaseUrl's
+            // maybeResetAfterCooldown(), which we call to nudge state first.
+            maybeResetAfterCooldown()
+            var currentIndex = currentUrlIndex.get()
             var lastException: Exception? = null
             
             // Try each URL in sequence
@@ -86,6 +114,7 @@ object NetworkModule {
                     if (currentIndex < BASE_URLS.size - 1) {
                         currentIndex++
                         currentUrlIndex.set(currentIndex)
+                        failoverTimestamp.set(System.currentTimeMillis())
                         android.util.Log.i("NetworkModule", "Switching to failover URL: ${BASE_URLS[currentIndex]}")
                     } else {
                         // No more URLs to try
@@ -100,6 +129,7 @@ object NetworkModule {
                     if (currentIndex < BASE_URLS.size - 1) {
                         currentIndex++
                         currentUrlIndex.set(currentIndex)
+                        failoverTimestamp.set(System.currentTimeMillis())
                         android.util.Log.i("NetworkModule", "Switching to failover URL: ${BASE_URLS[currentIndex]}")
                     } else {
                         // No more URLs to try
@@ -114,6 +144,7 @@ object NetworkModule {
                     if (currentIndex < BASE_URLS.size - 1) {
                         currentIndex++
                         currentUrlIndex.set(currentIndex)
+                        failoverTimestamp.set(System.currentTimeMillis())
                         android.util.Log.i("NetworkModule", "Switching to failover URL: ${BASE_URLS[currentIndex]}")
                     } else {
                         // No more URLs to try
@@ -233,7 +264,8 @@ object NetworkModule {
     fun failover() {
         if (canFailover()) {
             currentUrlIndex.incrementAndGet()
-            android.util.Log.i("NetworkModule", "Switched to failover: $currentBaseUrl")
+            failoverTimestamp.set(System.currentTimeMillis())
+            android.util.Log.i("NetworkModule", "Switched to failover: ${BASE_URLS[currentUrlIndex.get()]}")
         }
     }
     
@@ -249,6 +281,7 @@ object NetworkModule {
      */
     fun resetToPrimary() {
         currentUrlIndex.set(0)
-        android.util.Log.i("NetworkModule", "Reset to primary: $currentBaseUrl")
+        failoverTimestamp.set(0L)
+        android.util.Log.i("NetworkModule", "Reset to primary: ${BASE_URLS[0]}")
     }
 }

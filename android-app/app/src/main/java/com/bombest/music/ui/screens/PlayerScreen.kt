@@ -16,7 +16,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Download
@@ -238,7 +238,7 @@ fun TopRow(onClose: () -> Unit, onRegisterPasskey: () -> Unit = {}) {
     ) {
         IconButtonCircle(onClick = onClose) {
             Icon(
-                imageVector = Icons.Default.ArrowBack,
+                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                 contentDescription = "Back",
                 tint = Color(0xFFF470FF)
             )
@@ -273,6 +273,13 @@ fun TopRow(onClose: () -> Unit, onRegisterPasskey: () -> Unit = {}) {
                 DropdownMenuItem(
                     text = { Text("Sleep Timer", color = Color.White) },
                     onClick = { showMenu = false }
+                )
+                DropdownMenuItem(
+                    text = { Text("Register Passkey", color = Color.White) },
+                    onClick = {
+                        showMenu = false
+                        onRegisterPasskey()
+                    }
                 )
             }
         }

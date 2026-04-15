@@ -48,6 +48,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.guava.future
 import kotlinx.coroutines.withContext
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import java.util.concurrent.atomic.AtomicBoolean
 
 class BombestMediaService : MediaLibraryService() {
 
@@ -68,6 +69,9 @@ class BombestMediaService : MediaLibraryService() {
     private var audioOffloadListener: ExoPlayer.AudioOffloadListener? = null
     private var playerListener: Player.Listener? = null
     private var analyticsListener: androidx.media3.exoplayer.analytics.AnalyticsListener? = null
+    // onDestroy can race with the service being torn down twice (rapid Auto reconnects
+    // observed in prod logs). The AtomicBoolean guard makes listener removal idempotent.
+    private val listenersRemoved = AtomicBoolean(false)
 
     // Track current audio format + connection type as dimensions for CloudWatch metrics.
     // Updated on each media item transition and network change.
@@ -964,14 +968,18 @@ class BombestMediaService : MediaLibraryService() {
         PerformanceMetricsManager.flush()
         // Detach listeners before release so any held closures drop references promptly —
         // release() alone isn't always enough when the service is recreated rapidly.
-        this.player?.let { p ->
-            audioOffloadListener?.let { p.removeAudioOffloadListener(it) }
-            playerListener?.let { p.removeListener(it) }
-            analyticsListener?.let { p.removeAnalyticsListener(it) }
+        // listenersRemoved guard: protects against onDestroy racing with itself on rapid
+        // Auto reconnects (observed in prod logs — double-remove would NPE on the player).
+        if (listenersRemoved.compareAndSet(false, true)) {
+            this.player?.let { p ->
+                audioOffloadListener?.let { p.removeAudioOffloadListener(it) }
+                playerListener?.let { p.removeListener(it) }
+                analyticsListener?.let { p.removeAnalyticsListener(it) }
+            }
+            audioOffloadListener = null
+            playerListener = null
+            analyticsListener = null
         }
-        audioOffloadListener = null
-        playerListener = null
-        analyticsListener = null
         mediaSession?.run {
             player.stop()
             player.release()
