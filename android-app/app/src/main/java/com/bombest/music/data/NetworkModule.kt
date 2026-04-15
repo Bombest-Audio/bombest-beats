@@ -1,5 +1,6 @@
 package com.bombest.music.data
 
+import android.content.Context
 import com.bombest.music.data.api.MusicApi
 import com.bombest.music.data.api.AuthApi
 import com.bombest.music.data.api.PlaylistApi
@@ -58,7 +59,26 @@ object NetworkModule {
         level = HttpLoggingInterceptor.Level.BASIC
     }
     
-    private val okHttpClient = OkHttpClient.Builder()
+    // Set by attachJwtAuthenticator() once the Application context is available.
+    // Kept as an OkHttp Authenticator (not an interceptor) so it runs *after* the
+    // server responds 401, giving us both the expired token and the original request
+    // in one shot — which is exactly what refresh-and-retry needs.
+    private var jwtAuthenticator: okhttp3.Authenticator? = null
+    private var builtClient: OkHttpClient? = null
+
+    /**
+     * Install the JWT refresh authenticator. Call once from [BombestApplication.onCreate].
+     * Safe to call multiple times (rebuilds the shared client so existing retrofit
+     * instances pick up the new authenticator on the next request).
+     */
+    fun attachJwtAuthenticator(context: Context) {
+        jwtAuthenticator = JwtAuthenticator(context.applicationContext)
+        builtClient = null  // Force lazy rebuild on next access.
+        _retrofit = buildRetrofit(BASE_URLS[currentUrlIndex.get()])
+        playlistRetrofit = null
+    }
+
+    private fun buildOkHttpClient(): OkHttpClient = OkHttpClient.Builder()
         .addInterceptor(loggingInterceptor)
         .addInterceptor { chain ->
             val originalRequest = chain.request()
@@ -163,7 +183,14 @@ object NetworkModule {
         }
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(20, TimeUnit.SECONDS)
+        .apply {
+            jwtAuthenticator?.let { authenticator(it) }
+        }
         .build()
+
+    /** Lazy accessor — rebuilds when attachJwtAuthenticator() nulls builtClient. */
+    private val okHttpClient: OkHttpClient
+        get() = builtClient ?: buildOkHttpClient().also { builtClient = it }
 
     private val moshi = com.squareup.moshi.Moshi.Builder()
         .add(com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory())

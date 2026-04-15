@@ -41,13 +41,20 @@ class MusicRepository(private val context: android.content.Context) {
         }
     }
     
-    fun getStreamUrl(trackId: Int): String {
-        // Always request AAC 256 kbps for remote streams:
-        //   - WAV/FLAC/OGG (~800–1400 kbps) are transcoded server-side to 256 kbps AAC
-        //   - 5x smaller payload → buffer fills faster → fewer underruns on cellular/Android Auto
-        //   - AAC triggers hardware audio offload on Android (WAV/FLAC do not)
-        //   - MP3/AAC originals are served unchanged (server skips transcode)
-        return "${NetworkModule.getStreamBaseUrl()}/stream/$trackId?format=aac&bitrate=256"
+    /**
+     * Build a `/stream/<id>` URL.
+     *
+     * - [transcodeForAuto] = true (Android Auto path): request `?transcode=aac&bitrate=256`.
+     *   Auto's certified playback stack is AAC/MP4 only — FLAC/WAV/OGG would be rejected by
+     *   the ExoPlayer renderer the head-unit ships with. Transcoding server-side keeps the
+     *   payload small (~5x smaller than FLAC) so the buffer fills faster on cellular.
+     * - [transcodeForAuto] = false (phone/headphones path): no transcode flag — the server
+     *   passes the source through with its canonical Content-Type (`audio/flac`, `audio/mpeg`,
+     *   etc) so lossless sources stay lossless and MP3/AAC originals are served unchanged.
+     */
+    fun getStreamUrl(trackId: Int, transcodeForAuto: Boolean = false): String {
+        val base = "${NetworkModule.getStreamBaseUrl()}/stream/$trackId"
+        return if (transcodeForAuto) "$base?transcode=aac&bitrate=256" else base
     }
     
     fun getTrackArtUrl(trackId: Int): String {

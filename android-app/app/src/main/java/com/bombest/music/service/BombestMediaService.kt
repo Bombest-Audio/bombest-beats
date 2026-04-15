@@ -142,6 +142,8 @@ class BombestMediaService : MediaLibraryService() {
         /** Playable row: expands to full shuffled library in onSetMediaItems / onAddMediaItems */
         const val SPECIAL_SHUFFLE_ALL = "special:shuffle_all"
         private const val BROWSE_PAGE_SIZE = 80
+        /** Package name Android Auto's Gearhead host (projection mode) advertises on connect. */
+        const val AUTO_PACKAGE = "com.google.android.projection.gearhead"
     }
 
     private fun formatFromMimeType(mimeType: String?): String = when {
@@ -573,10 +575,11 @@ class BombestMediaService : MediaLibraryService() {
                                 if (pid == null || api == null) {
                                     Futures.immediateFuture(LibraryResult.ofItemList(ImmutableList.of(), params))
                                 } else {
+                                    val transcodeForAuto = isAutoController(browser)
                                     serviceScope.future(Dispatchers.IO) {
                                         try {
                                             val tracks = api.getPlaylistTracks(pid).tracks
-                                            val items = tracks.map { buildMediaItemFromApiTrack(it) }
+                                            val items = tracks.map { buildMediaItemFromApiTrack(it, transcodeForAuto) }
                                             LibraryResult.ofItemList(ImmutableList.copyOf(items), params)
                                         } catch (e: Exception) {
                                             android.util.Log.e("BombestMediaService", "browse playlist $pid", e)
@@ -801,15 +804,23 @@ class BombestMediaService : MediaLibraryService() {
             .build()
     }
 
-    private fun buildMediaItemFromApiTrack(track: ApiTrack): MediaItem {
+    private fun buildMediaItemFromApiTrack(
+        track: ApiTrack,
+        transcodeForAuto: Boolean = false,
+    ): MediaItem {
         val tid = track.id.toString()
-        val streamUrl = repository.getStreamUrl(track.id)
+        val streamUrl = repository.getStreamUrl(track.id, transcodeForAuto)
         val artUri = Uri.parse(repository.getTrackArtUrl(track.id))
-        // Local downloads are stored as .mp3; remote streams always arrive as AAC
-        // (server transcodes WAV/FLAC/OGG on-the-fly when ?format=aac is requested).
+        // Local downloads: let DownloadManager infer from extension (mp3/m4a/flac).
+        // Remote streams: if we asked the server to transcode (Auto path), the bytes
+        // come back as fragmented MP4/AAC; otherwise the source format's canonical
+        // MIME (flac/mpeg/mp4/wav) so hardware offload can engage on phones.
         val isLocal = downloadManager.hasLocalTrackFile(tid)
-        val mimeType = if (isLocal) downloadManager.mimeTypeForPlayback(tid, track.path)
-                       else androidx.media3.common.MimeTypes.AUDIO_MP4
+        val mimeType = when {
+            isLocal -> downloadManager.mimeTypeForPlayback(tid, track.path)
+            transcodeForAuto -> androidx.media3.common.MimeTypes.AUDIO_MP4
+            else -> inferRemoteMimeType(track.path)
+        }
         return MediaItem.Builder()
             .setMediaId(tid)
             .setUri(downloadManager.playbackUriForTrack(tid, streamUrl))
@@ -827,6 +838,33 @@ class BombestMediaService : MediaLibraryService() {
                     .build()
             )
             .build()
+    }
+
+    /**
+     * Whether this browse/session controller is the Android Auto projection host.
+     * Gearhead is the package name shipped on every factory AA head unit; Polestar
+     * and BMW OEM stacks also advertise as this package per the Car App Library.
+     */
+    private fun isAutoController(info: MediaSession.ControllerInfo?): Boolean {
+        return info?.packageName == AUTO_PACKAGE
+    }
+
+    /**
+     * Canonical MIME for a remote pass-through stream based on the source's file extension.
+     * Falls back to MPEG (MP3) when the extension is unknown — safest default for the
+     * legacy library where most uploads are MP3 anyway. Must agree with the backend's
+     * `_PASS_THROUGH_CONTENT_TYPE` map (upload_server.py).
+     */
+    private fun inferRemoteMimeType(path: String?): String {
+        val ext = path?.substringAfterLast('.', "")?.lowercase().orEmpty()
+        return when (ext) {
+            "flac" -> androidx.media3.common.MimeTypes.AUDIO_FLAC
+            "mp3" -> androidx.media3.common.MimeTypes.AUDIO_MPEG
+            "m4a", "mp4", "aac" -> androidx.media3.common.MimeTypes.AUDIO_MP4
+            "wav" -> androidx.media3.common.MimeTypes.AUDIO_WAV
+            "ogg", "oga" -> androidx.media3.common.MimeTypes.AUDIO_OGG
+            else -> androidx.media3.common.MimeTypes.AUDIO_MPEG
+        }
     }
 
     private fun slicePage(list: List<MediaItem>, page: Int, pageSize: Int): List<MediaItem> {
@@ -891,11 +929,17 @@ class BombestMediaService : MediaLibraryService() {
                 val mediaItems = withContext(Dispatchers.Default) {
                     tracks.map { track ->
                         val tid = track.id.toString()
-                        val streamUrl = repository.getStreamUrl(track.id)
+                        // fetchLibrary runs before any controller connects, so default to the
+                        // phone/headphones path (pass-through). Auto re-requests playables via
+                        // onGetChildren with its packageName, and those build a fresh MediaItem
+                        // list with ?transcode=aac and audio/mp4 MIME.
+                        val streamUrl = repository.getStreamUrl(track.id, transcodeForAuto = false)
                         val artUri = Uri.parse(repository.getTrackArtUrl(track.id))
                         val isLocal = downloadManager.hasLocalTrackFile(tid)
-                        val mimeType = if (isLocal) downloadManager.mimeTypeForPlayback(tid, track.path)
-                                       else androidx.media3.common.MimeTypes.AUDIO_MP4
+                        val mimeType = when {
+                            isLocal -> downloadManager.mimeTypeForPlayback(tid, track.path)
+                            else -> inferRemoteMimeType(track.path)
+                        }
                         MediaItem.Builder()
                             .setMediaId(tid)
                             .setUri(downloadManager.playbackUriForTrack(tid, streamUrl))

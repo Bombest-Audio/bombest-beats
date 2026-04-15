@@ -7,6 +7,7 @@ import android.widget.Toast
 import androidx.car.app.connection.CarConnection
 import androidx.lifecycle.Observer
 import com.bombest.music.car.CarUiPolish
+import com.bombest.music.data.NetworkModule
 import com.bombest.music.work.CarLibrarySyncWorker
 
 /**
@@ -41,6 +42,9 @@ class BombestApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // Register the JWT Authenticator before any Retrofit calls fire so a 401 on the
+        // first authenticated request can refresh transparently (vs. bouncing the user to login).
+        NetworkModule.attachJwtAuthenticator(this)
         CarConnection(this).getType().observeForever(carConnectionObserver)
     }
 
