@@ -7,8 +7,8 @@
 
 ## Phases
 
-- [ ] **Phase 1: Release Build** - Configure signing, build release AAB/APK, sideload test
-- [ ] **Phase 2: Store Assets** - Create and optimize app icon, feature graphic, screenshots
+- [x] **Phase 1: Release Build** - Configure signing, build release AAB/APK, sideload test
+- [x] **Phase 2: Store Assets** - Create and optimize app icon, feature graphic, screenshots
 - [ ] **Phase 3: Play Store Listing** - Create listing, complete content rating, add privacy policy
 - [ ] **Phase 4: Submission & Publication** - Upload, pass pre-launch review, publish
 - [ ] **Phase 5: E2E UI Tests** - Page objects, method chaining, AAA pattern, P0 regression flows
@@ -76,9 +76,9 @@
 | SIGN-03 | Phase 1 | Pending |
 | SIDE-01 | Phase 1 | Pending |
 | SIDE-02 | Phase 1 | Pending |
-| ASSET-01 | Phase 2 | Pending |
-| ASSET-02 | Phase 2 | Pending |
-| ASSET-03 | Phase 2 | Pending |
+| ASSET-01 | Phase 2 | ✅ Complete |
+| ASSET-02 | Phase 2 | ✅ Complete |
+| ASSET-03 | Phase 2 | ✅ Complete |
 | LIST-01 | Phase 3 | Pending |
 | LIST-02 | Phase 3 | Pending |
 | LIST-03 | Phase 3 | Pending |
