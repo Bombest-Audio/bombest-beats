@@ -31,7 +31,16 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity, get_jwt
+from datetime import datetime, timedelta, timezone
+
+from flask_jwt_extended import (
+    JWTManager,
+    create_access_token,
+    create_refresh_token,
+    jwt_required,
+    get_jwt_identity,
+    get_jwt,
+)
 import bcrypt
 import mediafile  # noqa: F401  — used in update_item() to rewrite audio-file tags
 import smtplib
@@ -53,8 +62,39 @@ with open('config.yaml', 'r') as f:
 
 # JWT Configuration
 app.config['JWT_SECRET_KEY'] = config.get('jwt_secret', 'dev-secret-key')
-app.config['JWT_ACCESS_TOKEN_EXPIRES'] = False # Non-expiring for simplicty in MVP
+# 30-day access TTL keeps refresh pressure low while still allowing revocation
+# windows. Previously False (non-expiring) — see C6 / issue #24.
+app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(days=30)
+# 180-day refresh TTL. We don't rotate refresh tokens in v1 — rotation adds a
+# race/ordering surface for mobile (sleep/wake, parallel requests) and the
+# benefit is minor when refresh lives only in Keychain/DataStore.
+app.config['JWT_REFRESH_TOKEN_EXPIRES'] = timedelta(days=180)
+# Field-issued tokens pre-C6 have no `exp` claim — accepting them until this
+# date gives mobile/web clients a window to upgrade and obtain a refresh token.
+# Anything older than this is force-logged-out.
+LEGACY_TOKEN_GRACE_UNTIL = datetime(2026, 6, 15, tzinfo=timezone.utc)
 jwt = JWTManager(app)
+
+
+@jwt.token_verification_loader
+def _accept_legacy_token_without_exp(jwt_header, jwt_payload):
+    """Accept pre-C6 tokens (no `exp` claim) until LEGACY_TOKEN_GRACE_UNTIL.
+
+    flask-jwt-extended calls this after standard validation. Returning True
+    passes verification; False rejects. We only intervene when the token is
+    missing `exp` (legacy shape); tokens with a real `exp` are rejected by the
+    library's normal clock check if stale and never reach this loader.
+    """
+    if 'exp' in jwt_payload:
+        return True  # Normal path — library already validated exp.
+    if datetime.now(tz=timezone.utc) > LEGACY_TOKEN_GRACE_UNTIL:
+        return False
+    logger.warning(
+        "Accepting legacy no-exp JWT for user=%s (grace until %s)",
+        jwt_payload.get('sub'),
+        LEGACY_TOKEN_GRACE_UNTIL.date().isoformat(),
+    )
+    return True
 # CORS: allow frontend origins (bom.best, CloudFront, beats-app host the app; beats.bom.best is API)
 _cors_origins = [
     'https://bom.best', 'https://www.bom.best',
@@ -2021,12 +2061,16 @@ def register():
             
         conn.commit()
         
-        # Create token
-        access_token = create_access_token(identity=str(new_user_id), additional_claims={'role': role, 'username': username})
-        
+        # Create tokens (access for API calls, refresh for obtaining new access)
+        claims = {'role': role, 'username': username}
+        access_token = create_access_token(identity=str(new_user_id), additional_claims=claims)
+        refresh_token = create_refresh_token(identity=str(new_user_id), additional_claims=claims)
+
         return jsonify({
             'message': 'Registration successful',
             'access_token': access_token,
+            'refresh_token': refresh_token,
+            'expires_in': int(app.config['JWT_ACCESS_TOKEN_EXPIRES'].total_seconds()),
             'user': {'id': new_user_id, 'username': username, 'role': role}
         }), 201
         
@@ -2066,11 +2110,42 @@ def login():
     if not user or not bcrypt.checkpw(password.encode('utf-8'), user['password_hash'].encode('utf-8') if isinstance(user['password_hash'], str) else user['password_hash']):
         return jsonify({'error': 'Invalid credentials'}), 401
 
-    access_token = create_access_token(identity=str(user['id']), additional_claims={'role': user['role'], 'username': user['username']})
-    
+    claims = {'role': user['role'], 'username': user['username']}
+    access_token = create_access_token(identity=str(user['id']), additional_claims=claims)
+    refresh_token = create_refresh_token(identity=str(user['id']), additional_claims=claims)
+
     return jsonify({
         'access_token': access_token,
+        'refresh_token': refresh_token,
+        'expires_in': int(app.config['JWT_ACCESS_TOKEN_EXPIRES'].total_seconds()),
         'user': {'id': user['id'], 'username': user['username'], 'role': user['role']}
+    }), 200
+
+
+@app.route('/auth/refresh', methods=['POST'])
+@jwt_required(refresh=True)
+def refresh_access_token():
+    """Exchange a valid refresh token for a new access token.
+
+    Refresh tokens are not rotated in v1 — see JWT_REFRESH_TOKEN_EXPIRES comment.
+    Clients should store the refresh token in a secure keystore (Keychain on iOS,
+    EncryptedSharedPreferences/DataStore on Android).
+    """
+    user_id = get_jwt_identity()
+    # Re-read role/username so stale claims don't outlive a role change.
+    conn = sqlite3.connect(USERS_DB)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute('SELECT id, username, role FROM users WHERE id = ?', (user_id,))
+    user = cursor.fetchone()
+    conn.close()
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+    claims = {'role': user['role'], 'username': user['username']}
+    access_token = create_access_token(identity=str(user['id']), additional_claims=claims)
+    return jsonify({
+        'access_token': access_token,
+        'expires_in': int(app.config['JWT_ACCESS_TOKEN_EXPIRES'].total_seconds()),
     }), 200
 
 @app.route('/auth/me', methods=['GET'])
@@ -2361,14 +2436,15 @@ def passkey_login_verify():
         # Clean up challenge
         del passkey_challenges[login_id]
         
-        # Issue JWT
-        access_token = create_access_token(
-            identity=str(cred['user_id']),
-            additional_claims={'role': cred['role'], 'username': cred['username']}
-        )
-        
+        # Issue JWT pair (access + refresh)
+        claims = {'role': cred['role'], 'username': cred['username']}
+        access_token = create_access_token(identity=str(cred['user_id']), additional_claims=claims)
+        refresh_token = create_refresh_token(identity=str(cred['user_id']), additional_claims=claims)
+
         return jsonify({
             'access_token': access_token,
+            'refresh_token': refresh_token,
+            'expires_in': int(app.config['JWT_ACCESS_TOKEN_EXPIRES'].total_seconds()),
             'user': {'id': cred['user_id'], 'username': cred['username'], 'role': cred['role']}
         })
     except Exception as e:
