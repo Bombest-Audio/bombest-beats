@@ -3234,23 +3234,63 @@ def search_playlist(playlist_id):
         logger.warning("Error searching playlist: %s", e)
         return jsonify({'error': str(e)}), 500
 
-# Formats that need transcoding to AAC for mobile playback.
-# MP3 and AAC/M4A already have hardware offload support — serve as-is.
-_TRANSCODE_EXTS = {'.wav', '.flac', '.ogg', '.aiff', '.aif'}
+# Formats that can be transcoded to AAC on request (?transcode=aac).
+# MP3 and AAC/M4A already have hardware offload everywhere — never transcoded.
+_TRANSCODEABLE_EXTS = {'.wav', '.flac', '.ogg', '.aiff', '.aif'}
+
+# Per-codec Content-Type for pass-through streaming. mimetypes.guess_type() is
+# unreliable for FLAC and WAV (returns 'application/octet-stream' on some OSes),
+# so the spec-canonical types are hardcoded here. See /stream contract in docs.
+_PASS_THROUGH_CONTENT_TYPE = {
+    '.flac': 'audio/flac',
+    '.mp3': 'audio/mpeg',
+    '.m4a': 'audio/mp4',
+    '.mp4': 'audio/mp4',
+    '.aac': 'audio/aac',
+    '.wav': 'audio/x-wav',
+    '.ogg': 'audio/ogg',
+    '.aiff': 'audio/aiff',
+    '.aif': 'audio/aiff',
+}
 
 # Max source size for on-the-fly transcode. Guards /tmp when the source lives in S3
 # and must be downloaded locally so ffmpeg can seek (FLAC header parsing needs seek).
 MAX_TRANSCODE_SOURCE_BYTES = int(os.environ.get('MAX_TRANSCODE_SOURCE_BYTES', 200 * 1024 * 1024))
 
 
-def _should_transcode(file_path, fmt):
+def _wants_aac_transcode(args):
+    """Client opts into transcode via ?transcode=aac (primary) or ?format=aac (legacy)."""
+    return (
+        args.get('transcode', '').lower() == 'aac'
+        or args.get('format', '').lower() == 'aac'
+    )
+
+
+def _should_transcode(file_path, args):
+    """Transcode only when the client explicitly asks AND the source is transcodeable."""
     ext = os.path.splitext(file_path)[1].lower()
-    # Always transcode non-AAC/MP3 formats so all clients get fragmented MP4.
-    # Explicit ?format=aac also triggers it, but the default for WAV/FLAC/OGG
-    # is to transcode rather than serving raw files that most players can't stream.
-    if ext in _TRANSCODE_EXTS:
-        return True
-    return fmt == 'aac' and ext in _TRANSCODE_EXTS
+    return _wants_aac_transcode(args) and ext in _TRANSCODEABLE_EXTS
+
+
+def _pass_through_content_type(file_path):
+    """Canonical Content-Type for a pass-through (non-transcoded) response."""
+    ext = os.path.splitext(file_path)[1].lower()
+    return _PASS_THROUGH_CONTENT_TYPE.get(ext) or (
+        mimetypes.guess_type(file_path)[0] or 'application/octet-stream'
+    )
+
+
+def _ffmpeg_available():
+    """Report whether the ffmpeg binary is on PATH. Cached result is not used
+    (cheap enough), so container rebuilds that install ffmpeg don't need restart."""
+    return shutil.which('ffmpeg') is not None
+
+
+def _ffmpeg_unavailable_response():
+    return jsonify({
+        'error': 'transcode unavailable',
+        'code': 'FFMPEG_MISSING',
+    }), 503
 
 
 def _transcode_generator(file_path, bitrate='256k'):
@@ -3331,34 +3371,50 @@ def stream_track(track_id):
         if isinstance(file_path, bytes):
             file_path = file_path.decode('utf-8', errors='ignore')
 
-        # ?format=aac&bitrate=256 — requested by Android client for hardware-offload-compatible
-        # streaming. WAV/FLAC/OGG are transcoded on-the-fly; MP3/AAC pass through unchanged.
-        fmt = request.args.get('format', '').lower()
+        # ?transcode=aac&bitrate=256 (primary) or ?format=aac (legacy alias) — requested by
+        # Android Auto for hardware-offload-compatible streaming. Without the param,
+        # all codecs pass through (FLAC direct to phones/headphones, etc).
         raw_bitrate = request.args.get('bitrate', '256')
         try:
             bitrate = f"{int(raw_bitrate)}k"
         except ValueError:
             bitrate = '256k'
+        # Clamp to a sane range — stops clients requesting silly values that would
+        # either waste bandwidth (>320) or produce garbage-quality output (<96).
+        try:
+            kbps = int(raw_bitrate)
+            bitrate = f"{max(96, min(320, kbps))}k"
+        except ValueError:
+            bitrate = '256k'
+
+        if _wants_aac_transcode(request.args) and not _ffmpeg_available():
+            return _ffmpeg_unavailable_response()
+
+        transcoded_headers = {
+            'Accept-Ranges': 'none',
+            'Cache-Control': 'no-store',
+        }
 
         # --- Local Strategy (preferred — avoids S3 download for transcode) ---
         if os.path.exists(file_path):
-            if _should_transcode(file_path, fmt):
+            if _should_transcode(file_path, request.args):
                 return Response(
                     _transcode_generator(file_path, bitrate),
                     mimetype='audio/mp4',
-                    headers={'Accept-Ranges': 'none'}
+                    headers=transcoded_headers,
                 )
-            mime_type, _ = mimetypes.guess_type(file_path)
-            if file_path.lower().endswith('.wav') and (not mime_type or mime_type == 'application/octet-stream'):
-                mime_type = 'audio/x-wav'
-            return send_file(file_path, mimetype=mime_type, conditional=True)
+            return send_file(
+                file_path,
+                mimetype=_pass_through_content_type(file_path),
+                conditional=True,
+            )
 
         # --- S3 Fallback (file not on local disk) ---
         if s3_client:
             try:
                 rel_path = os.path.relpath(file_path, start=os.getcwd())
                 if not rel_path.startswith('..'):
-                    if _should_transcode(rel_path, fmt):
+                    if _should_transcode(rel_path, request.args):
                         # Cap source size before downloading — a 500 MB FLAC would fill /tmp.
                         # head_object is cheap and lets us 413 cleanly rather than failing mid-download.
                         try:
@@ -3398,7 +3454,7 @@ def stream_track(track_id):
                         return Response(
                             generate_s3_transcode(),
                             mimetype='audio/mp4',
-                            headers={'Accept-Ranges': 'none'}
+                            headers=transcoded_headers,
                         )
                     else:
                         # Original format — pass through with range support
@@ -3409,11 +3465,11 @@ def stream_track(track_id):
                         try:
                             resp = s3_client.get_object(**params)
                             body = resp['Body']
-                            content_type = resp.get('ContentType') or mimetypes.guess_type(rel_path)[0] or 'application/octet-stream'
-                            if rel_path.lower().endswith('.wav'):
-                                content_type = 'audio/x-wav'
+                            # Trust our ext-keyed canonical map over S3 ContentType
+                            # (bucket uploads were mostly written as octet-stream).
+                            content_type = _pass_through_content_type(rel_path)
                             status = resp.get('ResponseMetadata', {}).get('HTTPStatusCode', 200)
-                            headers = {}
+                            headers = {'Accept-Ranges': 'bytes'}
                             if 'ContentLength' in resp:
                                 headers['Content-Length'] = str(resp['ContentLength'])
                             if 'ContentRange' in resp:
