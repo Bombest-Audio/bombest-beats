@@ -33,6 +33,7 @@ logger = logging.getLogger(__name__)
 
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity, get_jwt
 import bcrypt
+import mediafile  # noqa: F401  — used in update_item() to rewrite audio-file tags
 import smtplib
 import yaml
 import boto3
@@ -86,6 +87,48 @@ if S3_BUCKET and AWS_ACCESS_KEY and AWS_SECRET_KEY:
         logger.info("S3 client initialized for bucket: %s", S3_BUCKET)
     except Exception as e:
         logger.error("Failed to init S3: %s", e)
+
+
+# --- Transcode temp-file sweeper ---
+# Transcode temp files are normally deleted in a generator's finally block, but
+# if the process is killed mid-stream (OOM, SIGKILL) the file leaks. Every 15
+# min a daemon thread sweeps /tmp/bombest-transcode-* files older than 1h. The
+# prefix is namespaced so we won't delete files from other tools.
+_TRANSCODE_TMP_PREFIX = 'bombest-transcode-'
+_TRANSCODE_SWEEP_INTERVAL_SEC = 15 * 60
+_TRANSCODE_STALE_THRESHOLD_SEC = 60 * 60
+
+
+def _sweep_transcode_tmp_files():
+    """Daemon-thread loop that removes stale transcode temp files."""
+    tmp_dir = tempfile.gettempdir()
+    while True:
+        try:
+            now = time.time()
+            for entry in os.listdir(tmp_dir):
+                if not entry.startswith(_TRANSCODE_TMP_PREFIX):
+                    continue
+                path = os.path.join(tmp_dir, entry)
+                try:
+                    age = now - os.path.getmtime(path)
+                except OSError:
+                    continue
+                if age < _TRANSCODE_STALE_THRESHOLD_SEC:
+                    continue
+                try:
+                    os.unlink(path)
+                    logger.info("Swept stale transcode temp file: %s (age=%ds)", path, int(age))
+                except OSError as e:
+                    logger.warning("Failed to sweep %s: %s", path, e)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Transcode sweeper error: %s", e)
+        time.sleep(_TRANSCODE_SWEEP_INTERVAL_SEC)
+
+
+_transcode_sweeper = threading.Thread(
+    target=_sweep_transcode_tmp_files, name='transcode-tmp-sweeper', daemon=True
+)
+_transcode_sweeper.start()
 
 
 # --- Helpers ---
@@ -3232,7 +3275,7 @@ def _transcode_generator(file_path, bitrate='256k'):
     ]
     # Capture stderr to a tempfile so we can surface transcode errors for triage.
     # A PIPE would deadlock because we read stdout incrementally and never drain stderr.
-    stderr_fd, stderr_path = tempfile.mkstemp(prefix='ffmpeg_stderr_', suffix='.log')
+    stderr_fd, stderr_path = tempfile.mkstemp(prefix='bombest-transcode-stderr-', suffix='.log')
     proc = None
     try:
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=stderr_fd)
@@ -3332,7 +3375,7 @@ def stream_track(track_id):
 
                         # Download to temp file so ffmpeg can seek (needed for FLAC header parsing)
                         ext = os.path.splitext(rel_path)[1] or '.wav'
-                        tmp_fd, tmp_path = tempfile.mkstemp(suffix=ext)
+                        tmp_fd, tmp_path = tempfile.mkstemp(prefix='bombest-transcode-', suffix=ext)
                         os.close(tmp_fd)
                         try:
                             resp = s3_client.get_object(Bucket=S3_BUCKET, Key=rel_path)
