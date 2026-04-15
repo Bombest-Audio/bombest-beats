@@ -1,9 +1,11 @@
 import base64
 import errno
+import logging
 import os
 import mimetypes
 import re
 import json
+import sys
 import uuid
 import subprocess
 import sqlite3
@@ -18,6 +20,16 @@ import threading
 from flask import Flask, request, jsonify, send_file, Response
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
+
+# Module-level logger (INFO default, stderr). Route handlers and helpers should
+# use `logger` — not `print()` — so logs route through the configured handlers
+# and can be filtered/tagged in deployment.
+logging.basicConfig(
+    level=os.environ.get('LOG_LEVEL', 'INFO'),
+    format='%(asctime)s %(levelname)s %(name)s: %(message)s',
+    stream=sys.stderr,
+)
+logger = logging.getLogger(__name__)
 
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity, get_jwt
 import bcrypt
@@ -71,9 +83,9 @@ if S3_BUCKET and AWS_ACCESS_KEY and AWS_SECRET_KEY:
             aws_secret_access_key=AWS_SECRET_KEY,
             config=BotocoreConfig(signature_version='s3v4'),
         )
-        print(f"✅ S3 Client initialized for bucket: {S3_BUCKET}")
+        logger.info("S3 client initialized for bucket: %s", S3_BUCKET)
     except Exception as e:
-        print(f"❌ Failed to init S3: {e}")
+        logger.error("Failed to init S3: %s", e)
 
 
 # --- Helpers ---
@@ -213,7 +225,7 @@ def init_track_artwork():
         conn.commit()
         conn.close()
     except Exception as e:
-        print(f"track_artwork init: {e}")
+        logger.warning("track_artwork init: %s", e)
 
 ALLOWED_EXTENSIONS = {'mp3', 'wav', 'ogg', 'flac', 'm4a'}
 
@@ -267,7 +279,7 @@ def _set_import_marker(filepath, marker):
                     raw.save()
                     return True
     except Exception as e:
-        print(f"Could not set import marker: {e}")
+        logger.warning("Could not set import marker: %s", e)
     return False
 
 def _find_track_by_marker(marker, timeout=10, title_hint=None):
@@ -303,7 +315,7 @@ def _find_track_by_marker(marker, timeout=10, title_hint=None):
             if row:
                 return row[0]
         except Exception as e:
-            print(f"Title-based track lookup failed: {e}")
+            logger.warning("Title-based track lookup failed: %s", e)
     return None
 
 def _clear_import_marker(track_id, genre_value=''):
@@ -315,7 +327,7 @@ def _clear_import_marker(track_id, genre_value=''):
         conn.commit()
         conn.close()
     except Exception as e:
-        print(f"Could not clear import marker: {e}")
+        logger.warning("Could not clear import marker: %s", e)
 
 
 def allowed_file(filename):
@@ -347,7 +359,7 @@ def check_duplicate(track_name):
         conn.close()
         return result  # Returns (id, title) if found, None otherwise
     except Exception as e:
-        print(f"Duplicate check error: {e}")
+        logger.warning("Duplicate check error: %s", e)
         return None
 
 def set_audio_title(filepath, title):
@@ -363,7 +375,7 @@ def set_audio_title(filepath, title):
             audio.save()
             return True
     except Exception as e:
-        print(f"Could not set metadata: {e}")
+        logger.warning("Could not set metadata: %s", e)
     return False
 
 def generate_waveform_peaks(audio_path, num_peaks=200):
@@ -421,7 +433,7 @@ def generate_waveform_peaks(audio_path, num_peaks=200):
         return peaks
         
     except Exception as e:
-        print(f"Waveform generation error: {e}")
+        logger.warning("Waveform generation error: %s", e)
         return None
 
 def get_track_path(track_id):
@@ -435,7 +447,7 @@ def get_track_path(track_id):
         if result:
             return result[0]
     except Exception as e:
-        print(f"Get track path error: {e}")
+        logger.warning("Get track path error: %s", e)
     return None
 
 @app.route('/waveform/<int:track_id>', methods=['GET'])
@@ -494,7 +506,7 @@ def detect_beats(audio_path, beats_per_bar=4):
             'duration': round(duration, 3),
         }
     except Exception as e:
-        print(f"Beat detection error: {e}")
+        logger.warning("Beat detection error: %s", e)
         return None
 
 
@@ -581,7 +593,7 @@ def upload_file():
                     conn.commit()
                     conn.close()
                 except Exception as db_err:
-                    print(f"Warning: Could not update title in database: {db_err}")
+                    logger.warning("Could not update title in database: %s", db_err)
 
                 # --- S3 Upload (report failures to frontend) ---
                 if s3_client:
@@ -599,13 +611,13 @@ def upload_file():
 
                             rel_path = os.path.relpath(final_path, start=os.getcwd())
                             if not rel_path.startswith('..'):
-                                print(f"Uploading to S3: {rel_path}")
+                                logger.info("Uploading to S3: %s", rel_path)
                                 s3_client.upload_file(final_path, S3_BUCKET, rel_path)
                     except Exception as s3_err:
-                        print(f"❌ S3 Upload Failed: {s3_err}")
+                        logger.error("S3 upload failed: %s", s3_err)
                         s3_warning = f"Track imported locally but S3 sync failed: {s3_err}"
             else:
-                print(f"⚠️ Could not find imported track by marker: {import_marker}")
+                logger.warning("Could not find imported track by marker: %s", import_marker)
 
 
             # Clean up uploaded file
@@ -721,7 +733,7 @@ def _set_audio_metadata(filepath, title, artist, album):
                     raw.save()
                     return True
     except Exception as e:
-        print(f"Could not set metadata: {e}")
+        logger.warning("Could not set metadata: %s", e)
     return False
 
 def _insert_track_artwork(track_id, src_path, art_type, is_primary=0, suffix=None):
@@ -744,7 +756,7 @@ def _insert_track_artwork(track_id, src_path, art_type, is_primary=0, suffix=Non
         conn.close()
         return rel_path
     except Exception as e:
-        print(f"Failed to store track artwork: {e}")
+        logger.warning("Failed to store track artwork: %s", e)
         return None
 
 
@@ -921,7 +933,7 @@ def _import_from_directory(extract_root, album_override=None, user_id=None):
                     if not rel_path.startswith('..'):
                         s3_client.upload_file(final_path, S3_BUCKET, rel_path)
             except Exception as s3_err:
-                print(f"S3 upload failed for {new_id}: {s3_err}")
+                logger.error("S3 upload failed for %s: %s", new_id, s3_err)
                 results['s3_warnings'].append({'track_id': new_id, 'error': str(s3_err)})
 
         results['imported'].append({'track_name': track_name, 'id': new_id})
@@ -942,7 +954,7 @@ def _import_from_directory(extract_root, album_override=None, user_id=None):
             conn.close()
             playlist_info = {'id': playlist_id, 'name': album_override, 'count': len(results['imported'])}
         except Exception as e:
-            print(f"Warning: failed to auto-create playlist: {e}")
+            logger.warning("Failed to auto-create playlist: %s", e)
 
     response = {
         'message': f"Imported {len(results['imported'])} tracks",
@@ -1049,7 +1061,7 @@ def _cleanup_s3_session(session_id, keys):
         try:
             s3_client.delete_object(Bucket=S3_BUCKET, Key=key)
         except Exception as e:
-            print(f"S3 cleanup failed for {key}: {e}")
+            logger.warning("S3 cleanup failed for %s: %s", key, e)
     # Remove session tracking
     with _presign_sessions_lock:
         _presign_sessions.pop(session_id, None)
@@ -1083,7 +1095,7 @@ def _run_process_job(job_id, session_id, keys, work_dir, prefix, album_override=
             try:
                 shutil.rmtree(work_dir)
             except Exception as cleanup_err:
-                print(f"Warning: temp dir cleanup failed: {cleanup_err}")
+                logger.warning("Temp dir cleanup failed: %s", cleanup_err)
 
 
 @app.route('/upload/process', methods=['POST'])
@@ -1277,7 +1289,7 @@ def _update_audio_tags(filepath, title=None, artist=None, album=None):
                     raw.tags.add(TALB(encoding=3, text=[album]))
                 raw.save()
     except Exception as e:
-        print(f"Warning: Could not update audio file metadata for {filepath}: {e}")
+        logger.warning("Could not update audio file metadata for %s: %s", filepath, e)
 
 
 @app.route('/track/<int:track_id>', methods=['PUT'])
@@ -1371,7 +1383,7 @@ def delete_track(track_id):
             users_conn.commit()
             users_conn.close()
         except Exception as e:
-            print(f"Warning: playlist_tracks cleanup failed for track {track_id}: {e}")
+            logger.warning("playlist_tracks cleanup failed for track %s: %s", track_id, e)
         
         # Delete waveform cache
         waveform_file = os.path.join(WAVEFORM_FOLDER, f'{track_id}.json')
@@ -1383,7 +1395,7 @@ def delete_track(track_id):
             try:
                 os.remove(track_path)
             except Exception as e:
-                print(f"Warning: could not delete local file {track_path}: {e}")
+                logger.warning("Could not delete local file %s: %s", track_path, e)
 
         # Delete from S3
         if s3_client:
@@ -1392,7 +1404,7 @@ def delete_track(track_id):
                 if not rel_path.startswith('..'):
                     s3_client.delete_object(Bucket=S3_BUCKET, Key=rel_path)
             except Exception as e:
-                print(f"Warning: S3 delete failed for track {track_id}: {e}")
+                logger.warning("S3 delete failed for track %s: %s", track_id, e)
 
         return jsonify({
             'message': 'Track deleted successfully',
@@ -1528,7 +1540,7 @@ def batch_delete_tracks():
                     try:
                         os.remove(track_path)
                     except Exception as e:
-                        print(f"Error deleting file {track_path}: {e}")
+                        logger.warning("Error deleting file %s: %s", track_path, e)
             
             deleted_count += 1
             
@@ -1715,7 +1727,7 @@ def update_item(item_id):
         if 'album' in data: f.album = data['album']
         f.save()
     except Exception as e:
-        print(f"Metadata write error: {e}")
+        logger.warning("Metadata write error: %s", e)
         # Non-fatal, DB is updated
         
     return jsonify({'message': 'Item updated'}), 200
@@ -2821,7 +2833,7 @@ def get_playlist_art(playlist_id):
             return '', 404
         return send_file(art_path, mimetype=mimetypes.guess_type(art_path)[0] or 'image/jpeg')
     except Exception as e:
-        print(f"Error serving playlist art: {e}")
+        logger.warning("Error serving playlist art: %s", e)
         return '', 404
 
 @app.route('/playlists/<int:playlist_id>/art', methods=['PUT', 'POST'])
@@ -2874,7 +2886,7 @@ def set_playlist_art(playlist_id):
         conn.close()
         return jsonify({'success': True, 'art_url': f"/playlists/{playlist_id}/art"})
     except Exception as e:
-        print(f"Error setting playlist art: {e}")
+        logger.warning("Error setting playlist art: %s", e)
         return jsonify({'error': str(e)}), 500
 
 @app.route('/playlists/<int:playlist_id>/tracks', methods=['GET'])
@@ -2934,7 +2946,7 @@ def get_playlist_tracks(playlist_id):
         
         return jsonify({'tracks': formatted_tracks})
     except Exception as e:
-        print(f"Error fetching playlist tracks: {e}")
+        logger.warning("Error fetching playlist tracks: %s", e)
         return jsonify({'error': str(e)}), 500
 
 @app.route('/playlists/<int:playlist_id>/tracks', methods=['POST'])
@@ -3067,7 +3079,7 @@ def initialize_system_playlists():
             'favorites_id': favorites_id
         })
     except Exception as e:
-        print(f"Error initializing system playlists: {e}")
+        logger.warning("Error initializing system playlists: %s", e)
         return jsonify({'error': str(e)}), 500
 
 @app.route('/playlists/<int:playlist_id>/reorder', methods=['PUT'])
@@ -3106,7 +3118,7 @@ def reorder_playlist_tracks(playlist_id):
         
         return jsonify({'success': True, 'count': len(track_ids)})
     except Exception as e:
-        print(f"Error reordering playlist: {e}")
+        logger.warning("Error reordering playlist: %s", e)
         return jsonify({'error': str(e)}), 500
 
 @app.route('/playlists/<int:playlist_id>/search', methods=['GET'])
@@ -3172,7 +3184,7 @@ def search_playlist(playlist_id):
         
         return jsonify({'tracks': formatted_tracks})
     except Exception as e:
-        print(f"Error searching playlist: {e}")
+        logger.warning("Error searching playlist: %s", e)
         return jsonify({'error': str(e)}), 500
 
 # Formats that need transcoding to AAC for mobile playback.
@@ -3241,7 +3253,7 @@ def _transcode_generator(file_path, bitrate='256k'):
                 try:
                     with open(stderr_path, 'r', errors='replace') as f:
                         tail = f.read()[-2000:]
-                    print(f"ffmpeg exit {proc.returncode} for {file_path}: {tail}")
+                    logger.warning("ffmpeg exit %s for %s: %s", proc.returncode, file_path, tail)
                 except OSError:
                     pass
         if stderr_fd >= 0:
@@ -3306,7 +3318,7 @@ def stream_track(track_id):
                             head = s3_client.head_object(Bucket=S3_BUCKET, Key=rel_path)
                             content_length = int(head.get('ContentLength') or 0)
                         except ClientError as e:
-                            print(f"S3 head_object error (transcode): {e}")
+                            logger.warning("S3 head_object error (transcode): %s", e)
                             return jsonify({'error': 'S3 error'}), 502
                         if content_length > MAX_TRANSCODE_SOURCE_BYTES:
                             return jsonify({
@@ -3324,7 +3336,7 @@ def stream_track(track_id):
                                 shutil.copyfileobj(resp['Body'], f)
                         except ClientError as e:
                             os.unlink(tmp_path)
-                            print(f"S3 get_object error (transcode): {e}")
+                            logger.warning("S3 get_object error (transcode): %s", e)
                             return jsonify({'error': 'S3 error'}), 502
 
                         def generate_s3_transcode():
@@ -3361,7 +3373,7 @@ def stream_track(track_id):
                                 headers['Content-Range'] = resp['ContentRange']
                             return Response(body, status=status, mimetype=content_type, headers=headers, direct_passthrough=True)
                         except ClientError as e:
-                            print(f"S3 get_object error: {e}")
+                            logger.warning("S3 get_object error: %s", e)
             except (ValueError, OSError):
                 pass
 
@@ -3394,7 +3406,7 @@ def get_album_art(album_id):
 
         return send_file(art_path)
     except Exception as e:
-        print(f"Art error: {e}")
+        logger.warning("Art error: %s", e)
         return jsonify({'error': str(e)}), 500
 
 @app.route('/track/<int:track_id>/art', methods=['GET'])
@@ -3498,7 +3510,7 @@ def get_track_art(track_id):
                 if artwork_data:
                     return send_file(BytesIO(artwork_data), mimetype='image/jpeg')
             except Exception as extract_error:
-                print(f"Artwork extraction error: {extract_error}")
+                logger.warning("Artwork extraction error: %s", extract_error)
 
         # Return default artwork
         default_art = os.path.join(os.path.dirname(__file__), 'static', 'no-image.png')
@@ -3507,7 +3519,7 @@ def get_track_art(track_id):
         
         return jsonify({'error': 'No artwork found'}), 404
     except Exception as e:
-        print(f"Track art error: {e}")
+        logger.warning("Track art error: %s", e)
         return jsonify({'error': str(e)}), 500
 
 
@@ -3538,7 +3550,7 @@ def get_track_canvas(track_id):
     except sqlite3.OperationalError:
         return jsonify({'error': 'No canvas found'}), 404
     except Exception as e:
-        print(f"Canvas error: {e}")
+        logger.warning("Canvas error: %s", e)
         return jsonify({'error': str(e)}), 500
 
 
@@ -3603,7 +3615,7 @@ def notify_interest():
         return jsonify({'message': 'Notification sent'}), 200
         
     except Exception as e:
-        print(f"Notify error: {e}")
+        logger.warning("Notify error: %s", e)
         return jsonify({'error': str(e)}), 500
 
 # --- Favorites & Roles ---
@@ -3720,7 +3732,7 @@ def toggle_favorite(playlist_id):
         
         return jsonify({'success': True, 'favorited': favorited})
     except Exception as e:
-        print(f"Error toggling favorite: {e}")
+        logger.warning("Error toggling favorite: %s", e)
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
@@ -3786,7 +3798,7 @@ def batch_record_plays():
         return jsonify({'message': f'Successfully recorded {count} events'}), 201
         
     except Exception as e:
-        print(f"Batch metrics error: {e}")
+        logger.warning("Batch metrics error: %s", e)
         return jsonify({'error': str(e)}), 500
 
 @app.route('/metrics/dashboard', methods=['GET'])
@@ -3939,7 +3951,7 @@ def _emit_perf_metrics(events):
                 MetricData=metric_data[i:i + 20]
             )
     except Exception as e:
-        print(f"CloudWatch emit error (non-fatal): {e}")
+        logger.warning("CloudWatch emit error (non-fatal): %s", e)
 
 
 def ensure_cloudwatch_dashboard():
@@ -4010,9 +4022,9 @@ def ensure_cloudwatch_dashboard():
             ]
         })
         cw.put_dashboard(DashboardName='BombestBeats-Playback', DashboardBody=dashboard_body)
-        print("CloudWatch dashboard 'BombestBeats-Playback' created/updated")
+        logger.info("CloudWatch dashboard 'BombestBeats-Playback' created/updated")
     except Exception as e:
-        print(f"Dashboard setup error (non-fatal): {e}")
+        logger.warning("Dashboard setup error (non-fatal): %s", e)
 
 
 @app.route('/metrics/performance', methods=['POST'])
@@ -4072,7 +4084,7 @@ def batch_record_perf():
         return jsonify({'message': f'Recorded {len(events)} perf events'}), 201
 
     except Exception as e:
-        print(f"Performance metrics error: {e}")
+        logger.warning("Performance metrics error: %s", e)
         return jsonify({'error': str(e)}), 500
 
 
@@ -4102,7 +4114,7 @@ def _check_s3_health():
             _s3_health_cache['ok'] = True
         return 'ok', None
     except Exception as e:
-        print(f"/health S3 probe failed: {e}")
+        logger.warning("/health S3 probe failed: %s", e)
         with _s3_health_lock:
             _s3_health_cache['ts'] = now
             _s3_health_cache['ok'] = False
@@ -4130,7 +4142,7 @@ def health_check():
         conn.close()
         checks['library_db'] = {'status': 'ok', 'track_count': track_count}
     except Exception as e:
-        print(f"/health library_db probe failed: {e}")
+        logger.warning("/health library_db probe failed: %s", e)
         checks['library_db'] = {'status': 'error'}
         healthy = False
 

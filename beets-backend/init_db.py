@@ -1,10 +1,13 @@
-import sqlite3
-import bcrypt
+import logging
 import os
+import sqlite3
+
+import bcrypt
 
 from db_path import get_users_db_path
 
 DB_PATH = get_users_db_path()
+logger = logging.getLogger(__name__)
 
 def migrate_loop_points_table(cursor):
     """Idempotent migration for the loops -> loop_points rename.
@@ -63,7 +66,7 @@ def migrate_loop_points_table(cursor):
 
 
 def init_db():
-    print(f"Initializing user database at {DB_PATH}...")
+    logger.info("Initializing user database at %s", DB_PATH)
     
     # Ensure directory exists (DATA_DIR or music/)
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
@@ -192,22 +195,22 @@ def init_db():
     # Check if admin exists
     cursor.execute("SELECT * FROM users WHERE username = 'admin'")
     if not cursor.fetchone():
-        print("Creating default admin user...")
+        logger.info("Creating default admin user...")
         password = "admin_password" # Change this immediately!
         salt = bcrypt.gensalt()
         hashed = bcrypt.hashpw(password.encode('utf-8'), salt)
-        
+
         cursor.execute(
             "INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)",
             ('admin', hashed.decode('utf-8'), 'admin')
         )
-        print(f"Admin user created. Username: admin, Password: {password}")
+        logger.info("Admin user created. Username: admin, Password: %s", password)
     else:
-        print("Admin user already exists.")
-        
+        logger.info("Admin user already exists.")
+
     conn.commit()
     conn.close()
-    print("Database initialization complete.")
+    logger.info("Database initialization complete.")
 
 if __name__ == '__main__':
     init_db()
