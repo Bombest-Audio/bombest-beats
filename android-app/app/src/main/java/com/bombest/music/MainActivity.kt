@@ -495,7 +495,8 @@ fun MainContent(
                     onSetLoopStart = viewModel::setLoopStart,
                     onSetLoopEnd = viewModel::setLoopEnd,
                     onClearLoop = viewModel::clearLoop,
-                    isBuffering = viewModel.isBuffering.value
+                    isBuffering = viewModel.isBuffering.value,
+                    isCastConnected = viewModel.isCastConnected
                 )
             }
         }
@@ -514,9 +515,10 @@ fun MainContent(
                     onNext = viewModel::skipNext,
                     onPrevious = viewModel::skipPrevious,
                     onClick = { isPlayerOpen = true },
-                    progress = if (viewModel.duration.value > 0) 
+                    progress = if (viewModel.duration.value > 0)
                         viewModel.currentPosition.value.toFloat() / viewModel.duration.value.toFloat()
-                    else 0f
+                    else 0f,
+                    showCastButton = true
                 )
             }
         }

@@ -54,6 +54,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val duration = mutableStateOf(0L)
     val isBuffering = mutableStateOf(false)
 
+    // Cast State — true when a Chromecast session is active (audio is on the remote device)
+    var isCastConnected by mutableStateOf(false)
+        private set
+
     // A-B Loop State
     val loopStartMs = mutableStateOf<Long?>(null)
     val loopEndMs = mutableStateOf<Long?>(null)
@@ -95,6 +99,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val shuffleHistory = mutableListOf<Int>()
     private val unplayedIndices = mutableSetOf<Int>()
     
+    init {
+        observeCastState()
+    }
+
+    private fun observeCastState() {
+        val castContext = runCatching {
+            com.google.android.gms.cast.framework.CastContext.getSharedInstance(getApplication())
+        }.getOrNull() ?: return
+        castContext.addCastStateListener { state ->
+            isCastConnected = state == com.google.android.gms.cast.framework.CastState.CONNECTED
+        }
+    }
+
     private fun requestAudioSessionId() {
         android.util.Log.d("MainViewModel", "requestAudioSessionId called, mediaBrowser: $mediaBrowser")
         

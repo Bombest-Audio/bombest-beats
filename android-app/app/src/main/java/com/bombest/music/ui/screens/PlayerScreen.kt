@@ -100,6 +100,7 @@ fun PlayerScreen(
     onSetLoopEnd: () -> Unit = {},
     onClearLoop: () -> Unit = {},
     isBuffering: Boolean = false,
+    isCastConnected: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     // Full Screen Background - Graffiti theme deep navy
@@ -136,7 +137,7 @@ fun PlayerScreen(
                     .verticalScroll(scrollState),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                TopRow(onClose = onClose, onRegisterPasskey = onRegisterPasskey)
+                TopRow(onClose = onClose, onRegisterPasskey = onRegisterPasskey, showCastButton = true)
 
                 Spacer(Modifier.height(16.dp))
 
@@ -185,16 +186,19 @@ fun PlayerScreen(
 
                 Spacer(Modifier.height(24.dp))
 
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(120.dp)
-                ) {
-                    GraffitiWaveformVisualizer(
-                        amplitudes = amplitudes,
-                        isPlaying = isPlaying,
-                        modifier = Modifier.fillMaxSize()
-                    )
+                // Visualizer renders on-device waveform; audio is on the Chromecast when casting
+                if (!isCastConnected) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(120.dp)
+                    ) {
+                        GraffitiWaveformVisualizer(
+                            amplitudes = amplitudes,
+                            isPlaying = isPlaying,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
                 }
 
                 Spacer(Modifier.height(16.dp))
@@ -228,9 +232,9 @@ fun PlayerScreen(
 
 
 @Composable
-fun TopRow(onClose: () -> Unit, onRegisterPasskey: () -> Unit = {}) {
+fun TopRow(onClose: () -> Unit, onRegisterPasskey: () -> Unit = {}, showCastButton: Boolean = true) {
     var showMenu by remember { mutableStateOf(false) }
-    
+
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -243,7 +247,22 @@ fun TopRow(onClose: () -> Unit, onRegisterPasskey: () -> Unit = {}) {
                 tint = Color(0xFFF470FF)
             )
         }
-        
+
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (showCastButton) {
+                AndroidView(
+                    factory = { ctx ->
+                        androidx.mediarouter.app.MediaRouteButton(ctx).also { btn ->
+                            com.google.android.gms.cast.framework.CastButtonFactory
+                                .setUpMediaRouteButton(ctx, btn)
+                        }
+                    },
+                    modifier = Modifier
+                        .size(40.dp)
+                        .padding(4.dp)
+                )
+            }
+
         Box {
             IconButtonCircle(onClick = { showMenu = true }) {
                 Icon(
@@ -282,7 +301,8 @@ fun TopRow(onClose: () -> Unit, onRegisterPasskey: () -> Unit = {}) {
                     }
                 )
             }
-        }
+        } // end Box (menu)
+        } // end inner Row (cast + menu)
     }
 }
 

@@ -45,6 +45,11 @@ class BombestApplication : Application() {
         // Register the JWT Authenticator before any Retrofit calls fire so a 401 on the
         // first authenticated request can refresh transparently (vs. bouncing the user to login).
         NetworkModule.attachJwtAuthenticator(this)
+        // Initialize Cast framework on the main thread (required before any Activity starts).
+        // Failure is non-fatal — Cast just won't be available on devices without Play Services.
+        runCatching {
+            com.google.android.gms.cast.framework.CastContext.getSharedInstance(this)
+        }
         CarConnection(this).getType().observeForever(carConnectionObserver)
     }
 

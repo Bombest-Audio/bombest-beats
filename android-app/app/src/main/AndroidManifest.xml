@@ -66,6 +66,11 @@
         <meta-data
             android:name="com.google.android.gms.car.application"
             android:resource="@xml/automotive_app_desc" />
+
+        <!-- Cast framework: registers the options provider that sets the receiver app ID -->
+        <meta-data
+            android:name="com.google.android.gms.cast.framework.OPTIONS_PROVIDER_CLASS_NAME"
+            android:value="com.bombest.music.cast.CastOptionsProvider" />
         
     </application>
 

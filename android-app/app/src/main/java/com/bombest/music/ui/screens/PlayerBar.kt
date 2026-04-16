@@ -33,6 +33,7 @@ import androidx.media3.common.MediaItem
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.bombest.music.R
+import androidx.compose.ui.viewinterop.AndroidView
 import kotlin.math.abs
 
 /**
@@ -58,6 +59,7 @@ fun PlayerBar(
     onPrevious: () -> Unit = {},
     onClick: () -> Unit,
     progress: Float = 0f,  // 0.0 to 1.0 for progress bar
+    showCastButton: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     if (currentMediaItem == null) return
@@ -223,6 +225,19 @@ fun PlayerBar(
                             contentDescription = "Next",
                             tint = Color.White.copy(alpha = 0.8f),
                             modifier = Modifier.size(24.dp)
+                        )
+                    }
+
+                    if (showCastButton) {
+                        Spacer(modifier = Modifier.width(4.dp))
+                        AndroidView(
+                            factory = { ctx ->
+                                androidx.mediarouter.app.MediaRouteButton(ctx).also { btn ->
+                                    com.google.android.gms.cast.framework.CastButtonFactory
+                                        .setUpMediaRouteButton(ctx, btn)
+                                }
+                            },
+                            modifier = Modifier.size(36.dp)
                         )
                     }
                 }

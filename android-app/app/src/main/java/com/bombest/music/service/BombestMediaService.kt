@@ -69,6 +69,7 @@ class BombestMediaService : MediaLibraryService() {
 
     // Kept as a field so NetworkCallback and error recovery can reference it
     private var player: ExoPlayer? = null
+    private var castPlayer: androidx.media3.cast.CastPlayer? = null
 
     // Listener references stored so onDestroy can remove them before player.release().
     // Belt-and-braces against leaks when the service is recreated rapidly (e.g., Auto reconnects).
@@ -761,6 +762,22 @@ class BombestMediaService : MediaLibraryService() {
         .setBitmapLoader(bitmapLoader)
         .build()
 
+        // CastPlayer: initialized after mediaSession so switchToPlayer() can set mediaSession.player.
+        // runCatching because getSharedInstance() throws on devices without Play Services.
+        val castContext = runCatching {
+            com.google.android.gms.cast.framework.CastContext.getSharedInstance(this)
+        }.getOrNull()
+        if (castContext != null) {
+            castPlayer = androidx.media3.cast.CastPlayer(castContext).also { cp ->
+                cp.setSessionAvailabilityListener(object : androidx.media3.cast.SessionAvailabilityListener {
+                    override fun onCastSessionAvailable() { switchToPlayer(cp) }
+                    override fun onCastSessionUnavailable() { player?.let { switchToPlayer(it) } }
+                })
+                // Already in a Cast session when service starts (e.g. cold-start while casting)
+                if (cp.isCastSessionAvailable) switchToPlayer(cp)
+            }
+        }
+
         fetchLibrary(player)
     }
 
@@ -906,6 +923,45 @@ class BombestMediaService : MediaLibraryService() {
         return out
     }
 
+    /**
+     * Transfers current queue + position to [target] and sets it as the active session player.
+     * When switching to [CastPlayer], stream URIs are rewritten to force AAC transcode so the
+     * Default Media Receiver can decode WAV/FLAC sources (it only handles MP4/AAC natively).
+     * Must be called on the main thread.
+     */
+    private fun switchToPlayer(target: androidx.media3.common.Player) {
+        val session = mediaSession ?: return
+        val current = session.player
+        if (current === target) return
+
+        val index = current.currentMediaItemIndex.coerceAtLeast(0)
+        val positionMs = current.currentPosition
+        val playWhenReady = current.playWhenReady
+        val items = (0 until current.mediaItemCount).map { current.getMediaItemAt(it) }
+
+        current.stop()
+
+        val targetItems = if (target is androidx.media3.cast.CastPlayer) {
+            items.map { item ->
+                val uri = item.localConfiguration?.uri ?: return@map item
+                val castUri = if (uri.getQueryParameter("transcode") == null)
+                    uri.buildUpon()
+                        .appendQueryParameter("transcode", "aac")
+                        .appendQueryParameter("bitrate", "256")
+                        .build()
+                else uri
+                item.buildUpon().setUri(castUri).setMimeType("audio/mp4").build()
+            }
+        } else items
+
+        target.setMediaItems(targetItems, index, positionMs)
+        target.playWhenReady = playWhenReady
+        target.prepare()
+        session.player = target
+        android.util.Log.i("BombestMediaService",
+            "switchToPlayer → ${target.javaClass.simpleName}, index=$index, pos=${positionMs}ms")
+    }
+
     private fun fetchLibrary(player: Player) {
         android.util.Log.d("BombestMediaService", "fetchLibrary() called, launching coroutine...")
         serviceScope.launch {
@@ -1015,6 +1071,9 @@ class BombestMediaService : MediaLibraryService() {
             playerListener = null
             analyticsListener = null
         }
+        castPlayer?.setSessionAvailabilityListener(null)
+        castPlayer?.release()
+        castPlayer = null
         mediaSession?.run {
             player.stop()
             player.release()
