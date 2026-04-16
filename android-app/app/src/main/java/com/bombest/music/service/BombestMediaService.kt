@@ -222,13 +222,16 @@ class BombestMediaService : MediaLibraryService() {
             .build()
         this.player = player
 
-        // Hardware audio offload: prefer delegating decoding to the audio DSP coprocessor
-        // so the main CPU can sleep between buffer refills (Android 10+, MP3/AAC).
-        // Eliminates GC/scheduler wakeups that cause mid-track skipping.
+        // Hardware audio offload trades the visualizer for battery life. On Pixels (verified
+        // 2026-04-15 against a Pixel 8) the offload path runs PCM through the DSP and bypasses
+        // `android.media.audiofx.Visualizer`'s effect-chain tap — any attached Visualizer
+        // instance gets a STOP → TearDown ~1.7s after playback starts (see logcat tag
+        // AHAL_EffectImpl / EHal::VisualizerProcessor). Since the fullscreen player shows
+        // the visualizer by default, keep offload DISABLED. The mid-track skip regression
+        // that motivated adding offload was separately fixed by the load-control changes
+        // (DefaultLoadControl buffer tuning) so this disable should not bring it back.
         val audioOffloadPrefs = TrackSelectionParameters.AudioOffloadPreferences.Builder()
-            .setAudioOffloadMode(TrackSelectionParameters.AudioOffloadPreferences.AUDIO_OFFLOAD_MODE_ENABLED)
-            .setIsGaplessSupportRequired(true)
-            .setIsSpeedChangeSupportRequired(false)
+            .setAudioOffloadMode(TrackSelectionParameters.AudioOffloadPreferences.AUDIO_OFFLOAD_MODE_DISABLED)
             .build()
         player.trackSelectionParameters = player.trackSelectionParameters
             .buildUpon()

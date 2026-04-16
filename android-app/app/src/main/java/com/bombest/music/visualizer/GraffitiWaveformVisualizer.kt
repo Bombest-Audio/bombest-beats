@@ -48,19 +48,21 @@ fun GraffitiWaveformVisualizer(
         }
     }
     
-    // Smooth amplitudes - derivedStateOf properly observes SnapshotStateList changes
-    val smoothedAmplitudes by remember {
-        derivedStateOf {
-            if (amplitudes.isEmpty()) emptyList()
-            else smoother.smooth(amplitudes.take(qualityTier.strokeSegments))
-        }
+    // Smooth amplitudes. NOTE: the previous implementation used `remember { derivedStateOf {
+    // amplitudes.take(..) } }` with no key. `amplitudes` is a plain function parameter — not a
+    // Snapshot state — so `derivedStateOf` never observed it, and `remember {}` cached the
+    // first (empty) value forever. That's why the canvas below short-circuited on
+    // `smoothedAmplitudes.isEmpty()` on every frame. Key the remember on `amplitudes` so the
+    // smoother runs on every recomposition of the parent (which recomposes whenever
+    // MainViewModel.visualizerAmplitudes — a real mutableStateOf — changes).
+    val smoothedAmplitudes = remember(amplitudes, qualityTier) {
+        if (amplitudes.isEmpty()) emptyList()
+        else smoother.smooth(amplitudes.take(qualityTier.strokeSegments))
     }
-    
+
     // Create frame with peak detection
-    val frame by remember {
-        derivedStateOf {
-            VisualizerFrame.from(smoothedAmplitudes)
-        }
+    val frame = remember(smoothedAmplitudes) {
+        VisualizerFrame.from(smoothedAmplitudes)
     }
     
     Canvas(modifier = modifier.fillMaxSize()) {

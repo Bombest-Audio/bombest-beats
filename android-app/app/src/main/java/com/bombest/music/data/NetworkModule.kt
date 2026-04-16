@@ -30,8 +30,13 @@ object NetworkModule {
 
     // Once we've failed over, stay on the failover URL for this cooldown before
     // auto-retrying the primary. Prevents ping-pong when Cloudflare has a brief
-    // blip but also prevents permanent stickiness if the primary recovers.
-    private const val FAILOVER_COOLDOWN_MS = 5L * 60L * 1000L
+    // blip but also recovers quickly when primary comes back up. 60s strikes a
+    // balance: long enough to let Cloudflare route changes settle, short enough
+    // that a recovered primary isn't stuck behind the failover for 5 minutes.
+    //
+    // For a probe-based recovery (hitting /health on primary before each
+    // request once cooldown elapses), see the follow-up ticket.
+    private const val FAILOVER_COOLDOWN_MS = 60L * 1000L
     private val failoverTimestamp = AtomicLong(0L)
 
     /** If cooldown has elapsed since last failover, reset to primary. */
@@ -74,6 +79,7 @@ object NetworkModule {
     fun attachJwtAuthenticator(context: Context) {
         jwtAuthenticator = JwtAuthenticator(context.applicationContext)
         builtClient = null  // Force lazy rebuild on next access.
+        builtPlaylistClient = null  // Same for the playlist client.
         _retrofit = buildRetrofit(BASE_URLS[currentUrlIndex.get()])
         playlistRetrofit = null
     }
@@ -113,7 +119,9 @@ object NetworkModule {
                         .url(newUrl)
                         .build()
                     
-                    android.util.Log.d("NetworkModule", "Attempting request to: ${newUrl.host}${newUrl.encodedPath}")
+                    // Log only host + first path segment to avoid leaking share
+                    // tokens (/playlists/share/<token>) via Logcat/bugreports.
+                    android.util.Log.d("NetworkModule", "Attempting request to: ${newUrl.host}/${newUrl.pathSegments.firstOrNull().orEmpty()}")
                     val response = chain.proceed(newRequest)
                     
                     // If we get a successful response or HTTP error (4xx, 5xx), don't failover
@@ -224,8 +232,14 @@ object NetworkModule {
         playlistBearerToken.set(token)
     }
 
-    private val playlistAuthClient: OkHttpClient by lazy {
-        okHttpClient.newBuilder()
+    // Lazy + rebuildable. When attachJwtAuthenticator() nulls builtClient, it
+    // also nulls this so the new JwtAuthenticator is picked up on next access.
+    // Without this, the playlist client snapshots the pre-authenticator
+    // okHttpClient once and silently never auto-refreshes on 401.
+    private var builtPlaylistClient: OkHttpClient? = null
+
+    private val playlistAuthClient: OkHttpClient
+        get() = builtPlaylistClient ?: okHttpClient.newBuilder()
             .addInterceptor { chain ->
                 val t = playlistBearerToken.get()
                 val req = if (!t.isNullOrBlank()) {
@@ -238,7 +252,7 @@ object NetworkModule {
                 chain.proceed(req)
             }
             .build()
-    }
+            .also { builtPlaylistClient = it }
 
     private var playlistRetrofit: Retrofit? = null
     private var playlistRetrofitBase: String? = null

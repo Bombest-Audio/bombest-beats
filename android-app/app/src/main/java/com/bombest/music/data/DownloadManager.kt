@@ -182,16 +182,12 @@ class DownloadManager private constructor(private val context: Context) {
         return mimeForPath(pathFromApi)
     }
 
-    private fun mimeForPath(path: String?): String {
-        if (path.isNullOrBlank()) return MimeTypes.AUDIO_MPEG
-        return when {
-            path.endsWith(".wav", true) -> MimeTypes.AUDIO_WAV
-            path.endsWith(".flac", true) -> MimeTypes.AUDIO_FLAC
-            path.endsWith(".m4a", true) || path.endsWith(".aac", true) -> MimeTypes.AUDIO_AAC
-            path.endsWith(".ogg", true) -> MimeTypes.AUDIO_OGG
-            else -> MimeTypes.AUDIO_MPEG
-        }
-    }
+    // Delegates to MimeInference to keep a single source of truth for
+    // extension→MIME mapping. Critically, .m4a / .aac are MP4 containers and
+    // must be advertised as AUDIO_MP4 (not AUDIO_AAC) so ExoPlayer picks the
+    // right extractor — otherwise AAC-in-MP4 sources fail to play.
+    private fun mimeForPath(path: String?): String =
+        com.bombest.music.service.MimeInference.inferRemoteMimeType(path)
     
     /**
      * Download a track to local storage.

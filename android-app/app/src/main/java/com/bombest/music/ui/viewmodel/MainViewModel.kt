@@ -419,7 +419,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 // Request Audio Session ID for Visualizer
                 requestAudioSessionId()
             } catch (e: Exception) {
-                e.printStackTrace()
+                android.util.Log.e("MainViewModel", "MediaBrowser init failed", e)
             }
         }, MoreExecutors.directExecutor())
     }
@@ -612,7 +612,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
              } catch(e: Exception) {
                 android.util.Log.e("MainViewModel", "Error getting children", e)
                 libraryState.value = LibraryState.ERROR
-                e.printStackTrace()
              }
         }, MoreExecutors.directExecutor())
     }

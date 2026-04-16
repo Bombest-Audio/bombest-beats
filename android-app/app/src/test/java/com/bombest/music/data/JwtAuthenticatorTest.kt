@@ -135,6 +135,65 @@ class JwtAuthenticatorTest {
         assertNull("refresh failure must propagate original 401 to caller", retry)
     }
 
+    @Test
+    fun `concurrent 401s trigger only one refresh round-trip`() {
+        // Seed refresh token + a stale access token.
+        runBlocking {
+            context.authDataStore.edit { prefs ->
+                prefs[AuthPreferences.REFRESH_TOKEN_KEY] = "refresh-abc"
+                prefs[AuthPreferences.TOKEN_KEY] = "stale-access"
+            }
+        }
+        // Only one refresh response is enqueued. If single-flight is broken, the
+        // second (and later) threads will hit MockWebServer with no response and
+        // throw, or call takeRequest twice.
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setBody("""{"access_token":"fresh-access","expires_in":2592000}""")
+                .setHeader("Content-Type", "application/json"),
+        )
+
+        val auth = JwtAuthenticator(context) { server.url("/").toString().trimEnd('/') }
+
+        // Build N synthetic 401 responses, all using the same stale token.
+        val n = 5
+        val staleAuth = "Bearer stale-access"
+        val requests = (1..n).map {
+            val req = Request.Builder()
+                .url(server.url("/tracks/$it").toString())
+                .header("Authorization", staleAuth)
+                .build()
+            Response.Builder()
+                .request(req)
+                .protocol(Protocol.HTTP_1_1)
+                .code(401)
+                .message("Unauthorized")
+                .build()
+        }
+
+        // Fire them in parallel threads and join.
+        val results = java.util.Collections.synchronizedList(mutableListOf<Request?>())
+        val threads = requests.map { resp ->
+            Thread { results.add(auth.authenticate(route = null, response = resp)) }.also { it.start() }
+        }
+        threads.forEach { it.join(5_000) }
+
+        // Every thread should end up with the same fresh bearer token.
+        assertEquals(n, results.size)
+        results.forEach { r ->
+            assertNotNull(r)
+            assertEquals("Bearer fresh-access", r?.header("Authorization"))
+        }
+
+        // Exactly one hit to /auth/refresh.
+        val firstRefresh = server.takeRequest(2, java.util.concurrent.TimeUnit.SECONDS)
+        assertNotNull("first thread should refresh", firstRefresh)
+        assertEquals("/auth/refresh", firstRefresh?.path)
+        val secondRefresh = server.takeRequest(500, java.util.concurrent.TimeUnit.MILLISECONDS)
+        assertNull("later threads must replay with the stored token, not refresh again", secondRefresh)
+    }
+
     /** Build a minimal 401 Response with the given URL for the Authenticator to inspect. */
     private fun fakeResponse(url: String): Response {
         val req = Request.Builder().url(url).build()

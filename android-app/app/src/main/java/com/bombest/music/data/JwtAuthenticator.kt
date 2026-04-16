@@ -2,6 +2,9 @@ package com.bombest.music.data
 
 import android.content.Context
 import androidx.datastore.preferences.core.edit
+import com.bombest.music.data.api.RefreshResponse
+import com.squareup.moshi.Moshi
+import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.flow.first
 import okhttp3.Authenticator
@@ -46,6 +49,15 @@ class JwtAuthenticator(
             .build()
     }
 
+    /**
+     * Single-flight lock around the refresh call. N concurrent 401s (e.g. library +
+     * playlists + waveform) must not trigger N parallel refreshes — that races into
+     * DataStore and, if the backend ever starts rotating refresh tokens, can trigger
+     * a 401 loop. With the lock, the first caller refreshes and the rest simply
+     * replay with the freshly-stored token.
+     */
+    private val refreshLock = Any()
+
     override fun authenticate(route: Route?, response: Response): Request? {
         // Already retried once — don't loop forever.
         if (response.priorResponse != null) return null
@@ -54,13 +66,33 @@ class JwtAuthenticator(
         // Same guard for the login endpoints — 401 there means bad creds, not expired token.
         if (response.request.url.encodedPath.endsWith("/auth/login")) return null
 
-        val refreshToken = readRefreshTokenBlocking() ?: return null
-        val newAccess = tryRefresh(refreshToken) ?: return null
-        saveAccessTokenBlocking(newAccess)
+        synchronized(refreshLock) {
+            val failedAuth = response.request.header("Authorization")
+            val currentAccess = readAccessTokenBlocking()
+            // If another thread already refreshed while we were waiting on the lock,
+            // the stored access token will differ from the one the failed request
+            // used. Short-circuit and replay with the current token — no extra
+            // network round-trip and no duplicate DataStore writes.
+            if (currentAccess != null && failedAuth != "Bearer $currentAccess") {
+                return response.request.newBuilder()
+                    .header("Authorization", "Bearer $currentAccess")
+                    .build()
+            }
 
-        return response.request.newBuilder()
-            .header("Authorization", "Bearer $newAccess")
-            .build()
+            val refreshToken = readRefreshTokenBlocking() ?: return null
+            val newAccess = tryRefresh(refreshToken) ?: return null
+            saveAccessTokenBlocking(newAccess)
+
+            return response.request.newBuilder()
+                .header("Authorization", "Bearer $newAccess")
+                .build()
+        }
+    }
+
+    private fun readAccessTokenBlocking(): String? {
+        return runBlocking {
+            appContext.authDataStore.data.first()[AuthPreferences.TOKEN_KEY]
+        }
     }
 
     private fun readRefreshTokenBlocking(): String? {
@@ -90,14 +122,20 @@ class JwtAuthenticator(
             refreshClient.newCall(req).execute().use { r ->
                 if (!r.isSuccessful) return null
                 val body = r.body?.string() ?: return null
-                // Tiny ad-hoc JSON parse — avoids taking a Moshi dep here and keeps the
-                // Authenticator self-contained. Shape is {"access_token":"..","expires_in":N}.
-                val match = Regex("\"access_token\"\\s*:\\s*\"([^\"]+)\"").find(body)
-                match?.groupValues?.get(1)
+                // Moshi handles escaped quotes and nested keys correctly — safer than the
+                // regex parse this replaced.
+                refreshAdapter.fromJson(body)?.access_token
             }
         } catch (e: Exception) {
             android.util.Log.w("JwtAuthenticator", "Refresh failed: ${e.message}")
             null
         }
+    }
+
+    private val refreshAdapter by lazy {
+        Moshi.Builder()
+            .add(KotlinJsonAdapterFactory())
+            .build()
+            .adapter(RefreshResponse::class.java)
     }
 }
