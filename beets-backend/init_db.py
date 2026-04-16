@@ -30,8 +30,22 @@ def migrate_loop_points_table(cursor):
 
     if 'loops' in existing and 'loop_points' not in existing:
         # Case 2: rename old table, then add missing columns.
-        cursor.execute("ALTER TABLE loops RENAME TO loop_points")
-        existing = {'loop_points'}
+        # Under multi-worker gunicorn, two workers can race to rename. SQLite
+        # will serialize writes, so the second worker will see an OperationalError
+        # — either "already exists" (if it beat us here) or "no such table: loops"
+        # (if the rename already happened). Both are benign; re-read the schema
+        # state and carry on.
+        try:
+            cursor.execute("ALTER TABLE loops RENAME TO loop_points")
+        except sqlite3.OperationalError as exc:
+            logger.info("loops→loop_points rename race handled: %s", exc)
+            cursor.execute(
+                "SELECT name FROM sqlite_master "
+                "WHERE type='table' AND name IN ('loops','loop_points')"
+            )
+            existing = {row[0] for row in cursor.fetchall()}
+        else:
+            existing = {'loop_points'}
 
     if 'loops' in existing and 'loop_points' in existing:
         # Case 3: both exist — copy rows and drop old.
@@ -196,7 +210,12 @@ def init_db():
     cursor.execute("SELECT * FROM users WHERE username = 'admin'")
     if not cursor.fetchone():
         logger.info("Creating default admin user...")
-        password = "admin_password" # Change this immediately!
+        # Accept password via env for provisioned deploys. Fall back to a
+        # well-known bootstrap password (documented in README) for local dev
+        # only; the fallback must be rotated immediately. Never log the
+        # password value — log aggregators would capture the credential.
+        password = os.environ.get("BOMBEST_ADMIN_PASSWORD", "admin_password")
+        using_default = password == "admin_password"
         salt = bcrypt.gensalt()
         hashed = bcrypt.hashpw(password.encode('utf-8'), salt)
 
@@ -204,7 +223,12 @@ def init_db():
             "INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)",
             ('admin', hashed.decode('utf-8'), 'admin')
         )
-        logger.info("Admin user created. Username: admin, Password: %s", password)
+        logger.info("Admin user created. Username: admin")
+        if using_default:
+            logger.warning(
+                "Default admin password in use — rotate immediately via "
+                "POST /auth/change-password or set BOMBEST_ADMIN_PASSWORD."
+            )
     else:
         logger.info("Admin user already exists.")
 

@@ -198,8 +198,19 @@ def _jwt_role():
         return None
 
 
+_playlist_schema_ready = False
+
+
 def ensure_playlist_schema(conn):
-    """Ensure playlists.user_id exists; backfill public catalog rows (user_id NULL) as is_public."""
+    """Ensure playlists.user_id exists; backfill public catalog rows (user_id NULL) as is_public.
+
+    Runs at most once per process. Previously it PRAGMA'd + ALTER'd + UPDATE'd
+    on every playlist request (11+ routes), wasting cycles and racing ALTERs
+    under multi-worker gunicorn once the first request hit each worker.
+    """
+    global _playlist_schema_ready
+    if _playlist_schema_ready:
+        return
     cursor = conn.cursor()
     cursor.execute("PRAGMA table_info(playlists)")
     columns = [col[1] for col in cursor.fetchall()]
@@ -211,6 +222,7 @@ def ensure_playlist_schema(conn):
     cursor.execute("UPDATE playlists SET is_public = 1 WHERE user_id IS NULL AND IFNULL(is_system, 0) = 0")
     cursor.execute("UPDATE playlists SET is_public = 1 WHERE IFNULL(is_system, 0) = 1")
     conn.commit()
+    _playlist_schema_ready = True
 
 
 def get_playlist_row_dict(cursor, playlist_id):
@@ -282,7 +294,7 @@ app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500 MB
 # Ensure 500 errors return JSON so frontend can display the message
 @app.errorhandler(500)
 def handle_500(err):
-    traceback.print_exc()
+    logger.exception('Unhandled 500 from request handler')
     message = str(err) if (err and app.debug) else 'Internal server error'
     return jsonify({'error': message}), 500
 
@@ -654,7 +666,10 @@ def upload_file():
         import_marker = f"_import_{uuid.uuid4().hex}"
         _set_import_marker(filepath, import_marker)
 
-        # Run beet import
+        # Run beet import. Wrap the whole block in try/finally so the uploaded
+        # file is always cleaned up, even when beet raises CalledProcessError.
+        # Previously the cleanup only ran inside the success branch, leaving
+        # disk litter after every failed import.
         try:
             subprocess.run(
                 ['beet', '-c', 'config.yaml', 'import', '-q', '--noautotag', '-s', filepath],
@@ -703,10 +718,6 @@ def upload_file():
                 logger.warning("Could not find imported track by marker: %s", import_marker)
 
 
-            # Clean up uploaded file
-            if os.path.exists(filepath):
-                os.remove(filepath)
-
             response = {
                 'message': f'Successfully uploaded "{track_name}"',
                 'track_name': track_name,
@@ -716,10 +727,19 @@ def upload_file():
                 response['s3_warning'] = s3_warning
 
             return jsonify(response), 200
-        except subprocess.CalledProcessError as e:
-            return jsonify({'error': f'Import failed: {str(e)}'}), 500
-        except Exception as e:
-            return jsonify({'error': f'Server error: {str(e)}'}), 500
+        except subprocess.CalledProcessError:
+            logger.exception('beet import failed for %s', filename)
+            return jsonify({'error': 'Import failed'}), 500
+        except Exception:
+            logger.exception('Unexpected error during upload of %s', filename)
+            return jsonify({'error': 'Server error'}), 500
+        finally:
+            # Cleanup in BOTH success and error paths (Python rule).
+            try:
+                if os.path.exists(filepath):
+                    os.remove(filepath)
+            except OSError as cleanup_err:
+                logger.warning("Failed to remove upload temp %s: %s", filepath, cleanup_err)
             
     return jsonify({'error': 'Invalid file type'}), 400
 
@@ -910,9 +930,9 @@ def upload_folder():
         result, status_code = _import_from_directory(extract_root, album_override=album_override, user_id=user_id)
         return jsonify(result), status_code
 
-    except Exception as e:
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
+    except Exception:
+        logger.exception('Folder upload failed')
+        return jsonify({'error': 'Folder upload failed'}), 500
 
     finally:
         if work_dir and os.path.isdir(work_dir):
@@ -1168,7 +1188,7 @@ def _run_process_job(job_id, session_id, keys, work_dir, prefix, album_override=
             _process_jobs[job_id]['status_code'] = status_code
 
     except Exception as e:
-        traceback.print_exc()
+        logger.exception('S3 upload processing job failed')
         _cleanup_s3_session(session_id, keys)
         with _process_jobs_lock:
             _process_jobs[job_id]['status'] = 'error'
@@ -1285,7 +1305,8 @@ def confirm_art_selection():
         conn.close()
         return jsonify({'message': 'Art selection confirmed'}), 200
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.exception('Request failed')
+        return jsonify({'error': 'Internal server error'}), 500
 
 
 @app.route('/duplicates', methods=['DELETE'])
@@ -1762,7 +1783,8 @@ def create_loop(track_id):
         return jsonify({'id': loop_id, 'message': 'Loop created'}), 201
     except Exception as e:
         conn.close()
-        return jsonify({'error': str(e)}), 500
+        logger.exception('Request failed')
+        return jsonify({'error': 'Internal server error'}), 500
 
 @app.route('/items/<int:item_id>', methods=['PUT'])
 @admin_required()
@@ -1836,7 +1858,9 @@ def delete_loop(loop_id):
     cursor.execute("SELECT role FROM users WHERE id = ?", (current_user_id,))
     role_row = cursor.fetchone()
     user_role = role_row[0] if role_row else 'user'
-    if row[0] != current_user_id and user_role != 'admin':
+    # JWT identity is minted as str(user_id); DB user_id is int. Coerce both
+    # sides so a legitimate owner's comparison doesn't silently fail.
+    if int(row[0]) != int(current_user_id) and user_role != 'admin':
         conn.close()
         return jsonify({'error': 'Unauthorized'}), 403
 
@@ -1907,7 +1931,8 @@ def save_lyrics(track_id):
         return jsonify({'id': lid, 'message': 'Lyrics saved'}), 200 # Using 200 for upsert mostly
     except Exception as e:
         conn.close()
-        return jsonify({'error': str(e)}), 500
+        logger.exception('Request failed')
+        return jsonify({'error': 'Internal server error'}), 500
 
 @app.route('/tracks/<int:track_id>/comments', methods=['GET'])
 @jwt_required()
@@ -1953,7 +1978,8 @@ def create_comment(track_id):
         return jsonify({'id': cid, 'message': 'Comment added'}), 201
     except Exception as e:
         conn.close()
-        return jsonify({'error': str(e)}), 500
+        logger.exception('Request failed')
+        return jsonify({'error': 'Internal server error'}), 500
 
 @app.route('/comments/<int:comment_id>', methods=['DELETE'])
 @jwt_required()
@@ -1972,7 +1998,9 @@ def delete_comment(comment_id):
     cursor.execute("SELECT role FROM users WHERE id = ?", (current_user_id,))
     role_row = cursor.fetchone()
     user_role = role_row[0] if role_row else 'user'
-    if row[0] != current_user_id and user_role != 'admin':
+    # JWT identity is minted as str(user_id); DB user_id is int. Coerce both
+    # sides so a legitimate owner's comparison doesn't silently fail.
+    if int(row[0]) != int(current_user_id) and user_role != 'admin':
         conn.close()
         return jsonify({'error': 'Unauthorized'}), 403
 
@@ -2074,9 +2102,9 @@ def register():
             'user': {'id': new_user_id, 'username': username, 'role': role}
         }), 201
         
-    except Exception as e:
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
+    except Exception:
+        logger.exception('Registration failed')
+        return jsonify({'error': 'Registration failed'}), 500
     finally:
         conn.close()
 
@@ -2511,10 +2539,11 @@ def passkey_login_verify():
             'expires_in': int(app.config['JWT_ACCESS_TOKEN_EXPIRES'].total_seconds()),
             'user': {'id': cred['user_id'], 'username': cred['username'], 'role': cred['role']}
         })
-    except Exception as e:
+    except Exception:
         conn.close()
         _passkey_challenge_pop(login_id)
-        return jsonify({'error': str(e)}), 401
+        logger.exception('Passkey login verification failed')
+        return jsonify({'error': 'Passkey verification failed'}), 401
 
 @app.route('/auth/passkey/list', methods=['GET'])
 @jwt_required()
@@ -2729,13 +2758,23 @@ def get_playlists():
             pl['art_url'] = f"/playlists/{pl['id']}/art" if art_path else None
             pl['share_token'] = row[5] if len(row) > 5 else None
             playlists.append(pl)
-        for pl in playlists:
-            cursor.execute("SELECT COUNT(*) FROM playlist_tracks WHERE playlist_id = ?", (pl['id'],))
-            pl['count'] = cursor.fetchone()[0]
+        # One grouped count instead of N individual COUNT(*) queries.
+        if playlists:
+            placeholders = ','.join('?' for _ in playlists)
+            ids = [pl['id'] for pl in playlists]
+            cursor.execute(
+                f"SELECT playlist_id, COUNT(*) FROM playlist_tracks "
+                f"WHERE playlist_id IN ({placeholders}) GROUP BY playlist_id",
+                ids,
+            )
+            counts = {row[0]: row[1] for row in cursor.fetchall()}
+            for pl in playlists:
+                pl['count'] = counts.get(pl['id'], 0)
         conn.close()
         return jsonify({'playlists': playlists})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.exception('GET /playlists failed')
+        return jsonify({'error': 'Failed to list playlists'}), 500
 
 @app.route('/playlists', methods=['POST'])
 @jwt_required()
@@ -2781,7 +2820,8 @@ def create_playlist():
             'user_id': ret_uid,
         }), 201
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.exception('Request failed')
+        return jsonify({'error': 'Internal server error'}), 500
 
 @app.route('/playlists/<int:playlist_id>', methods=['PUT'])
 @jwt_required()
@@ -2812,7 +2852,8 @@ def update_playlist(playlist_id):
 
         return jsonify({'success': True})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.exception('Request failed')
+        return jsonify({'error': 'Internal server error'}), 500
 
 @app.route('/playlists/<int:playlist_id>', methods=['DELETE'])
 @jwt_required()
@@ -2839,7 +2880,8 @@ def delete_playlist(playlist_id):
 
         return jsonify({'success': True})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.exception('Request failed')
+        return jsonify({'error': 'Internal server error'}), 500
 
 SHARE_BASE_URL = os.environ.get('SHARE_BASE_URL', 'https://bom.best')
 API_PUBLIC_URL = os.environ.get('API_PUBLIC_URL', 'https://beats.bom.best')
@@ -2884,7 +2926,8 @@ def share_playlist(playlist_id):
         share_url = f"{SHARE_BASE_URL}/beats/playlist/{share_token}"
         return jsonify({'share_token': share_token, 'share_url': share_url})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.exception('Request failed')
+        return jsonify({'error': 'Internal server error'}), 500
 
 @app.route('/playlists/<int:playlist_id>/share', methods=['DELETE'])
 @jwt_required()
@@ -2908,7 +2951,8 @@ def unshare_playlist(playlist_id):
         conn.close()
         return jsonify({'message': 'Sharing disabled'})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.exception('Request failed')
+        return jsonify({'error': 'Internal server error'}), 500
 
 @app.route('/shared/<token>', methods=['GET'])
 def get_shared_playlist(token):
@@ -2966,7 +3010,8 @@ def get_shared_playlist(token):
         art_url = f"{base_url}/playlists/{playlist_id}/art" if art_path else None
         return jsonify({'name': name, 'art_url': art_url, 'tracks': tracks})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.exception('Request failed')
+        return jsonify({'error': 'Internal server error'}), 500
 
 @app.route('/shared/<token>/art', methods=['GET'])
 def get_shared_playlist_art(token):
@@ -3073,7 +3118,8 @@ def set_playlist_art(playlist_id):
         return jsonify({'success': True, 'art_url': f"/playlists/{playlist_id}/art"})
     except Exception as e:
         logger.warning("Error setting playlist art: %s", e)
-        return jsonify({'error': str(e)}), 500
+        logger.exception('Request failed')
+        return jsonify({'error': 'Internal server error'}), 500
 
 @app.route('/playlists/<int:playlist_id>/tracks', methods=['GET'])
 @jwt_required(optional=True)
@@ -3133,7 +3179,8 @@ def get_playlist_tracks(playlist_id):
         return jsonify({'tracks': formatted_tracks})
     except Exception as e:
         logger.warning("Error fetching playlist tracks: %s", e)
-        return jsonify({'error': str(e)}), 500
+        logger.exception('Request failed')
+        return jsonify({'error': 'Internal server error'}), 500
 
 @app.route('/playlists/<int:playlist_id>/tracks', methods=['POST'])
 @jwt_required()
@@ -3175,7 +3222,8 @@ def add_tracks_to_playlist(playlist_id):
         
         return jsonify({'success': True})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.exception('Request failed')
+        return jsonify({'error': 'Internal server error'}), 500
 
 @app.route('/playlists/<int:playlist_id>/tracks', methods=['DELETE'])
 @jwt_required()
@@ -3207,7 +3255,8 @@ def remove_tracks_from_playlist(playlist_id):
         
         return jsonify({'success': True})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.exception('Request failed')
+        return jsonify({'error': 'Internal server error'}), 500
 
 @app.route('/playlists/system/init', methods=['POST'])
 @admin_required()
@@ -3266,7 +3315,8 @@ def initialize_system_playlists():
         })
     except Exception as e:
         logger.warning("Error initializing system playlists: %s", e)
-        return jsonify({'error': str(e)}), 500
+        logger.exception('Request failed')
+        return jsonify({'error': 'Internal server error'}), 500
 
 @app.route('/playlists/<int:playlist_id>/reorder', methods=['PUT'])
 @jwt_required()
@@ -3305,7 +3355,8 @@ def reorder_playlist_tracks(playlist_id):
         return jsonify({'success': True, 'count': len(track_ids)})
     except Exception as e:
         logger.warning("Error reordering playlist: %s", e)
-        return jsonify({'error': str(e)}), 500
+        logger.exception('Request failed')
+        return jsonify({'error': 'Internal server error'}), 500
 
 @app.route('/playlists/<int:playlist_id>/search', methods=['GET'])
 @jwt_required(optional=True)
@@ -3371,7 +3422,8 @@ def search_playlist(playlist_id):
         return jsonify({'tracks': formatted_tracks})
     except Exception as e:
         logger.warning("Error searching playlist: %s", e)
-        return jsonify({'error': str(e)}), 500
+        logger.exception('Request failed')
+        return jsonify({'error': 'Internal server error'}), 500
 
 # Formats that can be transcoded to AAC on request (?transcode=aac).
 # MP3 and AAC/M4A already have hardware offload everywhere — never transcoded.
@@ -3622,7 +3674,8 @@ def stream_track(track_id):
         return jsonify({'error': 'File not found'}), 404
 
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.exception('Request failed')
+        return jsonify({'error': 'Internal server error'}), 500
 
 # --- Artwork Routes ---
 
@@ -3649,7 +3702,8 @@ def get_album_art(album_id):
         return send_file(art_path)
     except Exception as e:
         logger.warning("Art error: %s", e)
-        return jsonify({'error': str(e)}), 500
+        logger.exception('Request failed')
+        return jsonify({'error': 'Internal server error'}), 500
 
 @app.route('/track/<int:track_id>/art', methods=['GET'])
 def get_track_art(track_id):
@@ -3762,7 +3816,8 @@ def get_track_art(track_id):
         return jsonify({'error': 'No artwork found'}), 404
     except Exception as e:
         logger.warning("Track art error: %s", e)
-        return jsonify({'error': str(e)}), 500
+        logger.exception('Request failed')
+        return jsonify({'error': 'Internal server error'}), 500
 
 
 @app.route('/track/<int:track_id>/canvas', methods=['GET'])
@@ -3793,7 +3848,8 @@ def get_track_canvas(track_id):
         return jsonify({'error': 'No canvas found'}), 404
     except Exception as e:
         logger.warning("Canvas error: %s", e)
-        return jsonify({'error': str(e)}), 500
+        logger.exception('Request failed')
+        return jsonify({'error': 'Internal server error'}), 500
 
 
 @app.route('/notify-interest', methods=['POST'])
@@ -3858,7 +3914,8 @@ def notify_interest():
         
     except Exception as e:
         logger.warning("Notify error: %s", e)
-        return jsonify({'error': str(e)}), 500
+        logger.exception('Request failed')
+        return jsonify({'error': 'Internal server error'}), 500
 
 # --- Favorites & Roles ---
 
@@ -3973,11 +4030,9 @@ def toggle_favorite(playlist_id):
         conn.close()
         
         return jsonify({'success': True, 'favorited': favorited})
-    except Exception as e:
-        logger.warning("Error toggling favorite: %s", e)
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
+    except Exception:
+        logger.exception('Toggle favorite failed')
+        return jsonify({'error': 'Toggle favorite failed'}), 500
 
 
 # --- Metrics ---
@@ -4041,7 +4096,8 @@ def batch_record_plays():
         
     except Exception as e:
         logger.warning("Batch metrics error: %s", e)
-        return jsonify({'error': str(e)}), 500
+        logger.exception('Request failed')
+        return jsonify({'error': 'Internal server error'}), 500
 
 @app.route('/metrics/dashboard', methods=['GET'])
 @admin_required()
@@ -4327,7 +4383,8 @@ def batch_record_perf():
 
     except Exception as e:
         logger.warning("Performance metrics error: %s", e)
-        return jsonify({'error': str(e)}), 500
+        logger.exception('Request failed')
+        return jsonify({'error': 'Internal server error'}), 500
 
 
 # Cache S3 reachability for ~60s so external probes (ALB, Docker HEALTHCHECK, Cloudflare)

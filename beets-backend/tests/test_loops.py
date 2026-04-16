@@ -61,6 +61,41 @@ def test_schema_has_expected_columns(users_db):
         assert col in cols, f'loop_points missing expected column: {col}'
 
 
+def test_owner_can_delete_own_loop(client, user_token):
+    """Regression: JWT identity is minted as str but DB user_id is int.
+
+    A naive ``row[0] != current_user_id`` comparison silently fails for
+    legitimate owners (str("1") != 1), so users could not delete their own
+    loops. Verify the fixed comparison accepts the owner.
+    """
+    create = client.post(
+        '/tracks/99/loops',
+        headers={'Authorization': f'Bearer {user_token}'},
+        json={'start_time': 0.0, 'end_time': 1.0, 'label': 'mine'},
+    )
+    loop_id = create.get_json()['id']
+    resp = client.delete(
+        f'/loops/{loop_id}',
+        headers={'Authorization': f'Bearer {user_token}'},
+    )
+    assert resp.status_code == 200, resp.get_json()
+
+
+def test_non_owner_cannot_delete_loop(client, user_token, second_user_token):
+    """Negative side of the ownership check — another user still gets 403."""
+    create = client.post(
+        '/tracks/99/loops',
+        headers={'Authorization': f'Bearer {user_token}'},
+        json={'start_time': 0.0, 'end_time': 1.0, 'label': 'mine'},
+    )
+    loop_id = create.get_json()['id']
+    resp = client.delete(
+        f'/loops/{loop_id}',
+        headers={'Authorization': f'Bearer {second_user_token}'},
+    )
+    assert resp.status_code == 403
+
+
 def test_legacy_loops_rows_migrate_to_loop_points(tmp_path, monkeypatch):
     """Simulate an install where the old `loops` table exists and verify the
     lazy migrator copies rows to loop_points + backfills user_id/label."""
