@@ -31,8 +31,9 @@ fi
 
 # Prune policy — opt-in and scoped:
 #   PRUNE=0 (default): don't prune. Deploys stay focused on "pull + restart."
-#   PRUNE=images: remove only dangling images after the new container is up
-#                 and healthy (safe — running containers pin their images).
+#   PRUNE=images: remove only dangling images after the new container is started
+#                 (safe — running containers pin their images, so the new image
+#                 is never removed regardless of whether the container is healthy).
 #   PRUNE=all:    full `docker system prune -f --filter until=24h` (the old
 #                 behavior — can touch unused containers/networks/volumes).
 # Pruning runs AFTER the new container starts so a failed deploy doesn't

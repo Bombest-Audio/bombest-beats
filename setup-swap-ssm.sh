@@ -47,7 +47,8 @@ echo "Sending SSM command..."
 if command -v jq &>/dev/null; then
   PARAMS_JSON=$(jq -n --arg c "$COMMAND" '{commands: [$c]}')
 else
-  ESCAPED=$(echo "$COMMAND" | sed 's/\\/\\\\/g; s/"/\\"/g')
+  # python3 handles all JSON escape sequences (backslash, quotes, newlines)
+  ESCAPED=$(printf '%s' "$COMMAND" | python3 -c "import sys,json; print(json.dumps(sys.stdin.read())[1:-1])")
   PARAMS_JSON="{\"commands\": [\"$ESCAPED\"]}"
 fi
 

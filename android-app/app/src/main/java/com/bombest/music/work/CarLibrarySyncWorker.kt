@@ -37,8 +37,8 @@ class CarLibrarySyncWorker(
                 .map { it[AuthPreferences.TOKEN_KEY] }
                 .first()
             if (token.isNullOrBlank()) {
-                Log.w(TAG, "No auth token; skipping car library sync")
-                return Result.failure()
+                Log.w(TAG, "No auth token; deferring car library sync until login")
+                return Result.retry()
             }
 
             val dm = DownloadManager.getInstance(applicationContext)
