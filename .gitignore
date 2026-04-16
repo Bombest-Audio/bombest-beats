@@ -53,3 +53,17 @@ keystore.properties
 
 # Plan files (Cursor/agent)
 *.plan.md
+
+# IDE & local tooling
+.cursor/
+.gradle-home/
+
+# Downloaded binaries (e.g. gh CLI releases)
+gh_*/
+
+# Reference / comparison apps (not part of this repo)
+musify-app/
+spotube-app/
+
+# GSD planning artifacts (generated, not source-controlled)
+.planning/ui-reviews/
