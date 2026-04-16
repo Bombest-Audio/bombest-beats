@@ -3783,6 +3783,7 @@ def stream_track(track_id):
 # --- Artwork Routes ---
 
 @app.route('/album/<int:album_id>/art', methods=['GET'])
+@cross_origin(origins="*")   # Cast DMR fetches artwork cross-origin
 def get_album_art(album_id):
     """Serve album art directly to bypass beets server"""
     try:
@@ -3809,6 +3810,7 @@ def get_album_art(album_id):
         return jsonify({'error': 'Internal server error'}), 500
 
 @app.route('/track/<int:track_id>/art', methods=['GET'])
+@cross_origin(origins="*")   # Cast DMR fetches artwork cross-origin
 def get_track_art(track_id):
     """Serve track artwork - track_artwork first, then album, embedded, default. ?path=... serves a specific track_artwork path."""
     try:

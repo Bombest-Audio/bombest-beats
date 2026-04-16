@@ -771,7 +771,10 @@ class BombestMediaService : MediaLibraryService() {
         }.getOrNull()
         if (castContext != null) {
             android.util.Log.i("BombestMediaService", "CastContext ready, initializing CastPlayer")
-            castPlayer = androidx.media3.cast.CastPlayer(castContext).also { cp ->
+            castPlayer = androidx.media3.cast.CastPlayer(
+                castContext,
+                com.bombest.music.cast.BombestCastMediaItemConverter(),
+            ).also { cp ->
                 cp.setSessionAvailabilityListener(object : androidx.media3.cast.SessionAvailabilityListener {
                     override fun onCastSessionAvailable() {
                         android.util.Log.i("BombestMediaService", "Cast session available → switching player")
