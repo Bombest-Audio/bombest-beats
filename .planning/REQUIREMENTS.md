@@ -37,10 +37,10 @@
 
 ### Testing
 
-- [ ] **TEST-01**: P0 Login flow E2E test passes (valid credentials → Library screen visible)
-- [ ] **TEST-02**: P0 Playback flow E2E test passes (Library → select track → player controls visible)
-- [ ] **TEST-03**: P0 Playlist CRUD flow E2E test passes (create → add track → delete)
-- [ ] **TEST-04**: Page objects implement method chaining and AAA pattern for all P0 screens
+- [x] **TEST-01**: P0 Login flow E2E test passes (valid credentials → Library screen visible)
+- [x] **TEST-02**: P0 Playback flow E2E test passes (Library → select track → player controls visible)
+- [x] **TEST-03**: P0 Playlist CRUD flow E2E test passes (create → add track → delete)
+- [x] **TEST-04**: Page objects implement method chaining and AAA pattern for all P0 screens
 
 ## v2 Requirements
 
@@ -83,10 +83,10 @@
 | SUBM-01 | Phase 4 | Pending |
 | SUBM-02 | Phase 4 | Pending |
 | SUBM-03 | Phase 4 | Pending |
-| TEST-01 | Phase 5 | Pending |
-| TEST-02 | Phase 5 | Pending |
-| TEST-03 | Phase 5 | Pending |
-| TEST-04 | Phase 5 | Pending |
+| TEST-01 | Phase 5 | Complete |
+| TEST-02 | Phase 5 | Complete |
+| TEST-03 | Phase 5 | Complete |
+| TEST-04 | Phase 5 | Complete |
 
 **Coverage:**
 - v1 requirements: 19 total
