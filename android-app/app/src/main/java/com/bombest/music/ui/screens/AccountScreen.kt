@@ -10,6 +10,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.Fingerprint
@@ -32,6 +33,7 @@ import androidx.datastore.preferences.core.edit
 import com.bombest.music.data.NetworkModule
 import com.bombest.music.data.AuthPreferences
 import com.bombest.music.data.authDataStore
+import com.bombest.music.work.CarLibrarySyncWorker
 import com.bombest.music.data.api.ChangePasswordRequest
 import com.bombest.music.data.api.PasskeyInfo
 import kotlinx.coroutines.flow.first
@@ -93,6 +95,13 @@ fun AccountScreen(
                 .getBoolean("auto_sync_enabled", false)
         )
     }
+    var carWifiPrepareEnabled by remember {
+        mutableStateOf(
+            context.getSharedPreferences("download_prefs", android.content.Context.MODE_PRIVATE)
+                .getBoolean("car_wifi_prepare_enabled", false)
+        )
+    }
+
     var downloadProgress by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     var downloadedCount by remember { mutableIntStateOf(0) }
     var storageUsed by remember {
@@ -209,6 +218,63 @@ fun AccountScreen(
                 fontWeight = FontWeight.Medium,
                 modifier = Modifier.padding(start = 8.dp, bottom = 4.dp)
             )
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0xFF1A1F2E), RoundedCornerShape(12.dp))
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    Icons.Default.DirectionsCar,
+                    contentDescription = null,
+                    tint = if (carWifiPrepareEnabled) Color(0xFF4CAF50) else Color.Gray,
+                    modifier = Modifier.size(24.dp)
+                )
+                Spacer(Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Prepare for driving",
+                        color = Color.White,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Text(
+                        text = if (carWifiPrepareEnabled) {
+                            "Favorites and recents sync on Wi‑Fi (up to 200 tracks)"
+                        } else {
+                            "Auto-download favorites & Android Auto recents on unmetered Wi‑Fi"
+                        },
+                        color = Color.Gray,
+                        fontSize = 12.sp
+                    )
+                }
+                Switch(
+                    checked = carWifiPrepareEnabled,
+                    onCheckedChange = { enabled ->
+                        carWifiPrepareEnabled = enabled
+                        context.getSharedPreferences("download_prefs", android.content.Context.MODE_PRIVATE)
+                            .edit().putBoolean("car_wifi_prepare_enabled", enabled).apply()
+                        if (enabled) {
+                            CarLibrarySyncWorker.schedulePeriodicWifi(context)
+                            CarLibrarySyncWorker.enqueueOneTime(context)
+                            Toast.makeText(
+                                context,
+                                "Wi‑Fi sync queued — downloads when on unmetered network",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        } else {
+                            CarLibrarySyncWorker.cancelPeriodic(context)
+                        }
+                    },
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = Color.White,
+                        checkedTrackColor = Color(0xFF4CAF50),
+                        uncheckedThumbColor = Color.Gray,
+                        uncheckedTrackColor = Color(0xFF3A3A3A)
+                    )
+                )
+            }
             
             // Auto-Sync Toggle
             Row(

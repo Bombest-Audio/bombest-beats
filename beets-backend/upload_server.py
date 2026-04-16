@@ -1,9 +1,11 @@
 import base64
 import errno
+import logging
 import os
 import mimetypes
 import re
 import json
+import sys
 import uuid
 import subprocess
 import sqlite3
@@ -16,11 +18,37 @@ import struct
 import time
 import threading
 from flask import Flask, request, jsonify, send_file, Response
-from flask_cors import CORS
+from flask_cors import CORS, cross_origin
 from werkzeug.utils import secure_filename
 
-from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
+# Module-level logger (INFO default, stderr). Route handlers and helpers should
+# use `logger` — not `print()` — so logs route through the configured handlers
+# and can be filtered/tagged in deployment.
+logging.basicConfig(
+    level=os.environ.get('LOG_LEVEL', 'INFO'),
+    format='%(asctime)s %(levelname)s %(name)s: %(message)s',
+    stream=sys.stderr,
+)
+logger = logging.getLogger(__name__)
+
+# Cap concurrent ffmpeg workers. Each ffmpeg process uses 30-80 MB RSS; more
+# than 2-3 on the production instance (916 MB RAM, historically 0 swap)
+# saturates memory and triggers the OOM killer. Callers block until a slot
+# opens — waveform generation and streaming transcodes share this limit.
+_ffmpeg_sem = threading.Semaphore(2)
+
+from datetime import datetime, timedelta, timezone
+
+from flask_jwt_extended import (
+    JWTManager,
+    create_access_token,
+    create_refresh_token,
+    jwt_required,
+    get_jwt_identity,
+    get_jwt,
+)
 import bcrypt
+import mediafile  # noqa: F401  — used in update_item() to rewrite audio-file tags
 import smtplib
 import yaml
 import boto3
@@ -40,8 +68,39 @@ with open('config.yaml', 'r') as f:
 
 # JWT Configuration
 app.config['JWT_SECRET_KEY'] = config.get('jwt_secret', 'dev-secret-key')
-app.config['JWT_ACCESS_TOKEN_EXPIRES'] = False # Non-expiring for simplicty in MVP
+# 30-day access TTL keeps refresh pressure low while still allowing revocation
+# windows. Previously False (non-expiring) — see C6 / issue #24.
+app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(days=30)
+# 180-day refresh TTL. We don't rotate refresh tokens in v1 — rotation adds a
+# race/ordering surface for mobile (sleep/wake, parallel requests) and the
+# benefit is minor when refresh lives only in Keychain/DataStore.
+app.config['JWT_REFRESH_TOKEN_EXPIRES'] = timedelta(days=180)
+# Field-issued tokens pre-C6 have no `exp` claim — accepting them until this
+# date gives mobile/web clients a window to upgrade and obtain a refresh token.
+# Anything older than this is force-logged-out.
+LEGACY_TOKEN_GRACE_UNTIL = datetime(2026, 6, 15, tzinfo=timezone.utc)
 jwt = JWTManager(app)
+
+
+@jwt.token_verification_loader
+def _accept_legacy_token_without_exp(jwt_header, jwt_payload):
+    """Accept pre-C6 tokens (no `exp` claim) until LEGACY_TOKEN_GRACE_UNTIL.
+
+    flask-jwt-extended calls this after standard validation. Returning True
+    passes verification; False rejects. We only intervene when the token is
+    missing `exp` (legacy shape); tokens with a real `exp` are rejected by the
+    library's normal clock check if stale and never reach this loader.
+    """
+    if 'exp' in jwt_payload:
+        return True  # Normal path — library already validated exp.
+    if datetime.now(tz=timezone.utc) > LEGACY_TOKEN_GRACE_UNTIL:
+        return False
+    logger.warning(
+        "Accepting legacy no-exp JWT for user=%s (grace until %s)",
+        jwt_payload.get('sub'),
+        LEGACY_TOKEN_GRACE_UNTIL.date().isoformat(),
+    )
+    return True
 # CORS: allow frontend origins (bom.best, CloudFront, beats-app host the app; beats.bom.best is API)
 _cors_origins = [
     'https://bom.best', 'https://www.bom.best',
@@ -71,9 +130,51 @@ if S3_BUCKET and AWS_ACCESS_KEY and AWS_SECRET_KEY:
             aws_secret_access_key=AWS_SECRET_KEY,
             config=BotocoreConfig(signature_version='s3v4'),
         )
-        print(f"✅ S3 Client initialized for bucket: {S3_BUCKET}")
+        logger.info("S3 client initialized for bucket: %s", S3_BUCKET)
     except Exception as e:
-        print(f"❌ Failed to init S3: {e}")
+        logger.error("Failed to init S3: %s", e)
+
+
+# --- Transcode temp-file sweeper ---
+# Transcode temp files are normally deleted in a generator's finally block, but
+# if the process is killed mid-stream (OOM, SIGKILL) the file leaks. Every 15
+# min a daemon thread sweeps /tmp/bombest-transcode-* files older than 1h. The
+# prefix is namespaced so we won't delete files from other tools.
+_TRANSCODE_TMP_PREFIX = 'bombest-transcode-'
+_TRANSCODE_SWEEP_INTERVAL_SEC = 15 * 60
+_TRANSCODE_STALE_THRESHOLD_SEC = 60 * 60
+
+
+def _sweep_transcode_tmp_files():
+    """Daemon-thread loop that removes stale transcode temp files."""
+    tmp_dir = tempfile.gettempdir()
+    while True:
+        try:
+            now = time.time()
+            for entry in os.listdir(tmp_dir):
+                if not entry.startswith(_TRANSCODE_TMP_PREFIX):
+                    continue
+                path = os.path.join(tmp_dir, entry)
+                try:
+                    age = now - os.path.getmtime(path)
+                except OSError:
+                    continue
+                if age < _TRANSCODE_STALE_THRESHOLD_SEC:
+                    continue
+                try:
+                    os.unlink(path)
+                    logger.info("Swept stale transcode temp file: %s (age=%ds)", path, int(age))
+                except OSError as e:
+                    logger.warning("Failed to sweep %s: %s", path, e)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Transcode sweeper error: %s", e)
+        time.sleep(_TRANSCODE_SWEEP_INTERVAL_SEC)
+
+
+_transcode_sweeper = threading.Thread(
+    target=_sweep_transcode_tmp_files, name='transcode-tmp-sweeper', daemon=True
+)
+_transcode_sweeper.start()
 
 
 # --- Helpers ---
@@ -94,6 +195,82 @@ def admin_required():
             return fn(*args, **kwargs)
         return decorator
     return wrapper
+
+
+def _jwt_role():
+    try:
+        return (get_jwt() or {}).get('role')
+    except Exception:
+        return None
+
+
+_playlist_schema_ready = False
+
+
+def ensure_playlist_schema(conn):
+    """Ensure playlists.user_id exists; backfill public catalog rows (user_id NULL) as is_public.
+
+    Runs at most once per process. Previously it PRAGMA'd + ALTER'd + UPDATE'd
+    on every playlist request (11+ routes), wasting cycles and racing ALTERs
+    under multi-worker gunicorn once the first request hit each worker.
+    """
+    global _playlist_schema_ready
+    if _playlist_schema_ready:
+        return
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA table_info(playlists)")
+    columns = [col[1] for col in cursor.fetchall()]
+    if 'user_id' not in columns:
+        cursor.execute("ALTER TABLE playlists ADD COLUMN user_id INTEGER")
+    if 'is_public' not in columns:
+        cursor.execute("ALTER TABLE playlists ADD COLUMN is_public INTEGER DEFAULT 0")
+    conn.commit()
+    cursor.execute("UPDATE playlists SET is_public = 1 WHERE user_id IS NULL AND IFNULL(is_system, 0) = 0")
+    cursor.execute("UPDATE playlists SET is_public = 1 WHERE IFNULL(is_system, 0) = 1")
+    conn.commit()
+    _playlist_schema_ready = True
+
+
+def get_playlist_row_dict(cursor, playlist_id):
+    cursor.execute(
+        "SELECT id, name, user_id, is_public, is_system FROM playlists WHERE id = ?",
+        (playlist_id,),
+    )
+    row = cursor.fetchone()
+    if not row:
+        return None
+    return {
+        'id': row[0],
+        'name': row[1],
+        'user_id': row[2],
+        'is_public': int(row[3] or 0),
+        'is_system': bool(row[4]) if row[4] is not None else False,
+    }
+
+
+def playlist_visible_to_user(pl, jwt_uid, jwt_role):
+    """Who may list/open a playlist (GET list, GET tracks, GET art). Admin sees all."""
+    if jwt_role == 'admin':
+        return True
+    if pl['is_system'] or pl['is_public']:
+        return True
+    if jwt_uid is None:
+        return False
+    if pl['user_id'] is not None and int(pl['user_id']) == int(jwt_uid):
+        return True
+    return False
+
+
+def playlist_editable_by_user(pl, jwt_uid, jwt_role):
+    """Who may mutate playlist rows and membership. Catalog (user_id NULL) is admin-only."""
+    if jwt_role == 'admin':
+        return True
+    if jwt_uid is None:
+        return False
+    if pl['user_id'] is not None and int(pl['user_id']) == int(jwt_uid):
+        return True
+    return False
+
 
 # Persist playlists: set DATA_DIR to a path that is volume-mounted (e.g. /app/data in Docker).
 # users.db lives in DATA_DIR; library and music stay under cwd/music so image content is used.
@@ -123,7 +300,7 @@ app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500 MB
 # Ensure 500 errors return JSON so frontend can display the message
 @app.errorhandler(500)
 def handle_500(err):
-    traceback.print_exc()
+    logger.exception('Unhandled 500 from request handler')
     message = str(err) if (err and app.debug) else 'Internal server error'
     return jsonify({'error': message}), 500
 
@@ -149,7 +326,7 @@ def init_track_artwork():
         conn.commit()
         conn.close()
     except Exception as e:
-        print(f"track_artwork init: {e}")
+        logger.warning("track_artwork init: %s", e)
 
 ALLOWED_EXTENSIONS = {'mp3', 'wav', 'ogg', 'flac', 'm4a'}
 
@@ -203,7 +380,7 @@ def _set_import_marker(filepath, marker):
                     raw.save()
                     return True
     except Exception as e:
-        print(f"Could not set import marker: {e}")
+        logger.warning("Could not set import marker: %s", e)
     return False
 
 def _find_track_by_marker(marker, timeout=10, title_hint=None):
@@ -239,7 +416,7 @@ def _find_track_by_marker(marker, timeout=10, title_hint=None):
             if row:
                 return row[0]
         except Exception as e:
-            print(f"Title-based track lookup failed: {e}")
+            logger.warning("Title-based track lookup failed: %s", e)
     return None
 
 def _clear_import_marker(track_id, genre_value=''):
@@ -251,7 +428,7 @@ def _clear_import_marker(track_id, genre_value=''):
         conn.commit()
         conn.close()
     except Exception as e:
-        print(f"Could not clear import marker: {e}")
+        logger.warning("Could not clear import marker: %s", e)
 
 
 def allowed_file(filename):
@@ -283,7 +460,7 @@ def check_duplicate(track_name):
         conn.close()
         return result  # Returns (id, title) if found, None otherwise
     except Exception as e:
-        print(f"Duplicate check error: {e}")
+        logger.warning("Duplicate check error: %s", e)
         return None
 
 def set_audio_title(filepath, title):
@@ -299,7 +476,7 @@ def set_audio_title(filepath, title):
             audio.save()
             return True
     except Exception as e:
-        print(f"Could not set metadata: {e}")
+        logger.warning("Could not set metadata: %s", e)
     return False
 
 def generate_waveform_peaks(audio_path, num_peaks=200):
@@ -309,10 +486,11 @@ def generate_waveform_peaks(audio_path, num_peaks=200):
         temp_wav = audio_path + '.temp.wav'
         
         # Use ffmpeg to convert to mono WAV for easy reading
-        subprocess.run(
-            ['ffmpeg', '-y', '-i', audio_path, '-ac', '1', '-ar', '22050', temp_wav],
-            check=True, capture_output=True
-        )
+        with _ffmpeg_sem:
+            subprocess.run(
+                ['ffmpeg', '-y', '-i', audio_path, '-ac', '1', '-ar', '22050', temp_wav],
+                check=True, capture_output=True
+            )
         
         # Read WAV file
         with wave.open(temp_wav, 'rb') as wav:
@@ -357,7 +535,7 @@ def generate_waveform_peaks(audio_path, num_peaks=200):
         return peaks
         
     except Exception as e:
-        print(f"Waveform generation error: {e}")
+        logger.warning("Waveform generation error: %s", e)
         return None
 
 def get_track_path(track_id):
@@ -371,7 +549,7 @@ def get_track_path(track_id):
         if result:
             return result[0]
     except Exception as e:
-        print(f"Get track path error: {e}")
+        logger.warning("Get track path error: %s", e)
     return None
 
 @app.route('/waveform/<int:track_id>', methods=['GET'])
@@ -430,7 +608,7 @@ def detect_beats(audio_path, beats_per_bar=4):
             'duration': round(duration, 3),
         }
     except Exception as e:
-        print(f"Beat detection error: {e}")
+        logger.warning("Beat detection error: %s", e)
         return None
 
 
@@ -495,7 +673,10 @@ def upload_file():
         import_marker = f"_import_{uuid.uuid4().hex}"
         _set_import_marker(filepath, import_marker)
 
-        # Run beet import
+        # Run beet import. Wrap the whole block in try/finally so the uploaded
+        # file is always cleaned up, even when beet raises CalledProcessError.
+        # Previously the cleanup only ran inside the success branch, leaving
+        # disk litter after every failed import.
         try:
             subprocess.run(
                 ['beet', '-c', 'config.yaml', 'import', '-q', '--noautotag', '-s', filepath],
@@ -517,7 +698,7 @@ def upload_file():
                     conn.commit()
                     conn.close()
                 except Exception as db_err:
-                    print(f"Warning: Could not update title in database: {db_err}")
+                    logger.warning("Could not update title in database: %s", db_err)
 
                 # --- S3 Upload (report failures to frontend) ---
                 if s3_client:
@@ -535,18 +716,14 @@ def upload_file():
 
                             rel_path = os.path.relpath(final_path, start=os.getcwd())
                             if not rel_path.startswith('..'):
-                                print(f"Uploading to S3: {rel_path}")
+                                logger.info("Uploading to S3: %s", rel_path)
                                 s3_client.upload_file(final_path, S3_BUCKET, rel_path)
                     except Exception as s3_err:
-                        print(f"❌ S3 Upload Failed: {s3_err}")
+                        logger.error("S3 upload failed: %s", s3_err)
                         s3_warning = f"Track imported locally but S3 sync failed: {s3_err}"
             else:
-                print(f"⚠️ Could not find imported track by marker: {import_marker}")
+                logger.warning("Could not find imported track by marker: %s", import_marker)
 
-
-            # Clean up uploaded file
-            if os.path.exists(filepath):
-                os.remove(filepath)
 
             response = {
                 'message': f'Successfully uploaded "{track_name}"',
@@ -557,10 +734,19 @@ def upload_file():
                 response['s3_warning'] = s3_warning
 
             return jsonify(response), 200
-        except subprocess.CalledProcessError as e:
-            return jsonify({'error': f'Import failed: {str(e)}'}), 500
-        except Exception as e:
-            return jsonify({'error': f'Server error: {str(e)}'}), 500
+        except subprocess.CalledProcessError:
+            logger.exception('beet import failed for %s', filename)
+            return jsonify({'error': 'Import failed'}), 500
+        except Exception:
+            logger.exception('Unexpected error during upload of %s', filename)
+            return jsonify({'error': 'Server error'}), 500
+        finally:
+            # Cleanup in BOTH success and error paths (Python rule).
+            try:
+                if os.path.exists(filepath):
+                    os.remove(filepath)
+            except OSError as cleanup_err:
+                logger.warning("Failed to remove upload temp %s: %s", filepath, cleanup_err)
             
     return jsonify({'error': 'Invalid file type'}), 400
 
@@ -657,7 +843,7 @@ def _set_audio_metadata(filepath, title, artist, album):
                     raw.save()
                     return True
     except Exception as e:
-        print(f"Could not set metadata: {e}")
+        logger.warning("Could not set metadata: %s", e)
     return False
 
 def _insert_track_artwork(track_id, src_path, art_type, is_primary=0, suffix=None):
@@ -680,7 +866,7 @@ def _insert_track_artwork(track_id, src_path, art_type, is_primary=0, suffix=Non
         conn.close()
         return rel_path
     except Exception as e:
-        print(f"Failed to store track artwork: {e}")
+        logger.warning("Failed to store track artwork: %s", e)
         return None
 
 
@@ -751,9 +937,9 @@ def upload_folder():
         result, status_code = _import_from_directory(extract_root, album_override=album_override, user_id=user_id)
         return jsonify(result), status_code
 
-    except Exception as e:
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
+    except Exception:
+        logger.exception('Folder upload failed')
+        return jsonify({'error': 'Folder upload failed'}), 500
 
     finally:
         if work_dir and os.path.isdir(work_dir):
@@ -857,7 +1043,7 @@ def _import_from_directory(extract_root, album_override=None, user_id=None):
                     if not rel_path.startswith('..'):
                         s3_client.upload_file(final_path, S3_BUCKET, rel_path)
             except Exception as s3_err:
-                print(f"S3 upload failed for {new_id}: {s3_err}")
+                logger.error("S3 upload failed for %s: %s", new_id, s3_err)
                 results['s3_warnings'].append({'track_id': new_id, 'error': str(s3_err)})
 
         results['imported'].append({'track_name': track_name, 'id': new_id})
@@ -878,7 +1064,7 @@ def _import_from_directory(extract_root, album_override=None, user_id=None):
             conn.close()
             playlist_info = {'id': playlist_id, 'name': album_override, 'count': len(results['imported'])}
         except Exception as e:
-            print(f"Warning: failed to auto-create playlist: {e}")
+            logger.warning("Failed to auto-create playlist: %s", e)
 
     response = {
         'message': f"Imported {len(results['imported'])} tracks",
@@ -985,7 +1171,7 @@ def _cleanup_s3_session(session_id, keys):
         try:
             s3_client.delete_object(Bucket=S3_BUCKET, Key=key)
         except Exception as e:
-            print(f"S3 cleanup failed for {key}: {e}")
+            logger.warning("S3 cleanup failed for %s: %s", key, e)
     # Remove session tracking
     with _presign_sessions_lock:
         _presign_sessions.pop(session_id, None)
@@ -1009,7 +1195,7 @@ def _run_process_job(job_id, session_id, keys, work_dir, prefix, album_override=
             _process_jobs[job_id]['status_code'] = status_code
 
     except Exception as e:
-        traceback.print_exc()
+        logger.exception('S3 upload processing job failed')
         _cleanup_s3_session(session_id, keys)
         with _process_jobs_lock:
             _process_jobs[job_id]['status'] = 'error'
@@ -1019,7 +1205,7 @@ def _run_process_job(job_id, session_id, keys, work_dir, prefix, album_override=
             try:
                 shutil.rmtree(work_dir)
             except Exception as cleanup_err:
-                print(f"Warning: temp dir cleanup failed: {cleanup_err}")
+                logger.warning("Temp dir cleanup failed: %s", cleanup_err)
 
 
 @app.route('/upload/process', methods=['POST'])
@@ -1126,7 +1312,8 @@ def confirm_art_selection():
         conn.close()
         return jsonify({'message': 'Art selection confirmed'}), 200
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.exception('Request failed')
+        return jsonify({'error': 'Internal server error'}), 500
 
 
 @app.route('/duplicates', methods=['DELETE'])
@@ -1213,10 +1400,11 @@ def _update_audio_tags(filepath, title=None, artist=None, album=None):
                     raw.tags.add(TALB(encoding=3, text=[album]))
                 raw.save()
     except Exception as e:
-        print(f"Warning: Could not update audio file metadata for {filepath}: {e}")
+        logger.warning("Could not update audio file metadata for %s: %s", filepath, e)
 
 
 @app.route('/track/<int:track_id>', methods=['PUT'])
+@admin_required()
 def update_track(track_id):
     """Update track metadata in database and audio file"""
     try:
@@ -1307,7 +1495,7 @@ def delete_track(track_id):
             users_conn.commit()
             users_conn.close()
         except Exception as e:
-            print(f"Warning: playlist_tracks cleanup failed for track {track_id}: {e}")
+            logger.warning("playlist_tracks cleanup failed for track %s: %s", track_id, e)
         
         # Delete waveform cache
         waveform_file = os.path.join(WAVEFORM_FOLDER, f'{track_id}.json')
@@ -1319,7 +1507,7 @@ def delete_track(track_id):
             try:
                 os.remove(track_path)
             except Exception as e:
-                print(f"Warning: could not delete local file {track_path}: {e}")
+                logger.warning("Could not delete local file %s: %s", track_path, e)
 
         # Delete from S3
         if s3_client:
@@ -1328,7 +1516,7 @@ def delete_track(track_id):
                 if not rel_path.startswith('..'):
                     s3_client.delete_object(Bucket=S3_BUCKET, Key=rel_path)
             except Exception as e:
-                print(f"Warning: S3 delete failed for track {track_id}: {e}")
+                logger.warning("S3 delete failed for track %s: %s", track_id, e)
 
         return jsonify({
             'message': 'Track deleted successfully',
@@ -1340,6 +1528,7 @@ def delete_track(track_id):
 
 
 @app.route('/tracks/batch', methods=['PUT'])
+@admin_required()
 def batch_update_tracks():
     """Update multiple tracks with the same metadata"""
     try:
@@ -1404,6 +1593,7 @@ def batch_update_tracks():
         return jsonify({'error': f'Failed to batch update tracks: {str(e)}'}), 500
 
 @app.route('/tracks/reorder', methods=['PUT'])
+@admin_required()
 def reorder_tracks():
     """Update track order based on list of IDs"""
     try:
@@ -1428,6 +1618,7 @@ def reorder_tracks():
         return jsonify({'error': f'Failed to reorder tracks: {str(e)}'}), 500
 
 @app.route('/tracks/batch', methods=['DELETE'])
+@admin_required()
 def batch_delete_tracks():
     """Delete multiple tracks from database and optionally from disk"""
     try:
@@ -1464,7 +1655,7 @@ def batch_delete_tracks():
                     try:
                         os.remove(track_path)
                     except Exception as e:
-                        print(f"Error deleting file {track_path}: {e}")
+                        logger.warning("Error deleting file %s: %s", track_path, e)
             
             deleted_count += 1
             
@@ -1599,7 +1790,8 @@ def create_loop(track_id):
         return jsonify({'id': loop_id, 'message': 'Loop created'}), 201
     except Exception as e:
         conn.close()
-        return jsonify({'error': str(e)}), 500
+        logger.exception('Request failed')
+        return jsonify({'error': 'Internal server error'}), 500
 
 @app.route('/items/<int:item_id>', methods=['PUT'])
 @admin_required()
@@ -1651,7 +1843,7 @@ def update_item(item_id):
         if 'album' in data: f.album = data['album']
         f.save()
     except Exception as e:
-        print(f"Metadata write error: {e}")
+        logger.warning("Metadata write error: %s", e)
         # Non-fatal, DB is updated
         
     return jsonify({'message': 'Item updated'}), 200
@@ -1673,7 +1865,9 @@ def delete_loop(loop_id):
     cursor.execute("SELECT role FROM users WHERE id = ?", (current_user_id,))
     role_row = cursor.fetchone()
     user_role = role_row[0] if role_row else 'user'
-    if row[0] != current_user_id and user_role != 'admin':
+    # JWT identity is minted as str(user_id); DB user_id is int. Coerce both
+    # sides so a legitimate owner's comparison doesn't silently fail.
+    if int(row[0]) != int(current_user_id) and user_role != 'admin':
         conn.close()
         return jsonify({'error': 'Unauthorized'}), 403
 
@@ -1744,7 +1938,8 @@ def save_lyrics(track_id):
         return jsonify({'id': lid, 'message': 'Lyrics saved'}), 200 # Using 200 for upsert mostly
     except Exception as e:
         conn.close()
-        return jsonify({'error': str(e)}), 500
+        logger.exception('Request failed')
+        return jsonify({'error': 'Internal server error'}), 500
 
 @app.route('/tracks/<int:track_id>/comments', methods=['GET'])
 @jwt_required()
@@ -1790,7 +1985,8 @@ def create_comment(track_id):
         return jsonify({'id': cid, 'message': 'Comment added'}), 201
     except Exception as e:
         conn.close()
-        return jsonify({'error': str(e)}), 500
+        logger.exception('Request failed')
+        return jsonify({'error': 'Internal server error'}), 500
 
 @app.route('/comments/<int:comment_id>', methods=['DELETE'])
 @jwt_required()
@@ -1809,7 +2005,9 @@ def delete_comment(comment_id):
     cursor.execute("SELECT role FROM users WHERE id = ?", (current_user_id,))
     role_row = cursor.fetchone()
     user_role = role_row[0] if role_row else 'user'
-    if row[0] != current_user_id and user_role != 'admin':
+    # JWT identity is minted as str(user_id); DB user_id is int. Coerce both
+    # sides so a legitimate owner's comparison doesn't silently fail.
+    if int(row[0]) != int(current_user_id) and user_role != 'admin':
         conn.close()
         return jsonify({'error': 'Unauthorized'}), 403
 
@@ -1898,18 +2096,22 @@ def register():
             
         conn.commit()
         
-        # Create token
-        access_token = create_access_token(identity=str(new_user_id), additional_claims={'role': role, 'username': username})
-        
+        # Create tokens (access for API calls, refresh for obtaining new access)
+        claims = {'role': role, 'username': username}
+        access_token = create_access_token(identity=str(new_user_id), additional_claims=claims)
+        refresh_token = create_refresh_token(identity=str(new_user_id), additional_claims=claims)
+
         return jsonify({
             'message': 'Registration successful',
             'access_token': access_token,
+            'refresh_token': refresh_token,
+            'expires_in': int(app.config['JWT_ACCESS_TOKEN_EXPIRES'].total_seconds()),
             'user': {'id': new_user_id, 'username': username, 'role': role}
         }), 201
         
-    except Exception as e:
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
+    except Exception:
+        logger.exception('Registration failed')
+        return jsonify({'error': 'Registration failed'}), 500
     finally:
         conn.close()
 
@@ -1943,11 +2145,42 @@ def login():
     if not user or not bcrypt.checkpw(password.encode('utf-8'), user['password_hash'].encode('utf-8') if isinstance(user['password_hash'], str) else user['password_hash']):
         return jsonify({'error': 'Invalid credentials'}), 401
 
-    access_token = create_access_token(identity=str(user['id']), additional_claims={'role': user['role'], 'username': user['username']})
-    
+    claims = {'role': user['role'], 'username': user['username']}
+    access_token = create_access_token(identity=str(user['id']), additional_claims=claims)
+    refresh_token = create_refresh_token(identity=str(user['id']), additional_claims=claims)
+
     return jsonify({
         'access_token': access_token,
+        'refresh_token': refresh_token,
+        'expires_in': int(app.config['JWT_ACCESS_TOKEN_EXPIRES'].total_seconds()),
         'user': {'id': user['id'], 'username': user['username'], 'role': user['role']}
+    }), 200
+
+
+@app.route('/auth/refresh', methods=['POST'])
+@jwt_required(refresh=True)
+def refresh_access_token():
+    """Exchange a valid refresh token for a new access token.
+
+    Refresh tokens are not rotated in v1 — see JWT_REFRESH_TOKEN_EXPIRES comment.
+    Clients should store the refresh token in a secure keystore (Keychain on iOS,
+    EncryptedSharedPreferences/DataStore on Android).
+    """
+    user_id = get_jwt_identity()
+    # Re-read role/username so stale claims don't outlive a role change.
+    conn = sqlite3.connect(USERS_DB)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute('SELECT id, username, role FROM users WHERE id = ?', (user_id,))
+    user = cursor.fetchone()
+    conn.close()
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+    claims = {'role': user['role'], 'username': user['username']}
+    access_token = create_access_token(identity=str(user['id']), additional_claims=claims)
+    return jsonify({
+        'access_token': access_token,
+        'expires_in': int(app.config['JWT_ACCESS_TOKEN_EXPIRES'].total_seconds()),
     }), 200
 
 @app.route('/auth/me', methods=['GET'])
@@ -2017,12 +2250,15 @@ def _get_rp_id_and_origin():
     except Exception:
         return RP_ID, RP_ORIGINS
 
-# Store challenges temporarily (in production, use Redis or similar)
-# Values: { key: {'challenge': bytes, 'rp_id': str, 'origins': list} }
-passkey_challenges = {}
+# Passkey challenges must survive across requests (browser POSTs options, then
+# POSTs verify). Previously in-memory — broke multi-instance deployments and
+# leaked on process restart. Now persisted in users.db with a 5-min TTL so
+# stale challenges don't accumulate.
+_PASSKEY_CHALLENGE_TTL_SEC = 5 * 60
+
 
 def init_passkey_table():
-    """Create passkey_credentials table if not exists"""
+    """Create passkey_credentials + passkey_challenges tables if not exists."""
     conn = sqlite3.connect(USERS_DB)
     cursor = conn.cursor()
     cursor.execute('''
@@ -2036,10 +2272,72 @@ def init_passkey_table():
             FOREIGN KEY (user_id) REFERENCES users(id)
         )
     ''')
+    # Key is a string: user_id for register flow, random login_id for login flow.
+    # challenge is bytes (BLOB). origins stored as JSON array.
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS passkey_challenges (
+            challenge_key TEXT PRIMARY KEY,
+            challenge BLOB NOT NULL,
+            rp_id TEXT,
+            origins TEXT,
+            created_at REAL NOT NULL
+        )
+    ''')
     conn.commit()
     conn.close()
 
 init_passkey_table()
+
+
+def _passkey_challenge_set(key, challenge, rp_id, origins):
+    """Store a WebAuthn challenge. Called from options endpoints."""
+    conn = sqlite3.connect(USERS_DB)
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT OR REPLACE INTO passkey_challenges "
+        "(challenge_key, challenge, rp_id, origins, created_at) VALUES (?, ?, ?, ?, ?)",
+        (str(key), challenge, rp_id, json.dumps(origins), time.time()),
+    )
+    conn.commit()
+    conn.close()
+
+
+def _passkey_challenge_get(key):
+    """Return stored challenge dict or None if missing/expired."""
+    conn = sqlite3.connect(USERS_DB)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT challenge, rp_id, origins, created_at FROM passkey_challenges "
+        "WHERE challenge_key = ?",
+        (str(key),),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    if row is None:
+        return None
+    if time.time() - float(row['created_at']) > _PASSKEY_CHALLENGE_TTL_SEC:
+        _passkey_challenge_pop(key)
+        return None
+    try:
+        origins = json.loads(row['origins']) if row['origins'] else []
+    except (TypeError, ValueError):
+        origins = []
+    return {'challenge': row['challenge'], 'rp_id': row['rp_id'], 'origins': origins}
+
+
+def _passkey_challenge_pop(key):
+    """Remove a challenge after use (success or failure)."""
+    conn = sqlite3.connect(USERS_DB)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM passkey_challenges WHERE challenge_key = ?", (str(key),))
+    # Opportunistic sweep of any rows older than the TTL.
+    cursor.execute(
+        "DELETE FROM passkey_challenges WHERE created_at < ?",
+        (time.time() - _PASSKEY_CHALLENGE_TTL_SEC,),
+    )
+    conn.commit()
+    conn.close()
 
 @app.route('/auth/passkey/register/options', methods=['POST'])
 @jwt_required()
@@ -2081,8 +2379,8 @@ def passkey_register_options():
         ),
     )
     
-    # Store challenge and rp context for verification
-    passkey_challenges[str(user['id'])] = {'challenge': options.challenge, 'rp_id': rp_id, 'origins': origins}
+    # Store challenge and rp context for verification (5-min TTL, persisted to users.db)
+    _passkey_challenge_set(str(user['id']), options.challenge, rp_id, origins)
     
     return options_to_json(options)
 
@@ -2093,12 +2391,12 @@ def passkey_register_verify():
     current_user_id = get_jwt_identity()
     data = request.get_json()
     
-    stored = passkey_challenges.get(current_user_id)
+    stored = _passkey_challenge_get(current_user_id)
     if not stored:
         return jsonify({'error': 'No pending registration'}), 400
-    challenge = stored.get('challenge') if isinstance(stored, dict) else stored
-    rp_id = stored.get('rp_id', RP_ID) if isinstance(stored, dict) else RP_ID
-    origins = stored.get('origins', RP_ORIGINS) if isinstance(stored, dict) else RP_ORIGINS
+    challenge = stored['challenge']
+    rp_id = stored.get('rp_id') or RP_ID
+    origins = stored.get('origins') or RP_ORIGINS
     
     try:
         verification = verify_registration_response(
@@ -2124,12 +2422,11 @@ def passkey_register_verify():
         conn.close()
         
         # Clean up challenge
-        del passkey_challenges[current_user_id]
-        
+        _passkey_challenge_pop(current_user_id)
+
         return jsonify({'success': True, 'message': 'Passkey registered successfully'})
     except Exception as e:
-        if current_user_id in passkey_challenges:
-            del passkey_challenges[current_user_id]
+        _passkey_challenge_pop(current_user_id)
         err_msg = str(e)
         if 'already registered' in err_msg.lower() or 'credentials already' in err_msg.lower():
             err_msg = 'This passkey is already registered to your account. Try a different device or passkey, or remove the existing one first.'
@@ -2178,7 +2475,7 @@ def passkey_login_options():
     # Store challenge and rp context (keyed by a random ID for login)
     import secrets
     login_id = secrets.token_urlsafe(16)
-    passkey_challenges[login_id] = {'challenge': options.challenge, 'rp_id': rp_id, 'origins': origins}
+    _passkey_challenge_set(login_id, options.challenge, rp_id, origins)
     
     response = json.loads(options_to_json(options))
     response['loginId'] = login_id
@@ -2190,12 +2487,12 @@ def passkey_login_verify():
     data = request.get_json()
     login_id = data.get('loginId')
     
-    stored = passkey_challenges.get(login_id)
+    stored = _passkey_challenge_get(login_id)
     if not stored:
         return jsonify({'error': 'No pending login'}), 400
-    challenge = stored.get('challenge') if isinstance(stored, dict) else stored
-    rp_id = stored.get('rp_id', RP_ID) if isinstance(stored, dict) else RP_ID
-    origins = stored.get('origins', RP_ORIGINS) if isinstance(stored, dict) else RP_ORIGINS
+    challenge = stored['challenge']
+    rp_id = stored.get('rp_id') or RP_ID
+    origins = stored.get('origins') or RP_ORIGINS
     
     # Find the credential
     credential_id = data.get('id')
@@ -2236,23 +2533,24 @@ def passkey_login_verify():
         conn.close()
         
         # Clean up challenge
-        del passkey_challenges[login_id]
-        
-        # Issue JWT
-        access_token = create_access_token(
-            identity=str(cred['user_id']),
-            additional_claims={'role': cred['role'], 'username': cred['username']}
-        )
-        
+        _passkey_challenge_pop(login_id)
+
+        # Issue JWT pair (access + refresh)
+        claims = {'role': cred['role'], 'username': cred['username']}
+        access_token = create_access_token(identity=str(cred['user_id']), additional_claims=claims)
+        refresh_token = create_refresh_token(identity=str(cred['user_id']), additional_claims=claims)
+
         return jsonify({
             'access_token': access_token,
+            'refresh_token': refresh_token,
+            'expires_in': int(app.config['JWT_ACCESS_TOKEN_EXPIRES'].total_seconds()),
             'user': {'id': cred['user_id'], 'username': cred['username'], 'role': cred['role']}
         })
-    except Exception as e:
+    except Exception:
         conn.close()
-        if login_id in passkey_challenges:
-            del passkey_challenges[login_id]
-        return jsonify({'error': str(e)}), 401
+        _passkey_challenge_pop(login_id)
+        logger.exception('Passkey login verification failed')
+        return jsonify({'error': 'Passkey verification failed'}), 401
 
 @app.route('/auth/passkey/list', methods=['GET'])
 @jwt_required()
@@ -2407,10 +2705,14 @@ def apple_association():
 # --- Playlist Routes ---
 
 @app.route('/playlists', methods=['GET'])
+@jwt_required(optional=True)
 def get_playlists():
-    """Get all playlists"""
+    """List playlists: public/system for everyone; logged-in users also see their private playlists; admin sees all."""
     try:
+        jwt_uid = get_jwt_identity()
+        jwt_role = _jwt_role()
         conn = sqlite3.connect(USERS_DB)
+        ensure_playlist_schema(conn)
         cursor = conn.cursor()
         # Ensure art_path column exists
         cursor.execute("PRAGMA table_info(playlists)")
@@ -2428,85 +2730,165 @@ def get_playlists():
                 "ON playlists(share_token) WHERE share_token IS NOT NULL"
             )
             conn.commit()
-        cursor.execute("SELECT id, name, created_at, is_system, art_path, share_token FROM playlists ORDER BY created_at DESC")
+
+        if jwt_role == 'admin':
+            cursor.execute(
+                "SELECT id, name, created_at, is_system, art_path, share_token, user_id, IFNULL(is_public,0) "
+                "FROM playlists ORDER BY created_at DESC"
+            )
+        elif jwt_uid is not None:
+            cursor.execute(
+                "SELECT id, name, created_at, is_system, art_path, share_token, user_id, IFNULL(is_public,0) "
+                "FROM playlists WHERE IFNULL(is_public,0) = 1 OR IFNULL(is_system,0) = 1 OR user_id = ? "
+                "ORDER BY created_at DESC",
+                (int(jwt_uid),),
+            )
+        else:
+            cursor.execute(
+                "SELECT id, name, created_at, is_system, art_path, share_token, user_id, IFNULL(is_public,0) "
+                "FROM playlists WHERE IFNULL(is_public,0) = 1 OR IFNULL(is_system,0) = 1 "
+                "ORDER BY created_at DESC"
+            )
+            params = ()
+
         playlists = []
         for row in cursor.fetchall():
-            pl = {'id': row[0], 'name': row[1], 'created_at': row[2], 'is_system': bool(row[3])}
+            pl = {
+                'id': row[0],
+                'name': row[1],
+                'created_at': row[2],
+                'is_system': bool(row[3]),
+                'user_id': row[6],
+                'is_public': bool(row[7]),
+            }
             art_path = row[4] if len(row) > 4 else None
             pl['art_url'] = f"/playlists/{pl['id']}/art" if art_path else None
             pl['share_token'] = row[5] if len(row) > 5 else None
             playlists.append(pl)
-        # Get track counts for each playlist
-        for pl in playlists:
-            cursor.execute("SELECT COUNT(*) FROM playlist_tracks WHERE playlist_id = ?", (pl['id'],))
-            pl['count'] = cursor.fetchone()[0]
+        # One grouped count instead of N individual COUNT(*) queries.
+        if playlists:
+            placeholders = ','.join('?' for _ in playlists)
+            ids = [pl['id'] for pl in playlists]
+            cursor.execute(
+                f"SELECT playlist_id, COUNT(*) FROM playlist_tracks "
+                f"WHERE playlist_id IN ({placeholders}) GROUP BY playlist_id",
+                ids,
+            )
+            counts = {row[0]: row[1] for row in cursor.fetchall()}
+            for pl in playlists:
+                pl['count'] = counts.get(pl['id'], 0)
         conn.close()
         return jsonify({'playlists': playlists})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.exception('GET /playlists failed')
+        return jsonify({'error': 'Failed to list playlists'}), 500
 
 @app.route('/playlists', methods=['POST'])
+@jwt_required()
 def create_playlist():
-    """Create a new playlist. Admin can set is_public=True to publish to all users."""
+    """Create a playlist. Non-admin: private, owned by JWT user. Admin: optional is_public catalog (user_id NULL)."""
     try:
+        uid = int(get_jwt_identity())
+        role = _jwt_role() or 'user'
         data = request.get_json()
         name = data.get('name')
-        is_public = data.get('is_public', False)
+        is_public = bool(data.get('is_public', False))
         if not name:
             return jsonify({'error': 'Name is required'}), 400
-            
+        if role != 'admin':
+            is_public = False
+
         conn = sqlite3.connect(USERS_DB)
+        ensure_playlist_schema(conn)
         cursor = conn.cursor()
-        
-        # Check if is_public column exists, add if not
         cursor.execute("PRAGMA table_info(playlists)")
         columns = [col[1] for col in cursor.fetchall()]
         if 'is_public' not in columns:
             cursor.execute("ALTER TABLE playlists ADD COLUMN is_public INTEGER DEFAULT 0")
             conn.commit()
-        
-        cursor.execute("INSERT INTO playlists (name, is_public) VALUES (?, ?)", (name, 1 if is_public else 0))
+
+        if role == 'admin' and is_public:
+            cursor.execute("INSERT INTO playlists (name, is_public, user_id) VALUES (?, 1, NULL)", (name,))
+            ret_uid = None
+            out_public = True
+        else:
+            cursor.execute("INSERT INTO playlists (name, is_public, user_id) VALUES (?, 0, ?)", (name, uid))
+            ret_uid = uid
+            out_public = False
         playlist_id = cursor.lastrowid
         conn.commit()
         conn.close()
-        
-        return jsonify({'id': playlist_id, 'name': name, 'count': 0, 'is_public': is_public}), 201
+
+        return jsonify({
+            'id': playlist_id,
+            'name': name,
+            'count': 0,
+            'is_public': out_public,
+            'user_id': ret_uid,
+        }), 201
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.exception('Request failed')
+        return jsonify({'error': 'Internal server error'}), 500
 
 @app.route('/playlists/<int:playlist_id>', methods=['PUT'])
+@jwt_required()
 def update_playlist(playlist_id):
-    """Rename a playlist"""
+    """Rename a playlist (owner or admin)."""
     try:
         data = request.get_json()
         name = data.get('name')
         if not name:
             return jsonify({'error': 'Name is required'}), 400
-            
+
         conn = sqlite3.connect(USERS_DB)
+        ensure_playlist_schema(conn)
         cursor = conn.cursor()
+        pl = get_playlist_row_dict(cursor, playlist_id)
+        if not pl:
+            conn.close()
+            return jsonify({'error': 'Not found'}), 404
+        uid = get_jwt_identity()
+        role = _jwt_role()
+        if not playlist_editable_by_user(pl, uid, role):
+            conn.close()
+            return jsonify({'error': 'Forbidden'}), 403
+
         cursor.execute("UPDATE playlists SET name = ? WHERE id = ?", (name, playlist_id))
         conn.commit()
         conn.close()
-        
+
         return jsonify({'success': True})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.exception('Request failed')
+        return jsonify({'error': 'Internal server error'}), 500
 
 @app.route('/playlists/<int:playlist_id>', methods=['DELETE'])
+@jwt_required()
 def delete_playlist(playlist_id):
-    """Delete a playlist"""
+    """Delete a playlist (owner or admin)."""
     try:
         conn = sqlite3.connect(USERS_DB)
+        ensure_playlist_schema(conn)
         cursor = conn.cursor()
+        pl = get_playlist_row_dict(cursor, playlist_id)
+        if not pl:
+            conn.close()
+            return jsonify({'error': 'Not found'}), 404
+        uid = get_jwt_identity()
+        role = _jwt_role()
+        if not playlist_editable_by_user(pl, uid, role):
+            conn.close()
+            return jsonify({'error': 'Forbidden'}), 403
+
         cursor.execute("DELETE FROM playlist_tracks WHERE playlist_id = ?", (playlist_id,))
         cursor.execute("DELETE FROM playlists WHERE id = ?", (playlist_id,))
         conn.commit()
         conn.close()
-        
+
         return jsonify({'success': True})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.exception('Request failed')
+        return jsonify({'error': 'Internal server error'}), 500
 
 SHARE_BASE_URL = os.environ.get('SHARE_BASE_URL', 'https://bom.best')
 API_PUBLIC_URL = os.environ.get('API_PUBLIC_URL', 'https://beats.bom.best')
@@ -2517,7 +2899,17 @@ def share_playlist(playlist_id):
     """Generate a share token for a playlist. Returns share_url for sharing with others."""
     try:
         conn = sqlite3.connect(USERS_DB)
+        ensure_playlist_schema(conn)
         cursor = conn.cursor()
+        pl = get_playlist_row_dict(cursor, playlist_id)
+        if not pl:
+            conn.close()
+            return jsonify({'error': 'Playlist not found'}), 404
+        uid = get_jwt_identity()
+        role = _jwt_role()
+        if not playlist_editable_by_user(pl, uid, role):
+            conn.close()
+            return jsonify({'error': 'Forbidden'}), 403
         cursor.execute("PRAGMA table_info(playlists)")
         columns = [col[1] for col in cursor.fetchall()]
         if 'share_token' not in columns:
@@ -2541,7 +2933,8 @@ def share_playlist(playlist_id):
         share_url = f"{SHARE_BASE_URL}/beats/playlist/{share_token}"
         return jsonify({'share_token': share_token, 'share_url': share_url})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.exception('Request failed')
+        return jsonify({'error': 'Internal server error'}), 500
 
 @app.route('/playlists/<int:playlist_id>/share', methods=['DELETE'])
 @jwt_required()
@@ -2549,13 +2942,24 @@ def unshare_playlist(playlist_id):
     """Revoke sharing for a playlist."""
     try:
         conn = sqlite3.connect(USERS_DB)
+        ensure_playlist_schema(conn)
         cursor = conn.cursor()
+        pl = get_playlist_row_dict(cursor, playlist_id)
+        if not pl:
+            conn.close()
+            return jsonify({'error': 'Not found'}), 404
+        uid = get_jwt_identity()
+        role = _jwt_role()
+        if not playlist_editable_by_user(pl, uid, role):
+            conn.close()
+            return jsonify({'error': 'Forbidden'}), 403
         cursor.execute("UPDATE playlists SET share_token = NULL WHERE id = ?", (playlist_id,))
         conn.commit()
         conn.close()
         return jsonify({'message': 'Sharing disabled'})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.exception('Request failed')
+        return jsonify({'error': 'Internal server error'}), 500
 
 @app.route('/shared/<token>', methods=['GET'])
 def get_shared_playlist(token):
@@ -2613,7 +3017,8 @@ def get_shared_playlist(token):
         art_url = f"{base_url}/playlists/{playlist_id}/art" if art_path else None
         return jsonify({'name': name, 'art_url': art_url, 'tracks': tracks})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.exception('Request failed')
+        return jsonify({'error': 'Internal server error'}), 500
 
 @app.route('/shared/<token>/art', methods=['GET'])
 def get_shared_playlist_art(token):
@@ -2636,11 +3041,19 @@ def allowed_image_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_IMAGE_EXTENSIONS
 
 @app.route('/playlists/<int:playlist_id>/art', methods=['GET'])
+@jwt_required(optional=True)
 def get_playlist_art(playlist_id):
     """Serve playlist cover image if set"""
     try:
         conn = sqlite3.connect(USERS_DB)
+        ensure_playlist_schema(conn)
         cursor = conn.cursor()
+        pl = get_playlist_row_dict(cursor, playlist_id)
+        jwt_uid = get_jwt_identity()
+        jwt_role = _jwt_role()
+        if not pl or not playlist_visible_to_user(pl, jwt_uid, jwt_role):
+            conn.close()
+            return '', 404
         cursor.execute("PRAGMA table_info(playlists)")
         columns = [col[1] for col in cursor.fetchall()]
         if 'art_path' not in columns:
@@ -2658,13 +3071,27 @@ def get_playlist_art(playlist_id):
             return '', 404
         return send_file(art_path, mimetype=mimetypes.guess_type(art_path)[0] or 'image/jpeg')
     except Exception as e:
-        print(f"Error serving playlist art: {e}")
+        logger.warning("Error serving playlist art: %s", e)
         return '', 404
 
 @app.route('/playlists/<int:playlist_id>/art', methods=['PUT', 'POST'])
+@jwt_required()
 def set_playlist_art(playlist_id):
     """Upload playlist cover image (multipart form, file key 'image' or first file)"""
     try:
+        conn = sqlite3.connect(USERS_DB)
+        ensure_playlist_schema(conn)
+        cursor = conn.cursor()
+        pl = get_playlist_row_dict(cursor, playlist_id)
+        if not pl:
+            conn.close()
+            return jsonify({'error': 'Not found'}), 404
+        uid = get_jwt_identity()
+        role = _jwt_role()
+        if not playlist_editable_by_user(pl, uid, role):
+            conn.close()
+            return jsonify({'error': 'Forbidden'}), 403
+        conn.close()
         if 'file' not in request.files and 'image' not in request.files:
             # Some clients send as first key
             files = list(request.files.keys())
@@ -2697,20 +3124,29 @@ def set_playlist_art(playlist_id):
         conn.close()
         return jsonify({'success': True, 'art_url': f"/playlists/{playlist_id}/art"})
     except Exception as e:
-        print(f"Error setting playlist art: {e}")
-        return jsonify({'error': str(e)}), 500
+        logger.warning("Error setting playlist art: %s", e)
+        logger.exception('Request failed')
+        return jsonify({'error': 'Internal server error'}), 500
 
 @app.route('/playlists/<int:playlist_id>/tracks', methods=['GET'])
+@jwt_required(optional=True)
 def get_playlist_tracks(playlist_id):
     """Get tracks for a playlist with full metadata"""
     try:
-        # Get track IDs from playlist DB
         conn = sqlite3.connect(USERS_DB)
+        ensure_playlist_schema(conn)
         cursor = conn.cursor()
+        pl = get_playlist_row_dict(cursor, playlist_id)
+        jwt_uid = get_jwt_identity()
+        jwt_role = _jwt_role()
+        if not pl or not playlist_visible_to_user(pl, jwt_uid, jwt_role):
+            conn.close()
+            return jsonify({'error': 'Not found'}), 404
+
         cursor.execute("SELECT track_id FROM playlist_tracks WHERE playlist_id = ? ORDER BY position ASC", (playlist_id,))
         track_ids = [row[0] for row in cursor.fetchall()]
         conn.close()
-        
+
         if not track_ids:
             return jsonify({'tracks': []})
 
@@ -2749,19 +3185,31 @@ def get_playlist_tracks(playlist_id):
         
         return jsonify({'tracks': formatted_tracks})
     except Exception as e:
-        print(f"Error fetching playlist tracks: {e}")
-        return jsonify({'error': str(e)}), 500
+        logger.warning("Error fetching playlist tracks: %s", e)
+        logger.exception('Request failed')
+        return jsonify({'error': 'Internal server error'}), 500
 
 @app.route('/playlists/<int:playlist_id>/tracks', methods=['POST'])
+@jwt_required()
 def add_tracks_to_playlist(playlist_id):
     """Add tracks to playlist"""
     try:
         data = request.get_json()
         track_ids = data.get('track_ids', [])
-        
+
         conn = sqlite3.connect(USERS_DB)
+        ensure_playlist_schema(conn)
         cursor = conn.cursor()
-        
+        pl = get_playlist_row_dict(cursor, playlist_id)
+        if not pl:
+            conn.close()
+            return jsonify({'error': 'Not found'}), 404
+        uid = get_jwt_identity()
+        role = _jwt_role()
+        if not playlist_editable_by_user(pl, uid, role):
+            conn.close()
+            return jsonify({'error': 'Forbidden'}), 403
+
         # Get current max position
         cursor.execute("SELECT MAX(position) FROM playlist_tracks WHERE playlist_id = ?", (playlist_id,))
         result = cursor.fetchone()
@@ -2781,18 +3229,30 @@ def add_tracks_to_playlist(playlist_id):
         
         return jsonify({'success': True})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.exception('Request failed')
+        return jsonify({'error': 'Internal server error'}), 500
 
 @app.route('/playlists/<int:playlist_id>/tracks', methods=['DELETE'])
+@jwt_required()
 def remove_tracks_from_playlist(playlist_id):
     """Remove tracks from playlist"""
     try:
         data = request.get_json()
         track_ids = data.get('track_ids', [])
-        
+
         conn = sqlite3.connect(USERS_DB)
+        ensure_playlist_schema(conn)
         cursor = conn.cursor()
-        
+        pl = get_playlist_row_dict(cursor, playlist_id)
+        if not pl:
+            conn.close()
+            return jsonify({'error': 'Not found'}), 404
+        uid = get_jwt_identity()
+        role = _jwt_role()
+        if not playlist_editable_by_user(pl, uid, role):
+            conn.close()
+            return jsonify({'error': 'Forbidden'}), 403
+
         placeholders = ','.join('?' for _ in track_ids)
         cursor.execute(f"DELETE FROM playlist_tracks WHERE playlist_id = ? AND track_id IN ({placeholders})", 
                       (playlist_id, *track_ids))
@@ -2802,9 +3262,11 @@ def remove_tracks_from_playlist(playlist_id):
         
         return jsonify({'success': True})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.exception('Request failed')
+        return jsonify({'error': 'Internal server error'}), 500
 
 @app.route('/playlists/system/init', methods=['POST'])
+@admin_required()
 def initialize_system_playlists():
     """Initialize All Songs and Favorites system playlists"""
     try:
@@ -2859,19 +3321,31 @@ def initialize_system_playlists():
             'favorites_id': favorites_id
         })
     except Exception as e:
-        print(f"Error initializing system playlists: {e}")
-        return jsonify({'error': str(e)}), 500
+        logger.warning("Error initializing system playlists: %s", e)
+        logger.exception('Request failed')
+        return jsonify({'error': 'Internal server error'}), 500
 
 @app.route('/playlists/<int:playlist_id>/reorder', methods=['PUT'])
+@jwt_required()
 def reorder_playlist_tracks(playlist_id):
     """Reorder tracks in playlist"""
     try:
         data = request.get_json()
         track_ids = data.get('track_ids', [])  # New ordered list
-        
+
         conn = sqlite3.connect(USERS_DB)
+        ensure_playlist_schema(conn)
         cursor = conn.cursor()
-        
+        pl = get_playlist_row_dict(cursor, playlist_id)
+        if not pl:
+            conn.close()
+            return jsonify({'error': 'Not found'}), 404
+        uid = get_jwt_identity()
+        role = _jwt_role()
+        if not playlist_editable_by_user(pl, uid, role):
+            conn.close()
+            return jsonify({'error': 'Forbidden'}), 403
+
         # Delete all existing positions
         cursor.execute("DELETE FROM playlist_tracks WHERE playlist_id = ?", (playlist_id,))
         
@@ -2887,21 +3361,30 @@ def reorder_playlist_tracks(playlist_id):
         
         return jsonify({'success': True, 'count': len(track_ids)})
     except Exception as e:
-        print(f"Error reordering playlist: {e}")
-        return jsonify({'error': str(e)}), 500
+        logger.warning("Error reordering playlist: %s", e)
+        logger.exception('Request failed')
+        return jsonify({'error': 'Internal server error'}), 500
 
 @app.route('/playlists/<int:playlist_id>/search', methods=['GET'])
+@jwt_required(optional=True)
 def search_playlist(playlist_id):
     """Search within playlist"""
     try:
         query = request.args.get('q', '').lower()
-        
+
         if not query:
             return jsonify({'tracks': []})
-        
+
         conn = sqlite3.connect(USERS_DB)
+        ensure_playlist_schema(conn)
         cursor = conn.cursor()
-        
+        pl = get_playlist_row_dict(cursor, playlist_id)
+        jwt_uid = get_jwt_identity()
+        jwt_role = _jwt_role()
+        if not pl or not playlist_visible_to_user(pl, jwt_uid, jwt_role):
+            conn.close()
+            return jsonify({'error': 'Not found'}), 404
+
         # Get track IDs from playlist
         cursor.execute("SELECT track_id FROM playlist_tracks WHERE playlist_id = ? ORDER BY position", (playlist_id,))
         track_ids = [row[0] for row in cursor.fetchall()]
@@ -2945,10 +3428,205 @@ def search_playlist(playlist_id):
         
         return jsonify({'tracks': formatted_tracks})
     except Exception as e:
-        print(f"Error searching playlist: {e}")
-        return jsonify({'error': str(e)}), 500
+        logger.warning("Error searching playlist: %s", e)
+        logger.exception('Request failed')
+        return jsonify({'error': 'Internal server error'}), 500
+
+# Formats that can be transcoded to AAC on request (?transcode=aac).
+# MP3 and AAC/M4A already have hardware offload everywhere — never transcoded.
+_TRANSCODEABLE_EXTS = {'.wav', '.flac', '.ogg', '.aiff', '.aif'}
+
+# Per-codec Content-Type for pass-through streaming. mimetypes.guess_type() is
+# unreliable for FLAC and WAV (returns 'application/octet-stream' on some OSes),
+# so the spec-canonical types are hardcoded here. See /stream contract in docs.
+_PASS_THROUGH_CONTENT_TYPE = {
+    '.flac': 'audio/flac',
+    '.mp3': 'audio/mpeg',
+    '.m4a': 'audio/mp4',
+    '.mp4': 'audio/mp4',
+    '.aac': 'audio/aac',
+    '.wav': 'audio/x-wav',
+    '.ogg': 'audio/ogg',
+    '.aiff': 'audio/aiff',
+    '.aif': 'audio/aiff',
+}
+
+# Max source size for on-the-fly transcode. Guards /tmp when the source lives in S3
+# and must be downloaded locally so ffmpeg can seek (FLAC header parsing needs seek).
+MAX_TRANSCODE_SOURCE_BYTES = int(os.environ.get('MAX_TRANSCODE_SOURCE_BYTES', 200 * 1024 * 1024))
+
+
+def _wants_aac_transcode(args):
+    """Client opts into transcode via ?transcode=aac (primary) or ?format=aac (legacy)."""
+    return (
+        args.get('transcode', '').lower() == 'aac'
+        or args.get('format', '').lower() == 'aac'
+    )
+
+
+def _wants_mp3_transcode(args):
+    """Client opts into MP3 transcode via ?transcode=mp3.
+
+    Used by the Chromecast (Cast DMR) path: MP3 is a progressive streaming format —
+    Chrome's <audio> element can start playing from the first frame without knowing the
+    Content-Length, identical to how internet radio streams work.  Raw FLAC/WAV would
+    require the DMR to buffer the entire file (30-100 MB) before playback begins.
+    """
+    return args.get('transcode', '').lower() == 'mp3'
+
+
+def _should_transcode(file_path, args):
+    """Transcode only when the client explicitly asks AND the source is transcodeable."""
+    ext = os.path.splitext(file_path)[1].lower()
+    return (
+        (_wants_aac_transcode(args) or _wants_mp3_transcode(args))
+        and ext in _TRANSCODEABLE_EXTS
+    )
+
+
+def _pass_through_content_type(file_path):
+    """Canonical Content-Type for a pass-through (non-transcoded) response."""
+    ext = os.path.splitext(file_path)[1].lower()
+    return _PASS_THROUGH_CONTENT_TYPE.get(ext) or (
+        mimetypes.guess_type(file_path)[0] or 'application/octet-stream'
+    )
+
+
+def _ffmpeg_available():
+    """Report whether the ffmpeg binary is on PATH. Cached result is not used
+    (cheap enough), so container rebuilds that install ffmpeg don't need restart."""
+    return shutil.which('ffmpeg') is not None
+
+
+def _ffmpeg_unavailable_response():
+    return jsonify({
+        'error': 'transcode unavailable',
+        'code': 'FFMPEG_MISSING',
+    }), 503
+
+
+def _transcode_generator(file_path, bitrate='256k'):
+    """Yield fragmented MP4 (AAC-LC) chunks by piping file_path through ffmpeg.
+
+    Fragmented MP4 rather than raw ADTS because:
+    - The 'empty_moov' atom lets ExoPlayer know the codec and duration immediately,
+      so Android Auto can display a progress bar and album art without waiting for EOF.
+    - 'frag_keyframe' writes a fragment boundary at every keyframe so the stream is
+      playable from any fragment without seeking the whole file.
+    - ExoPlayer correctly reports isCurrentMediaItemSeekable=true for frag MP4,
+      so onPlayerError can safely seek to resume position on transient errors.
+    """
+    cmd = [
+        'ffmpeg', '-y', '-i', file_path,
+        '-vn',
+        '-c:a', 'aac',
+        '-b:a', bitrate,
+        '-movflags', 'frag_keyframe+empty_moov+faststart',
+        '-f', 'mp4',
+        'pipe:1'
+    ]
+    # Capture stderr to a tempfile so we can surface transcode errors for triage.
+    # A PIPE would deadlock because we read stdout incrementally and never drain stderr.
+    stderr_fd, stderr_path = tempfile.mkstemp(prefix='bombest-transcode-stderr-', suffix='.log')
+    proc = None
+    # Hold the semaphore for the full stream lifetime so in-flight transcodes
+    # count against the cap — not just until Popen returns.
+    with _ffmpeg_sem:
+        try:
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=stderr_fd)
+            os.close(stderr_fd)
+            stderr_fd = -1
+            while True:
+                chunk = proc.stdout.read(65536)
+                if not chunk:
+                    break
+                yield chunk
+        finally:
+            if proc is not None:
+                # Client may have disconnected mid-stream — don't let ffmpeg hang on a closed pipe.
+                if proc.poll() is None:
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                        proc.wait()
+                if proc.returncode not in (0, -15):  # 0 = OK, -15 = SIGTERM from our kill path
+                    try:
+                        with open(stderr_path, 'r', errors='replace') as f:
+                            tail = f.read()[-2000:]
+                        logger.warning("ffmpeg exit %s for %s: %s", proc.returncode, file_path, tail)
+                    except OSError:
+                        pass
+            if stderr_fd >= 0:
+                try:
+                    os.close(stderr_fd)
+                except OSError:
+                    pass
+            try:
+                os.unlink(stderr_path)
+            except OSError:
+                pass
+
+
+def _mp3_transcode_generator(file_path, bitrate='256k'):
+    """Yield MP3 chunks by piping file_path through ffmpeg.
+
+    Unlike the AAC/frag-MP4 path, MP3 is a headerless streaming format: Chrome (and
+    the Cast Default Media Receiver) can start decoding from the very first frame.
+    This eliminates the 'wait for Content-Length' stall that fragmented MP4 causes on
+    the Cast <audio> element and makes all source formats (FLAC, WAV, MP3, OGG) start
+    quickly and reliably over Chromecast.
+    """
+    cmd = [
+        'ffmpeg', '-y', '-i', file_path,
+        '-vn',
+        '-c:a', 'libmp3lame',
+        '-b:a', bitrate,
+        '-f', 'mp3',
+        'pipe:1'
+    ]
+    stderr_fd, stderr_path = tempfile.mkstemp(prefix='bombest-transcode-mp3-stderr-', suffix='.log')
+    proc = None
+    with _ffmpeg_sem:
+        try:
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=stderr_fd)
+            os.close(stderr_fd)
+            stderr_fd = -1
+            while True:
+                chunk = proc.stdout.read(65536)
+                if not chunk:
+                    break
+                yield chunk
+        finally:
+            if proc is not None:
+                if proc.poll() is None:
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                        proc.wait()
+                if proc.returncode not in (0, -15):
+                    try:
+                        with open(stderr_path, 'r', errors='replace') as f:
+                            tail = f.read()[-2000:]
+                        logger.warning("ffmpeg mp3 exit %s for %s: %s", proc.returncode, file_path, tail)
+                    except OSError:
+                        pass
+            if stderr_fd >= 0:
+                try:
+                    os.close(stderr_fd)
+                except OSError:
+                    pass
+            try:
+                os.unlink(stderr_path)
+            except OSError:
+                pass
+
 
 @app.route('/stream/<int:track_id>', methods=['GET'])
+@cross_origin(origins="*")   # Cast DMR fetches from gstatic origin — must allow all
 def stream_track(track_id):
     """Stream audio file directly from upload server to bypass beets CORS issues"""
     try:
@@ -2961,61 +3639,151 @@ def stream_track(track_id):
         if not result:
             return jsonify({'error': 'Track not found'}), 404
 
-        # Beets stores absolute path, or relative to library directory
-        # In our container/setup, it's usually absolute
         file_path = result[0]
-        
-        # Security check: Ensure file is within music directory?
-        # For now, trust the DB as it's internal.
-        
-        # Decode bytes if needed (sqlite sometimes returns bytes for text fields if messed up)
         if isinstance(file_path, bytes):
             file_path = file_path.decode('utf-8', errors='ignore')
 
-        # --- S3 Strategy: proxy stream so browser gets same-origin response (no CORS on S3) ---
+        # ?transcode=aac&bitrate=256 (primary) or ?format=aac (legacy alias) — requested by
+        # Android Auto for hardware-offload-compatible streaming. Without the param,
+        # all codecs pass through (FLAC direct to phones/headphones, etc).
+        raw_bitrate = request.args.get('bitrate', '256')
+        try:
+            bitrate = f"{int(raw_bitrate)}k"
+        except ValueError:
+            bitrate = '256k'
+        # Clamp to a sane range — stops clients requesting silly values that would
+        # either waste bandwidth (>320) or produce garbage-quality output (<96).
+        try:
+            kbps = int(raw_bitrate)
+            bitrate = f"{max(96, min(320, kbps))}k"
+        except ValueError:
+            bitrate = '256k'
+
+        if (_wants_aac_transcode(request.args) or _wants_mp3_transcode(request.args)) \
+                and not _ffmpeg_available():
+            return _ffmpeg_unavailable_response()
+
+        transcoded_headers = {
+            'Accept-Ranges': 'none',
+            'Cache-Control': 'no-store',
+        }
+
+        # --- Local Strategy (preferred — avoids S3 download for transcode) ---
+        if os.path.exists(file_path):
+            if _should_transcode(file_path, request.args):
+                if _wants_mp3_transcode(request.args):
+                    return Response(
+                        _mp3_transcode_generator(file_path, bitrate),
+                        mimetype='audio/mpeg',
+                        headers=transcoded_headers,
+                    )
+                return Response(
+                    _transcode_generator(file_path, bitrate),
+                    mimetype='audio/mp4',
+                    headers=transcoded_headers,
+                )
+            return send_file(
+                file_path,
+                mimetype=_pass_through_content_type(file_path),
+                conditional=True,
+            )
+
+        # --- S3 Fallback (file not on local disk) ---
         if s3_client:
             try:
                 rel_path = os.path.relpath(file_path, start=os.getcwd())
                 if not rel_path.startswith('..'):
-                    range_header = request.headers.get('Range')
-                    params = {'Bucket': S3_BUCKET, 'Key': rel_path}
-                    if range_header:
-                        params['Range'] = range_header
-                    try:
-                        resp = s3_client.get_object(**params)
-                        body = resp['Body']
-                        content_type = resp.get('ContentType') or mimetypes.guess_type(rel_path)[0] or 'application/octet-stream'
-                        if rel_path.lower().endswith('.wav'):
-                            content_type = 'audio/x-wav'
-                        status = resp.get('ResponseMetadata', {}).get('HTTPStatusCode', 200)
-                        headers = {}
-                        if 'ContentLength' in resp:
-                            headers['Content-Length'] = str(resp['ContentLength'])
-                        if 'ContentRange' in resp:
-                            headers['Content-Range'] = resp['ContentRange']
-                        return Response(body, status=status, mimetype=content_type, headers=headers, direct_passthrough=True)
-                    except ClientError as e:
-                        print(f"S3 get_object error: {e}")
+                    if _should_transcode(rel_path, request.args):
+                        # Cap source size before downloading — a 500 MB FLAC would fill /tmp.
+                        # head_object is cheap and lets us 413 cleanly rather than failing mid-download.
+                        try:
+                            head = s3_client.head_object(Bucket=S3_BUCKET, Key=rel_path)
+                            content_length = int(head.get('ContentLength') or 0)
+                        except ClientError as e:
+                            logger.warning("S3 head_object error (transcode): %s", e)
+                            return jsonify({'error': 'S3 error'}), 502
+                        if content_length > MAX_TRANSCODE_SOURCE_BYTES:
+                            return jsonify({
+                                'error': 'Source file too large to transcode',
+                                'limit_bytes': MAX_TRANSCODE_SOURCE_BYTES,
+                            }), 413
+
+                        # Download to temp file so ffmpeg can seek (needed for FLAC header parsing)
+                        ext = os.path.splitext(rel_path)[1] or '.wav'
+                        tmp_fd, tmp_path = tempfile.mkstemp(prefix='bombest-transcode-', suffix=ext)
+                        os.close(tmp_fd)
+                        try:
+                            resp = s3_client.get_object(Bucket=S3_BUCKET, Key=rel_path)
+                            with open(tmp_path, 'wb') as f:
+                                shutil.copyfileobj(resp['Body'], f)
+                        except ClientError as e:
+                            os.unlink(tmp_path)
+                            logger.warning("S3 get_object error (transcode): %s", e)
+                            return jsonify({'error': 'S3 error'}), 502
+
+                        if _wants_mp3_transcode(request.args):
+                            def generate_s3_mp3_transcode():
+                                try:
+                                    yield from _mp3_transcode_generator(tmp_path, bitrate)
+                                finally:
+                                    try:
+                                        os.unlink(tmp_path)
+                                    except OSError:
+                                        pass
+                            return Response(
+                                generate_s3_mp3_transcode(),
+                                mimetype='audio/mpeg',
+                                headers=transcoded_headers,
+                            )
+
+                        def generate_s3_transcode():
+                            try:
+                                yield from _transcode_generator(tmp_path, bitrate)
+                            finally:
+                                try:
+                                    os.unlink(tmp_path)
+                                except OSError:
+                                    pass
+
+                        return Response(
+                            generate_s3_transcode(),
+                            mimetype='audio/mp4',
+                            headers=transcoded_headers,
+                        )
+                    else:
+                        # Original format — pass through with range support
+                        range_header = request.headers.get('Range')
+                        params = {'Bucket': S3_BUCKET, 'Key': rel_path}
+                        if range_header:
+                            params['Range'] = range_header
+                        try:
+                            resp = s3_client.get_object(**params)
+                            body = resp['Body']
+                            # Trust our ext-keyed canonical map over S3 ContentType
+                            # (bucket uploads were mostly written as octet-stream).
+                            content_type = _pass_through_content_type(rel_path)
+                            status = resp.get('ResponseMetadata', {}).get('HTTPStatusCode', 200)
+                            headers = {'Accept-Ranges': 'bytes'}
+                            if 'ContentLength' in resp:
+                                headers['Content-Length'] = str(resp['ContentLength'])
+                            if 'ContentRange' in resp:
+                                headers['Content-Range'] = resp['ContentRange']
+                            return Response(body, status=status, mimetype=content_type, headers=headers, direct_passthrough=True)
+                        except ClientError as e:
+                            logger.warning("S3 get_object error: %s", e)
             except (ValueError, OSError):
                 pass
 
-        # --- Local Strategy ---
-        if not os.path.exists(file_path):
-             return jsonify({'error': 'File not found on disk'}), 404
-
-        mime_type, _ = mimetypes.guess_type(file_path)
-        # Force WAV if mime guess fails or is generic
-        if file_path.lower().endswith('.wav') and (not mime_type or mime_type == 'application/octet-stream'):
-            mime_type = 'audio/x-wav'
-            
-        return send_file(file_path, mimetype=mime_type, conditional=True)
+        return jsonify({'error': 'File not found'}), 404
 
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.exception('Request failed')
+        return jsonify({'error': 'Internal server error'}), 500
 
 # --- Artwork Routes ---
 
 @app.route('/album/<int:album_id>/art', methods=['GET'])
+@cross_origin(origins="*")   # Cast DMR fetches artwork cross-origin
 def get_album_art(album_id):
     """Serve album art directly to bypass beets server"""
     try:
@@ -3037,10 +3805,12 @@ def get_album_art(album_id):
 
         return send_file(art_path)
     except Exception as e:
-        print(f"Art error: {e}")
-        return jsonify({'error': str(e)}), 500
+        logger.warning("Art error: %s", e)
+        logger.exception('Request failed')
+        return jsonify({'error': 'Internal server error'}), 500
 
 @app.route('/track/<int:track_id>/art', methods=['GET'])
+@cross_origin(origins="*")   # Cast DMR fetches artwork cross-origin
 def get_track_art(track_id):
     """Serve track artwork - track_artwork first, then album, embedded, default. ?path=... serves a specific track_artwork path."""
     try:
@@ -3141,7 +3911,7 @@ def get_track_art(track_id):
                 if artwork_data:
                     return send_file(BytesIO(artwork_data), mimetype='image/jpeg')
             except Exception as extract_error:
-                print(f"Artwork extraction error: {extract_error}")
+                logger.warning("Artwork extraction error: %s", extract_error)
 
         # Return default artwork
         default_art = os.path.join(os.path.dirname(__file__), 'static', 'no-image.png')
@@ -3150,8 +3920,9 @@ def get_track_art(track_id):
         
         return jsonify({'error': 'No artwork found'}), 404
     except Exception as e:
-        print(f"Track art error: {e}")
-        return jsonify({'error': str(e)}), 500
+        logger.warning("Track art error: %s", e)
+        logger.exception('Request failed')
+        return jsonify({'error': 'Internal server error'}), 500
 
 
 @app.route('/track/<int:track_id>/canvas', methods=['GET'])
@@ -3181,8 +3952,9 @@ def get_track_canvas(track_id):
     except sqlite3.OperationalError:
         return jsonify({'error': 'No canvas found'}), 404
     except Exception as e:
-        print(f"Canvas error: {e}")
-        return jsonify({'error': str(e)}), 500
+        logger.warning("Canvas error: %s", e)
+        logger.exception('Request failed')
+        return jsonify({'error': 'Internal server error'}), 500
 
 
 @app.route('/notify-interest', methods=['POST'])
@@ -3246,8 +4018,9 @@ def notify_interest():
         return jsonify({'message': 'Notification sent'}), 200
         
     except Exception as e:
-        print(f"Notify error: {e}")
-        return jsonify({'error': str(e)}), 500
+        logger.warning("Notify error: %s", e)
+        logger.exception('Request failed')
+        return jsonify({'error': 'Internal server error'}), 500
 
 # --- Favorites & Roles ---
 
@@ -3362,11 +4135,9 @@ def toggle_favorite(playlist_id):
         conn.close()
         
         return jsonify({'success': True, 'favorited': favorited})
-    except Exception as e:
-        print(f"Error toggling favorite: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
+    except Exception:
+        logger.exception('Toggle favorite failed')
+        return jsonify({'error': 'Toggle favorite failed'}), 500
 
 
 # --- Metrics ---
@@ -3429,8 +4200,9 @@ def batch_record_plays():
         return jsonify({'message': f'Successfully recorded {count} events'}), 201
         
     except Exception as e:
-        print(f"Batch metrics error: {e}")
-        return jsonify({'error': str(e)}), 500
+        logger.warning("Batch metrics error: %s", e)
+        logger.exception('Request failed')
+        return jsonify({'error': 'Internal server error'}), 500
 
 @app.route('/metrics/dashboard', methods=['GET'])
 @admin_required()
@@ -3515,9 +4287,283 @@ def get_dashboard_metrics():
         'users': users
     })
 
+# --- Performance Metrics + CloudWatch ---
+
+_cloudwatch_client = None
+
+def _get_cloudwatch():
+    global _cloudwatch_client
+    if _cloudwatch_client is None:
+        _cloudwatch_client = boto3.client(
+            'cloudwatch',
+            region_name=os.environ.get('AWS_REGION', 'us-west-2')
+        )
+    return _cloudwatch_client
+
+
+def _emit_perf_metrics(events):
+    """Emit CloudWatch custom metrics for a batch of performance events. Best-effort."""
+    try:
+        cw = _get_cloudwatch()
+        metric_data = []
+        for ev in events:
+            t = ev.get('event_type', '')
+            fmt = ev.get('format') or 'unknown'
+            conn = ev.get('connection') or 'unknown'
+
+            if t == 'AudioUnderrun':
+                metric_data += [
+                    {
+                        'MetricName': 'AudioUnderrunCount',
+                        'Dimensions': [{'Name': 'Format', 'Value': fmt},
+                                       {'Name': 'Connection', 'Value': conn}],
+                        'Value': 1, 'Unit': 'Count'
+                    },
+                    {
+                        'MetricName': 'BufferLevelAtUnderrunMs',
+                        'Dimensions': [{'Name': 'Format', 'Value': fmt}],
+                        'Value': float(ev.get('buffer_ms') or 0), 'Unit': 'Milliseconds'
+                    },
+                ]
+            elif t == 'BandwidthSample':
+                kbps = float(ev.get('bitrate_kbps') or 0)
+                if kbps > 0:
+                    metric_data.append({
+                        'MetricName': 'BandwidthKbps',
+                        'Dimensions': [{'Name': 'Connection', 'Value': conn}],
+                        'Value': kbps, 'Unit': 'Kilobits/Second'
+                    })
+            elif t == 'LoadError':
+                metric_data.append({
+                    'MetricName': 'LoadErrorCount',
+                    'Dimensions': [{'Name': 'ErrorType', 'Value': ev.get('error_type') or 'Unknown'},
+                                   {'Name': 'Format', 'Value': fmt}],
+                    'Value': 1, 'Unit': 'Count'
+                })
+            elif t == 'OffloadState':
+                metric_data.append({
+                    'MetricName': 'OffloadEngaged',
+                    'Dimensions': [{'Name': 'Format', 'Value': fmt}],
+                    'Value': 1.0 if ev.get('sleeping') else 0.0, 'Unit': 'Count'
+                })
+
+        # CloudWatch max 20 metric data points per call
+        for i in range(0, len(metric_data), 20):
+            cw.put_metric_data(
+                Namespace='BombestBeats/Playback',
+                MetricData=metric_data[i:i + 20]
+            )
+    except Exception as e:
+        logger.warning("CloudWatch emit error (non-fatal): %s", e)
+
+
+def ensure_cloudwatch_dashboard():
+    """Create or update the BombestBeats-Playback CloudWatch dashboard. Idempotent."""
+    try:
+        cw = _get_cloudwatch()
+        dashboard_body = json.dumps({
+            "widgets": [
+                {
+                    "type": "metric", "x": 0, "y": 0, "width": 12, "height": 6,
+                    "properties": {
+                        "title": "Audio Underruns by Format",
+                        "metrics": [
+                            ["BombestBeats/Playback", "AudioUnderrunCount", "Format", "mp3", "Connection", "wifi"],
+                            [".", ".", ".", "mp3", ".", "cellular"],
+                            [".", ".", ".", "flac", ".", "wifi"],
+                            [".", ".", ".", "flac", ".", "cellular"],
+                            [".", ".", ".", "wav", ".", "wifi"],
+                            [".", ".", ".", "wav", ".", "cellular"],
+                            [".", ".", ".", "aac", ".", "wifi"],
+                            [".", ".", ".", "aac", ".", "cellular"],
+                        ],
+                        "period": 300, "stat": "Sum", "view": "timeSeries",
+                        "region": os.environ.get('AWS_REGION', 'us-west-2')
+                    }
+                },
+                {
+                    "type": "metric", "x": 12, "y": 0, "width": 12, "height": 6,
+                    "properties": {
+                        "title": "Bandwidth kbps (WiFi vs Cellular)",
+                        "metrics": [
+                            ["BombestBeats/Playback", "BandwidthKbps", "Connection", "wifi"],
+                            [".", ".", ".", "cellular"],
+                        ],
+                        "period": 300, "stat": "Average", "view": "timeSeries",
+                        "region": os.environ.get('AWS_REGION', 'us-west-2')
+                    }
+                },
+                {
+                    "type": "metric", "x": 0, "y": 6, "width": 12, "height": 6,
+                    "properties": {
+                        "title": "Load Errors by Type",
+                        "metrics": [
+                            ["BombestBeats/Playback", "LoadErrorCount", "ErrorType", "SocketTimeoutException", "Format", "mp3"],
+                            [".", ".", ".", "SocketTimeoutException", ".", "flac"],
+                            [".", ".", ".", "HttpDataSourceException", ".", "mp3"],
+                            [".", ".", ".", "HttpDataSourceException", ".", "flac"],
+                            [".", ".", ".", "UnknownHostException", ".", "mp3"],
+                        ],
+                        "period": 300, "stat": "Sum", "view": "timeSeries",
+                        "region": os.environ.get('AWS_REGION', 'us-west-2')
+                    }
+                },
+                {
+                    "type": "metric", "x": 12, "y": 6, "width": 12, "height": 6,
+                    "properties": {
+                        "title": "Audio Offload Engagement by Format (1=sleeping, 0=CPU)",
+                        "metrics": [
+                            ["BombestBeats/Playback", "OffloadEngaged", "Format", "mp3"],
+                            [".", ".", ".", "flac"],
+                            [".", ".", ".", "wav"],
+                            [".", ".", ".", "aac"],
+                        ],
+                        "period": 300, "stat": "Average", "view": "timeSeries",
+                        "region": os.environ.get('AWS_REGION', 'us-west-2')
+                    }
+                },
+            ]
+        })
+        cw.put_dashboard(DashboardName='BombestBeats-Playback', DashboardBody=dashboard_body)
+        logger.info("CloudWatch dashboard 'BombestBeats-Playback' created/updated")
+    except Exception as e:
+        logger.warning("Dashboard setup error (non-fatal): %s", e)
+
+
+@app.route('/metrics/performance', methods=['POST'])
+@jwt_required()
+def batch_record_perf():
+    """Receive batched playback performance events from the Android app."""
+    try:
+        user_id = get_jwt_identity()
+        data = request.get_json() or {}
+        events = data.get('events', [])
+
+        if not events:
+            return jsonify({'message': 'No events'}), 200
+
+        conn = sqlite3.connect(USERS_DB)
+        cursor = conn.cursor()
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS performance_events (
+                id INTEGER PRIMARY KEY,
+                event_type TEXT,
+                track_id TEXT,
+                format TEXT,
+                connection TEXT,
+                buffer_ms REAL,
+                elapsed_since_feed_ms REAL,
+                error_type TEXT,
+                error_message TEXT,
+                bitrate_kbps REAL,
+                bytes_loaded INTEGER,
+                load_time_ms INTEGER,
+                sleeping INTEGER,
+                user_id INTEGER,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
+        for ev in events:
+            cursor.execute('''
+                INSERT INTO performance_events
+                (event_type, track_id, format, connection, buffer_ms, elapsed_since_feed_ms,
+                 error_type, error_message, bitrate_kbps, bytes_loaded, load_time_ms, sleeping, user_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                ev.get('event_type'), ev.get('track_id'), ev.get('format'), ev.get('connection'),
+                ev.get('buffer_ms'), ev.get('elapsed_since_feed_ms'),
+                ev.get('error_type'), ev.get('error_message'),
+                ev.get('bitrate_kbps'), ev.get('bytes_loaded'), ev.get('load_time_ms'),
+                1 if ev.get('sleeping') else (0 if ev.get('sleeping') is not None else None),
+                user_id
+            ))
+
+        conn.commit()
+        conn.close()
+
+        _emit_perf_metrics(events)
+
+        return jsonify({'message': f'Recorded {len(events)} perf events'}), 201
+
+    except Exception as e:
+        logger.warning("Performance metrics error: %s", e)
+        logger.exception('Request failed')
+        return jsonify({'error': 'Internal server error'}), 500
+
+
+# Cache S3 reachability for ~60s so external probes (ALB, Docker HEALTHCHECK, Cloudflare)
+# don't turn this endpoint into a per-minute S3 billing source. Re-probed sooner on failure
+# so recovery is observable promptly.
+_S3_HEALTH_TTL_OK = 60.0
+_S3_HEALTH_TTL_ERR = 5.0
+_s3_health_lock = threading.Lock()
+_s3_health_cache = {'ts': 0.0, 'ok': None}  # ok: True/False/None(unchecked)
+
+
+def _check_s3_health():
+    """Return ('ok'|'error'|'skipped', detail_string_or_None). Cached for TTL."""
+    if not (s3_client and S3_BUCKET):
+        return 'skipped', None
+    now = time.time()
+    with _s3_health_lock:
+        cached_ok = _s3_health_cache['ok']
+        ttl = _S3_HEALTH_TTL_OK if cached_ok else _S3_HEALTH_TTL_ERR
+        if cached_ok is not None and (now - _s3_health_cache['ts']) < ttl:
+            return ('ok' if cached_ok else 'error'), None
+    try:
+        s3_client.list_objects_v2(Bucket=S3_BUCKET, MaxKeys=1)
+        with _s3_health_lock:
+            _s3_health_cache['ts'] = now
+            _s3_health_cache['ok'] = True
+        return 'ok', None
+    except Exception as e:
+        logger.warning("/health S3 probe failed: %s", e)
+        with _s3_health_lock:
+            _s3_health_cache['ts'] = now
+            _s3_health_cache['ok'] = False
+        return 'error', None
+
+
+@app.route('/health', methods=['GET'])
+def health_check():
+    """Health endpoint — checks library DB and S3 reachability.
+
+    Response body intentionally omits raw exception strings to avoid leaking paths,
+    bucket names, or AWS error codes to unauthenticated scanners. Full diagnostics
+    are logged server-side.
+    """
+    checks = {}
+    healthy = True
+
+    # Check library DB
+    try:
+        conn = sqlite3.connect(LIBRARY_DB)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute('SELECT COUNT(*) as cnt FROM items')
+        track_count = cursor.fetchone()['cnt']
+        conn.close()
+        checks['library_db'] = {'status': 'ok', 'track_count': track_count}
+    except Exception as e:
+        logger.warning("/health library_db probe failed: %s", e)
+        checks['library_db'] = {'status': 'error'}
+        healthy = False
+
+    # Check S3 (cached)
+    s3_status, _ = _check_s3_health()
+    checks['s3'] = {'status': s3_status}
+    if s3_status == 'error':
+        healthy = False
+
+    status_code = 200 if healthy else 503
+    return jsonify({'status': 'healthy' if healthy else 'degraded', 'checks': checks}), status_code
+
+
 if __name__ == '__main__':
     # Ensure users.db and tables exist (required for /auth/register, /auth/login, etc.)
     from init_db import init_db
     init_db()
     init_track_artwork()
+    ensure_cloudwatch_dashboard()
     app.run(host='0.0.0.0', port=8338)

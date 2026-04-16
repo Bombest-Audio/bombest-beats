@@ -7,10 +7,12 @@
 
 ## Phases
 
-- [ ] **Phase 1: Release Build** - Configure signing, build release AAB/APK, sideload test
-- [ ] **Phase 2: Store Assets** - Create and optimize app icon, feature graphic, screenshots
+- [x] **Phase 1: Release Build** - Configure signing, build release AAB/APK, sideload test
+- [x] **Phase 2: Store Assets** - Create and optimize app icon, feature graphic, screenshots
 - [ ] **Phase 3: Play Store Listing** - Create listing, complete content rating, add privacy policy
 - [ ] **Phase 4: Submission & Publication** - Upload, pass pre-launch review, publish
+- [ ] **Phase 5: E2E UI Tests** - Page objects, method chaining, AAA pattern, P0 regression flows
+- [x] **Phase 6: Android Stability & Optimization** - Shuffle fix, artist metadata, library resilience, health endpoint, error handling
 
 ## Phase Details
 
@@ -26,7 +28,7 @@
   5. Sideloaded APK installs cleanly on Pixel device and runs without crashes
   6. All app features work on Pixel: streaming, auth, playback, visualizers, haptics
 
-**Plans**: TBD
+**Plans**: [`.planning/phases/01-release-build/01-PLAN.md`](phases/01-release-build/01-PLAN.md)
 
 ### Phase 2: Store Assets
 **Goal**: Visual assets produced and optimized for Play Store listing
@@ -74,9 +76,9 @@
 | SIGN-03 | Phase 1 | Pending |
 | SIDE-01 | Phase 1 | Pending |
 | SIDE-02 | Phase 1 | Pending |
-| ASSET-01 | Phase 2 | Pending |
-| ASSET-02 | Phase 2 | Pending |
-| ASSET-03 | Phase 2 | Pending |
+| ASSET-01 | Phase 2 | ✅ Complete |
+| ASSET-02 | Phase 2 | ✅ Complete |
+| ASSET-03 | Phase 2 | ✅ Complete |
 | LIST-01 | Phase 3 | Pending |
 | LIST-02 | Phase 3 | Pending |
 | LIST-03 | Phase 3 | Pending |
@@ -84,10 +86,14 @@
 | SUBM-01 | Phase 4 | Pending |
 | SUBM-02 | Phase 4 | Pending |
 | SUBM-03 | Phase 4 | Pending |
+| TEST-01 | Phase 5 | Pending |
+| TEST-02 | Phase 5 | Pending |
+| TEST-03 | Phase 5 | Pending |
+| TEST-04 | Phase 5 | Pending |
 
 **Coverage:**
-- v1 requirements: 15 total
-- Mapped to phases: 15
+- v1 requirements: 19 total
+- Mapped to phases: 19
 - Unmapped: 0 ✓
 
 ## Progress
@@ -98,6 +104,35 @@
 | 2. Store Assets | Not started | — |
 | 3. Play Store Listing | Not started | — |
 | 4. Submission & Publication | Not started | — |
+| 5. E2E UI Tests | Not started | — |
+| 6. Android Stability & Optimization | Complete | 2026-04-13 |
+
+### Phase 5: E2E UI Tests
+**Goal**: P0 end-to-end UI test suite guards against regressions using page objects, method chaining, and arrange-act-assert pattern
+**Depends on**: Phase 1
+**Requirements**: TEST-01, TEST-02, TEST-03, TEST-04
+**Success criteria** (what must be TRUE):
+  1. Page object class exists for each P0 screen (Login, Library, Player, Playlists)
+  2. P0 flows pass: Login→Library→Play, Playlist CRUD, Logout
+  3. All tests use method chaining and AAA (Arrange/Act/Assert) structure
+  4. Tests compile and run via `./gradlew connectedAndroidTest` with 0 failures
+  5. No test flakiness on 3 consecutive runs
+
+**Plans**: TBD
+
+### Phase 6: Android Stability & Optimization
+**Goal**: Shuffle plays actual tracks, artist metadata displays correctly, app handles backend outages gracefully, errors surface to user
+**Depends on**: Nothing (stability fixes independent of Play Store pipeline)
+**Requirements**: STAB-01, STAB-02, STAB-03, STAB-04, STAB-05, STAB-06
+**Success criteria** (what must be TRUE):
+  1. Tapping "Shuffle library" plays actual tracks with correct title + "thomas phillips" as artist
+  2. Every track shows "thomas phillips" in library, mini player, full player, Android Auto
+  3. App shows loading spinner, error message with retry, or empty state — never a blank screen
+  4. Network recovery auto-refreshes library when connection returns and snapshot was empty
+  5. `GET /health` returns 200 with track count when healthy, 503 when degraded
+  6. Playback errors show user-friendly messages (not frozen UI)
+
+**Status**: Complete (2026-04-13)
 
 ---
 

@@ -33,6 +33,7 @@ import androidx.media3.common.MediaItem
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.bombest.music.R
+import androidx.compose.ui.viewinterop.AndroidView
 import kotlin.math.abs
 
 /**
@@ -58,6 +59,7 @@ fun PlayerBar(
     onPrevious: () -> Unit = {},
     onClick: () -> Unit,
     progress: Float = 0f,  // 0.0 to 1.0 for progress bar
+    showCastButton: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     if (currentMediaItem == null) return
@@ -165,7 +167,9 @@ fun PlayerBar(
                         verticalArrangement = Arrangement.Center
                     ) {
                         Text(
-                            text = currentMediaItem.mediaMetadata.title?.toString() ?: "Unknown",
+                            text = currentMediaItem.mediaMetadata.title?.toString()
+                                ?.takeUnless { currentMediaItem.mediaId.startsWith("special:") }
+                                ?: "Unknown",
                             fontSize = 15.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = Color.White,
@@ -221,6 +225,26 @@ fun PlayerBar(
                             contentDescription = "Next",
                             tint = Color.White.copy(alpha = 0.8f),
                             modifier = Modifier.size(24.dp)
+                        )
+                    }
+
+                    if (showCastButton) {
+                        Spacer(modifier = Modifier.width(4.dp))
+                        AndroidView(
+                            factory = { ctx ->
+                                // MediaRouteButton reads colorBackground from its theme and throws
+                                // if it is transparent. Wrap with an opaque Material theme so the
+                                // button initializes correctly; the visual tint is set separately.
+                                val themedCtx = android.view.ContextThemeWrapper(
+                                    ctx,
+                                    com.google.android.material.R.style.Theme_MaterialComponents_DayNight
+                                )
+                                androidx.mediarouter.app.MediaRouteButton(themedCtx).also { btn ->
+                                    com.google.android.gms.cast.framework.CastButtonFactory
+                                        .setUpMediaRouteButton(ctx, btn)
+                                }
+                            },
+                            modifier = Modifier.size(36.dp)
                         )
                     }
                 }

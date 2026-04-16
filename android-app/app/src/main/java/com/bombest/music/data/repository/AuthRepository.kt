@@ -13,6 +13,7 @@ class AuthRepository(private val context: Context, private val authApi: AuthApi)
     
     companion object {
         private val TOKEN_KEY = stringPreferencesKey("access_token")
+        private val REFRESH_TOKEN_KEY = stringPreferencesKey("refresh_token")
         private val USER_ID_KEY = stringPreferencesKey("user_id")
         private val USERNAME_KEY = stringPreferencesKey("username")
         private val ROLE_KEY = stringPreferencesKey("role")
@@ -40,7 +41,7 @@ class AuthRepository(private val context: Context, private val authApi: AuthApi)
             android.util.Log.d("AuthRepository", "Attempting login for username: $username")
             val response = authApi.login(LoginRequest(username, password))
             android.util.Log.d("AuthRepository", "Login successful for user: ${response.user.username}")
-            saveAuth(response.access_token, response.user)
+            saveAuth(response.access_token, response.refresh_token, response.user)
             Result.success(response.user)
         } catch (e: retrofit2.HttpException) {
             val errorBody = e.response()?.errorBody()?.string()
@@ -55,7 +56,7 @@ class AuthRepository(private val context: Context, private val authApi: AuthApi)
     suspend fun register(username: String, password: String, inviteCode: String): Result<User> {
         return try {
             val response = authApi.register(RegisterRequest(username, password, inviteCode))
-            saveAuth(response.access_token, response.user)
+            saveAuth(response.access_token, response.refresh_token, response.user)
             Result.success(response.user)
         } catch (e: Exception) {
             Result.failure(e)
@@ -74,7 +75,7 @@ class AuthRepository(private val context: Context, private val authApi: AuthApi)
     suspend fun verifyPasskeyLogin(request: PasskeyVerifyRequest): Result<User> {
         return try {
             val response = authApi.verifyPasskeyLogin(request)
-            saveAuth(response.access_token, response.user)
+            saveAuth(response.access_token, response.refresh_token, response.user)
             Result.success(response.user)
         } catch (e: Exception) {
             Result.failure(e)
@@ -107,16 +108,31 @@ class AuthRepository(private val context: Context, private val authApi: AuthApi)
         }
     }
     
-    private suspend fun saveAuth(token: String, user: User) {
+    private suspend fun saveAuth(token: String, refreshToken: String?, user: User) {
         context.authDataStore.edit { prefs ->
             prefs[TOKEN_KEY] = token
+            if (refreshToken != null) prefs[REFRESH_TOKEN_KEY] = refreshToken
             prefs[USER_ID_KEY] = user.id.toString()
             prefs[USERNAME_KEY] = user.username
             prefs[ROLE_KEY] = user.role
         }
     }
-    
+
     suspend fun getTokenSync(): String? {
         return context.authDataStore.data.first()[TOKEN_KEY]
+    }
+
+    suspend fun getRefreshTokenSync(): String? {
+        return context.authDataStore.data.first()[REFRESH_TOKEN_KEY]
+    }
+
+    /**
+     * Persist a freshly-refreshed access token (called by JwtAuthenticator). Leaves
+     * refresh token + user identity untouched — we only mint new access tokens in v1.
+     */
+    suspend fun updateAccessToken(newAccess: String) {
+        context.authDataStore.edit { prefs ->
+            prefs[TOKEN_KEY] = newAccess
+        }
     }
 }

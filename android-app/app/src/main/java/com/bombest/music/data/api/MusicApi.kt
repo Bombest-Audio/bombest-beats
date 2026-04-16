@@ -82,6 +82,12 @@ interface MusicApi {
         @Header("Authorization") auth: String
     ): Response<Unit>
 
+    @retrofit2.http.POST("metrics/performance")
+    suspend fun batchRecordPerfEvents(
+        @retrofit2.http.Body request: PerfBatchRequest,
+        @Header("Authorization") auth: String
+    ): Response<Unit>
+
     @DELETE("duplicates")
     suspend fun removeDuplicates(@Header("Authorization") auth: String): RemoveDuplicatesResponse
 }
@@ -94,6 +100,32 @@ data class PlayEvent(
     val track_id: Int,
     val timestamp: String // ISO 8601 or similar
 )
+
+/**
+ * Flat union type for all performance event flavors. The [event_type] discriminator tells
+ * the server which fields are populated:
+ *   "AudioUnderrun"  — buffer_ms, elapsed_since_feed_ms
+ *   "LoadError"      — error_type, error_message
+ *   "BandwidthSample"— bitrate_kbps, bytes_loaded, load_time_ms
+ *   "OffloadState"   — sleeping
+ */
+data class PerfEventPayload(
+    val event_type: String,
+    val timestamp: String,
+    val track_id: String? = null,
+    val format: String? = null,
+    val connection: String? = null,
+    val buffer_ms: Long? = null,
+    val elapsed_since_feed_ms: Long? = null,
+    val error_type: String? = null,
+    val error_message: String? = null,
+    val bitrate_kbps: Long? = null,
+    val bytes_loaded: Long? = null,
+    val load_time_ms: Int? = null,
+    val sleeping: Boolean? = null
+)
+
+data class PerfBatchRequest(val events: List<PerfEventPayload>)
 
 data class RemoveDuplicatesResponse(
     val message: String,

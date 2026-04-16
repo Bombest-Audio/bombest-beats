@@ -41,9 +41,36 @@ class MusicRepository(private val context: android.content.Context) {
         }
     }
     
-    fun getStreamUrl(trackId: Int): String {
-        return "${NetworkModule.getStreamBaseUrl()}/stream/$trackId"
+    /**
+     * Build a `/stream/<id>` URL.
+     *
+     * - [transcodeForAuto] = true (Android Auto path): request `?transcode=aac&bitrate=256`.
+     *   Auto's certified playback stack is AAC/MP4 only — FLAC/WAV/OGG would be rejected by
+     *   the ExoPlayer renderer the head-unit ships with. Transcoding server-side keeps the
+     *   payload small (~5x smaller than FLAC) so the buffer fills faster on cellular.
+     * - [transcodeForAuto] = false (phone/headphones path): no transcode flag — the server
+     *   passes the source through with its canonical Content-Type (`audio/flac`, `audio/mpeg`,
+     *   etc) so lossless sources stay lossless and MP3/AAC originals are served unchanged.
+     */
+    fun getStreamUrl(trackId: Int, transcodeForAuto: Boolean = false): String {
+        val base = "${NetworkModule.getStreamBaseUrl()}/stream/$trackId"
+        return if (transcodeForAuto) "$base?transcode=aac&bitrate=256" else base
     }
+
+    /**
+     * Build a Cast-optimised stream URL.
+     *
+     * Uses [?transcode=mp3] rather than the raw file or the AAC/frag-MP4 path because:
+     * - MP3 is a **progressive streaming format** — Chrome's <audio> element on the
+     *   Chromecast can start playing from the very first frame without knowing the
+     *   Content-Length (exactly like internet radio).
+     * - Raw FLAC / WAV files can be 30-100 MB; the Cast DMR buffers before playing,
+     *   causing multi-second delays or session timeouts.
+     * - The frag-MP4 (AAC) transcode has no Content-Length and Accept-Ranges:none,
+     *   which also prevents the DMR from progressive-buffering.
+     */
+    fun getCastStreamUrl(trackId: Int, bitrate: Int = 256): String =
+        "${NetworkModule.getStreamBaseUrl()}/stream/$trackId?transcode=mp3&bitrate=$bitrate"
     
     fun getTrackArtUrl(trackId: Int): String {
         return "${NetworkModule.getStreamBaseUrl()}/track/$trackId/art"

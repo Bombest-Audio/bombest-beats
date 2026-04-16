@@ -16,7 +16,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Download
@@ -46,6 +46,8 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -97,6 +99,8 @@ fun PlayerScreen(
     onSetLoopStart: () -> Unit = {},
     onSetLoopEnd: () -> Unit = {},
     onClearLoop: () -> Unit = {},
+    isBuffering: Boolean = false,
+    isCastConnected: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     // Full Screen Background - Graffiti theme deep navy
@@ -133,17 +137,26 @@ fun PlayerScreen(
                     .verticalScroll(scrollState),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                TopRow(onClose = onClose, onRegisterPasskey = onRegisterPasskey)
+                TopRow(onClose = onClose, onRegisterPasskey = onRegisterPasskey, showCastButton = true)
 
                 Spacer(Modifier.height(16.dp))
 
-                ArtworkWithProgress(
-                    imageSize = 300.dp,
-                    currentPosition = currentPosition,
-                    duration = duration,
-                    onSeek = onSeek,
-                    artworkUri = currentMediaItem.mediaMetadata.artworkUri
-                )
+                Box(contentAlignment = Alignment.Center) {
+                    ArtworkWithProgress(
+                        imageSize = 300.dp,
+                        currentPosition = currentPosition,
+                        duration = duration,
+                        onSeek = onSeek,
+                        artworkUri = currentMediaItem.mediaMetadata.artworkUri
+                    )
+                    if (isBuffering) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(56.dp),
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.85f),
+                            strokeWidth = 3.dp
+                        )
+                    }
+                }
 
                 Spacer(Modifier.height(24.dp))
 
@@ -173,23 +186,28 @@ fun PlayerScreen(
 
                 Spacer(Modifier.height(24.dp))
 
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(120.dp)
-                ) {
-                    GraffitiWaveformVisualizer(
-                        amplitudes = amplitudes,
-                        isPlaying = isPlaying,
-                        modifier = Modifier.fillMaxSize()
-                    )
+                // Visualizer renders on-device waveform; audio is on the Chromecast when casting
+                if (!isCastConnected) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(120.dp)
+                    ) {
+                        GraffitiWaveformVisualizer(
+                            amplitudes = amplitudes,
+                            isPlaying = isPlaying,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
                 }
 
                 Spacer(Modifier.height(16.dp))
             }
 
             SongInfo(
-                title = currentMediaItem.mediaMetadata.title?.toString() ?: "Unknown",
+                title = currentMediaItem.mediaMetadata.title?.toString()
+                    ?.takeUnless { currentMediaItem.mediaId.startsWith("special:") }
+                    ?: "Unknown",
                 artist = currentMediaItem.mediaMetadata.artist?.toString() ?: "Unknown Artist"
             )
 
@@ -214,9 +232,9 @@ fun PlayerScreen(
 
 
 @Composable
-fun TopRow(onClose: () -> Unit, onRegisterPasskey: () -> Unit = {}) {
+fun TopRow(onClose: () -> Unit, onRegisterPasskey: () -> Unit = {}, showCastButton: Boolean = true) {
     var showMenu by remember { mutableStateOf(false) }
-    
+
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -224,12 +242,33 @@ fun TopRow(onClose: () -> Unit, onRegisterPasskey: () -> Unit = {}) {
     ) {
         IconButtonCircle(onClick = onClose) {
             Icon(
-                imageVector = Icons.Default.ArrowBack,
+                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                 contentDescription = "Back",
                 tint = Color(0xFFF470FF)
             )
         }
-        
+
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (showCastButton) {
+                AndroidView(
+                    factory = { ctx ->
+                        // MediaRouteButton reads colorBackground from its theme and throws
+                        // if it is transparent. Wrap with an opaque Material theme.
+                        val themedCtx = android.view.ContextThemeWrapper(
+                            ctx,
+                            com.google.android.material.R.style.Theme_MaterialComponents_DayNight
+                        )
+                        androidx.mediarouter.app.MediaRouteButton(themedCtx).also { btn ->
+                            com.google.android.gms.cast.framework.CastButtonFactory
+                                .setUpMediaRouteButton(ctx, btn)
+                        }
+                    },
+                    modifier = Modifier
+                        .size(40.dp)
+                        .padding(4.dp)
+                )
+            }
+
         Box {
             IconButtonCircle(onClick = { showMenu = true }) {
                 Icon(
@@ -260,8 +299,16 @@ fun TopRow(onClose: () -> Unit, onRegisterPasskey: () -> Unit = {}) {
                     text = { Text("Sleep Timer", color = Color.White) },
                     onClick = { showMenu = false }
                 )
+                DropdownMenuItem(
+                    text = { Text("Register Passkey", color = Color.White) },
+                    onClick = {
+                        showMenu = false
+                        onRegisterPasskey()
+                    }
+                )
             }
-        }
+        } // end Box (menu)
+        } // end inner Row (cast + menu)
     }
 }
 
@@ -893,7 +940,8 @@ fun PlayButton(isPlaying: Boolean, onClick: () -> Unit) {
                 ),
                 shape = CircleShape
             )
-            .clickable { onClick() },
+            .clickable(onClickLabel = if (isPlaying) "Pause" else "Play") { onClick() }
+            .semantics { contentDescription = if (isPlaying) "Pause" else "Play" },
         contentAlignment = Alignment.Center
     ) {
         Box(

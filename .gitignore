@@ -36,11 +36,34 @@ beets-backend/waveforms/
 *.aac
 *.ogg
 
+# Editor backup files
+*.bak
+
 # macOS specific
 .DS_Store
 
 # Local credentials and keys
 .local/
 
+# Release keystores (never commit)
+*.jks
+*.keystore
+keystore.properties
+**/release.keystore
+
 # Plan files (Cursor/agent)
 *.plan.md
+
+# IDE & local tooling
+.cursor/
+.gradle-home/
+
+# Downloaded binaries (e.g. gh CLI releases)
+gh_*/
+
+# Reference / comparison apps (not part of this repo)
+musify-app/
+spotube-app/
+
+# GSD planning artifacts (generated, not source-controlled)
+.planning/ui-reviews/

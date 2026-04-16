@@ -2,6 +2,8 @@ package com.bombest.music.ui.screens
 
 import android.util.Log
 import androidx.activity.compose.BackHandler
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
@@ -56,7 +58,11 @@ fun LibraryScreen(
     currentMediaItem: MediaItem?,
     isRefreshing: Boolean = false,
     onRefresh: () -> Unit = {},
-    onDelete: (MediaItem) -> Unit = {}
+    onDelete: (MediaItem) -> Unit = {},
+    libraryState: com.bombest.music.ui.viewmodel.MainViewModel.LibraryState =
+        com.bombest.music.ui.viewmodel.MainViewModel.LibraryState.LOADED,
+    playbackError: String? = null,
+    onDismissError: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -371,7 +377,56 @@ fun LibraryScreen(
         modifier = Modifier
             .fillMaxSize()
             .nestedScroll(nestedScrollConnection)
+            .semantics { contentDescription = "Library" }
     ) {
+        // Playback error snackbar
+        if (playbackError != null) {
+            Snackbar(
+                modifier = Modifier
+                    .padding(16.dp)
+                    .align(Alignment.TopCenter),
+                action = {
+                    TextButton(onClick = onDismissError) {
+                        Text("Dismiss", color = Color.White)
+                    }
+                },
+                containerColor = Color(0xFFB71C1C)
+            ) {
+                Text(playbackError, color = Color.White)
+            }
+        }
+
+        // Loading / error / empty states
+        when (libraryState) {
+            com.bombest.music.ui.viewmodel.MainViewModel.LibraryState.LOADING -> {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = Color(0xFF6C63FF))
+                }
+                return@Box
+            }
+            com.bombest.music.ui.viewmodel.MainViewModel.LibraryState.ERROR -> {
+                Column(
+                    Modifier.fillMaxSize(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Text("Couldn't load library", color = Color.White, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(8.dp))
+                    Text("Check your connection and try again", color = Color.Gray)
+                    Spacer(Modifier.height(16.dp))
+                    Button(onClick = onRefresh) { Text("Retry") }
+                }
+                return@Box
+            }
+            com.bombest.music.ui.viewmodel.MainViewModel.LibraryState.EMPTY -> {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("No tracks yet", color = Color.Gray)
+                }
+                return@Box
+            }
+            com.bombest.music.ui.viewmodel.MainViewModel.LibraryState.LOADED -> { /* fall through to LazyColumn */ }
+        }
+
         // Content with offset for pull effect
         LazyColumn(
             state = listState,

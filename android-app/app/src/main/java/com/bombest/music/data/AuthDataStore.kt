@@ -11,6 +11,9 @@ val Context.authDataStore: DataStore<Preferences> by preferencesDataStore(name =
 
 object AuthPreferences {
     val TOKEN_KEY = stringPreferencesKey("access_token")
+    // Refresh token is stored alongside access to let JwtAuthenticator mint a new
+    // access token on 401 without re-prompting the user for credentials (issue #28).
+    val REFRESH_TOKEN_KEY = stringPreferencesKey("refresh_token")
     val USER_KEY = stringPreferencesKey("username")
     val USER_ID_KEY = stringPreferencesKey("user_id")
     val ROLE_KEY = stringPreferencesKey("role")

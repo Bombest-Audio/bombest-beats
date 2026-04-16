@@ -5,7 +5,7 @@ import android.content.Intent
 import android.os.Bundle
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
-import androidx.activity.ComponentActivity
+import androidx.appcompat.app.AppCompatActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -43,6 +43,7 @@ import com.bombest.music.ui.screens.*
 import com.bombest.music.ui.theme.BombestBeatsTheme
 import com.bombest.music.ui.viewmodel.MainViewModel
 import com.bombest.music.ui.viewmodel.PlaylistViewModel
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.rememberCoroutineScope
 import com.bombest.music.data.PasskeyManager
@@ -74,13 +75,20 @@ private fun createImagePart(context: android.content.Context, uri: Uri): Multipa
     }
 }
 
-private fun trackToMediaItem(track: Track, artworkUri: Uri? = null): MediaItem {
+private fun trackToMediaItem(
+    track: Track,
+    downloadManager: DownloadManager,
+    artworkUri: Uri? = null
+): MediaItem {
     val baseUrl = NetworkModule.getStreamBaseUrl()
     val streamUrl = "$baseUrl/stream/${track.id}"
+    val tid = track.id.toString()
+    val playUri = downloadManager.playbackUriForTrack(tid, streamUrl)
     val artUrl = artworkUri?.toString() ?: "$baseUrl/track/${track.id}/art"
     return MediaItem.Builder()
-        .setMediaId(track.id.toString())
-        .setUri(Uri.parse(streamUrl))
+        .setMediaId(tid)
+        .setUri(playUri)
+        .setMimeType(downloadManager.mimeTypeForPlayback(tid, track.path))
         .setMediaMetadata(
             MediaMetadata.Builder()
                 .setTitle(track.title)
@@ -94,7 +102,7 @@ private fun trackToMediaItem(track: Track, artworkUri: Uri? = null): MediaItem {
         .build()
 }
 
-class MainActivity : ComponentActivity() {
+class MainActivity : AppCompatActivity() {
     
     private val mainViewModel: MainViewModel by viewModels()
     private lateinit var passkeyManager: PasskeyManager
@@ -187,9 +195,16 @@ fun MainContent(
     var selectedPlaylistId by remember { mutableStateOf<Int?>(null) }
     val context = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
+    val downloadManager = remember { DownloadManager.getInstance(context) }
     
     val playlistViewModel: PlaylistViewModel = viewModel()
-    
+
+    LaunchedEffect(Unit) {
+        playlistViewModel.userMessages.collect { msg ->
+            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+        }
+    }
+
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { isGranted ->
@@ -235,7 +250,7 @@ fun MainContent(
                         LibraryScreen(
                             playlist = viewModel.playlist,
                             currentMediaItem = viewModel.currentMediaItem.value,
-                            onTrackClick = { item -> 
+                            onTrackClick = { item ->
                                 if (item.mediaId == "playlists") {
                                     // Switch to Playlists screen for rich UI
                                     playlistViewModel.loadPlaylists()
@@ -245,12 +260,15 @@ fun MainContent(
                                     viewModel.browseId(item.mediaId)
                                 } else {
                                     // Play track
-                                    viewModel.playMedia(item) 
+                                    viewModel.playMedia(item)
                                 }
                             },
                             isRefreshing = viewModel.isRefreshing.value,
                             onRefresh = { viewModel.refreshLibrary() },
-                            onDelete = { item -> viewModel.playlist.remove(item) }
+                            onDelete = { item -> viewModel.playlist.remove(item) },
+                            libraryState = viewModel.libraryState.value,
+                            playbackError = viewModel.playbackError.value,
+                            onDismissError = { viewModel.playbackError.value = null }
                         )
                         
                         // Handle back button for library navigation
@@ -265,6 +283,7 @@ fun MainContent(
                 PlaylistsScreen(
                     playlists = playlistViewModel.playlists,
                     isLoading = playlistViewModel.isLoading.value,
+                    showCreateButton = playlistViewModel.currentUserId.value != null,
                     onCreatePlaylist = { name -> playlistViewModel.createPlaylist(name) },
                     onPlaylistClick = { id ->
                         selectedPlaylistId = id
@@ -277,13 +296,17 @@ fun MainContent(
                             val tracks = playlistViewModel.getPlaylistTracksOnce(playlist.id)
                             if (tracks.isNotEmpty()) {
                                 val playlistArtUri = playlist.art_url?.let { url -> Uri.parse(NetworkModule.getStreamBaseUrl() + url) }
-                                val items = tracks.map { trackToMediaItem(it, playlistArtUri) }
+                                val items = tracks.map { trackToMediaItem(it, downloadManager, playlistArtUri) }
                                 viewModel.setPlaylistAndPlay(items)
                                 isPlayerOpen = true
                             }
                         }
                     },
                     onDeletePlaylist = { id -> playlistViewModel.deletePlaylist(id) },
+                    canDeletePlaylist = { pl ->
+                        playlistViewModel.canEditPlaylist(pl) && !pl.is_system
+                    },
+                    onRefresh = { playlistViewModel.loadPlaylists() },
                     onBack = { currentScreen = Screen.LIBRARY }
                 )
             }
@@ -291,17 +314,22 @@ fun MainContent(
             Screen.PLAYLIST_DETAIL -> {
                 val currentPlaylist = playlistViewModel.playlists.find { it.id == selectedPlaylistId }
                 val detailTracks = playlistViewModel.currentPlaylistTracks
+                val canEditDetail = when {
+                    currentPlaylist == null -> false
+                    currentPlaylist.is_system -> playlistViewModel.userRole.value == "admin"
+                    else -> playlistViewModel.canEditPlaylist(currentPlaylist)
+                }
                 PlaylistDetailScreen(
                     playlistId = selectedPlaylistId ?: 0,
                     playlistName = playlistViewModel.currentPlaylistName.value,
                     tracks = detailTracks,
-                    allTracks = playlistViewModel.allTracks,  // Use ViewModel's allTracks from API
+                    allTracks = playlistViewModel.allTracks,
                     isLoading = playlistViewModel.isLoading.value,
-                    isSystem = currentPlaylist?.is_system ?: false,
+                    canEdit = canEditDetail,
                     playlistArtUrl = currentPlaylist?.art_url,
                     onPlayAll = {
                         if (detailTracks.isNotEmpty()) {
-                            val items = detailTracks.map { trackToMediaItem(it, currentPlaylist?.art_url?.let { url -> Uri.parse(NetworkModule.getStreamBaseUrl() + url) }) }
+                            val items = detailTracks.map { trackToMediaItem(it, downloadManager, currentPlaylist?.art_url?.let { url -> Uri.parse(NetworkModule.getStreamBaseUrl() + url) }) }
                             viewModel.setPlaylistAndPlay(items)
                             isPlayerOpen = true
                         }
@@ -309,7 +337,7 @@ fun MainContent(
                     onTrackClick = { track ->
                         if (detailTracks.isNotEmpty()) {
                             val playlistArtUri = currentPlaylist?.art_url?.let { url -> Uri.parse(NetworkModule.getStreamBaseUrl() + url) }
-                            val items = detailTracks.map { trackToMediaItem(it, playlistArtUri) }
+                            val items = detailTracks.map { trackToMediaItem(it, downloadManager, playlistArtUri) }
                             val index = detailTracks.indexOfFirst { it.id == track.id }
                             if (index >= 0) {
                                 viewModel.setPlaylistAndPlayFrom(items, index)
@@ -344,6 +372,20 @@ fun MainContent(
                             }
                         }
                     },
+                    onRename = { newName ->
+                        selectedPlaylistId?.let { playlistViewModel.renamePlaylist(it, newName) }
+                    },
+                    onReorderTrack = { fromIndex, direction ->
+                        selectedPlaylistId?.let {
+                            playlistViewModel.reorderTrack(it, fromIndex, direction)
+                        }
+                    },
+                    onRefresh = {
+                        selectedPlaylistId?.let { id ->
+                            playlistViewModel.loadPlaylistTracks(id, playlistViewModel.currentPlaylistName.value)
+                            playlistViewModel.refreshAllTracks()
+                        }
+                    },
                     onBack = {
                         playlistViewModel.loadPlaylists()
                         currentScreen = Screen.PLAYLISTS
@@ -367,7 +409,10 @@ fun MainContent(
                 AccountScreen(
                     onBack = { currentScreen = Screen.LIBRARY },
                     onRegisterPasskey = onRegisterPasskey,
-                    onRefreshLibrary = { viewModel.refreshLibrary() },
+                    onRefreshLibrary = {
+                        viewModel.refreshLibrary()
+                        playlistViewModel.refreshAllTracks()
+                    },
                     onSignOut = onLogout
                 )
             }
@@ -449,7 +494,9 @@ fun MainContent(
                     bpm = viewModel.bpm.value,
                     onSetLoopStart = viewModel::setLoopStart,
                     onSetLoopEnd = viewModel::setLoopEnd,
-                    onClearLoop = viewModel::clearLoop
+                    onClearLoop = viewModel::clearLoop,
+                    isBuffering = viewModel.isBuffering.value,
+                    isCastConnected = viewModel.isCastConnected
                 )
             }
         }
@@ -468,9 +515,10 @@ fun MainContent(
                     onNext = viewModel::skipNext,
                     onPrevious = viewModel::skipPrevious,
                     onClick = { isPlayerOpen = true },
-                    progress = if (viewModel.duration.value > 0) 
+                    progress = if (viewModel.duration.value > 0)
                         viewModel.currentPosition.value.toFloat() / viewModel.duration.value.toFloat()
-                    else 0f
+                    else 0f,
+                    showCastButton = true
                 )
             }
         }

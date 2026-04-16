@@ -5,11 +5,16 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.List
@@ -44,10 +49,13 @@ import com.bombest.music.data.NetworkModule
 fun PlaylistsScreen(
     playlists: List<Playlist>,
     isLoading: Boolean,
+    showCreateButton: Boolean = true,
     onCreatePlaylist: (String) -> Unit,
     onPlaylistClick: (Int) -> Unit,
     onPlaylistPlayClick: (Playlist) -> Unit,
     onDeletePlaylist: (Int) -> Unit,
+    canDeletePlaylist: (Playlist) -> Boolean = { true },
+    onRefresh: () -> Unit = {},
     onBack: () -> Unit
 ) {
     var showCreateDialog by remember { mutableStateOf(false) }
@@ -64,8 +72,13 @@ fun PlaylistsScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = { showCreateDialog = true }) {
-                        Icon(Icons.Default.Add, contentDescription = "Create Playlist", tint = Color.White)
+                    IconButton(onClick = onRefresh) {
+                        Icon(Icons.Default.Refresh, contentDescription = "Refresh playlists", tint = Color.White)
+                    }
+                    if (showCreateButton) {
+                        IconButton(onClick = { showCreateDialog = true }) {
+                            Icon(Icons.Default.Add, contentDescription = "Create Playlist", tint = Color.White)
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -106,13 +119,14 @@ fun PlaylistsScreen(
                     contentPadding = PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    items(playlists) { playlist ->
+                    items(playlists, key = { it.id }) { playlist ->
                         PlaylistItem(
                             playlist = playlist,
                             onClick = { onPlaylistClick(playlist.id) },
                             onPlayClick = { onPlaylistPlayClick(playlist) },
                             onDelete = { playlistToDelete = playlist },
-                            isSystem = playlist.is_system
+                            isSystem = playlist.is_system,
+                            showDelete = canDeletePlaylist(playlist)
                         )
                     }
                 }
@@ -191,56 +205,79 @@ fun PlaylistItem(
     onClick: () -> Unit,
     onPlayClick: () -> Unit,
     onDelete: () -> Unit,
-    isSystem: Boolean = false
+    isSystem: Boolean = false,
+    showDelete: Boolean = true
 ) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick),
+            .semantics { contentDescription = playlist.name },
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = Color(0xFF1A1D2E))
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
+                .padding(end = 4.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            val artUrl = playlist.art_url?.let { NetworkModule.getStreamBaseUrl() + it }
-            if (artUrl != null) {
-                AsyncImage(
-                    model = artUrl,
-                    contentDescription = null,
-                    modifier = Modifier
-                        .size(48.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                )
-                Spacer(modifier = Modifier.width(12.dp))
+            // Clickable region: artwork + name/count text
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable(onClick = onClick)
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                val artUrl = playlist.art_url?.let { NetworkModule.getStreamBaseUrl() + it }
+                if (artUrl != null) {
+                    AsyncImage(
+                        model = artUrl,
+                        contentDescription = null,
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                }
+                Column {
+                    Text(
+                        text = playlist.name,
+                        color = Color.White,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = "${playlist.count} tracks",
+                        color = Color.Gray,
+                        fontSize = 14.sp
+                    )
+                    val badge = when {
+                        playlist.is_public && playlist.user_id == null -> "Published"
+                        playlist.user_id != null && !playlist.is_public -> "Only you"
+                        else -> null
+                    }
+                    if (badge != null) {
+                        Text(
+                            text = badge,
+                            color = Color(0xFF8899AA),
+                            fontSize = 12.sp
+                        )
+                    }
+                }
             }
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = playlist.name,
-                    color = Color.White,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Medium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    text = "${playlist.count} tracks",
-                    color = Color.Gray,
-                    fontSize = 14.sp
-                )
-            }
-            
+
+            // Action buttons outside the clickable zone — directly accessible for UIAutomator
             Row {
                 IconButton(onClick = onPlayClick) {
                     Icon(Icons.Default.PlayArrow, contentDescription = "Play", tint = Color(0xFFE90060))
                 }
-                if (!isSystem) {
+                if (showDelete && !isSystem) {
                     IconButton(onClick = onDelete) {
-                        Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color.Gray)
+                        Icon(Icons.Default.Delete, contentDescription = "Delete ${playlist.name}", tint = Color.Gray)
                     }
                 }
             }
@@ -251,12 +288,12 @@ fun PlaylistItem(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PlaylistDetailScreen(
-    playlistId: Int = 0,
+    @Suppress("UNUSED_PARAMETER") playlistId: Int = 0,
     playlistName: String,
     tracks: List<Track>,
     allTracks: List<Track> = emptyList(),
     isLoading: Boolean,
-    isSystem: Boolean = false,
+    canEdit: Boolean = false,
     playlistArtUrl: String? = null,
     onPlayAll: () -> Unit = {},
     onTrackClick: (Track) -> Unit,
@@ -264,15 +301,20 @@ fun PlaylistDetailScreen(
     onAddTracks: (List<Int>) -> Unit = {},
     onImageSelected: (Uri) -> Unit = {},
     onSharePlaylist: () -> Unit = {},
+    onRename: (String) -> Unit = {},
+    onReorderTrack: (fromIndex: Int, direction: Int) -> Unit = { _, _ -> },
+    onRefresh: () -> Unit = {},
     onBack: () -> Unit
 ) {
     var showAddTracksDialog by remember { mutableStateOf(false) }
+    var showRenameDialog by remember { mutableStateOf(false) }
+    var renameField by remember { mutableStateOf(playlistName) }
     var selectedTrackIds by remember { mutableStateOf(setOf<Int>()) }
     val fullArtUrl = playlistArtUrl?.let { NetworkModule.getStreamBaseUrl() + it }
     val imagePickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         uri?.let { onImageSelected(it) }
     }
-    
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -288,7 +330,7 @@ fun PlaylistDetailScreen(
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                         }
-                        Text(playlistName, fontWeight = FontWeight.Bold)
+                        Text(playlistName, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 },
                 navigationIcon = {
@@ -297,6 +339,9 @@ fun PlaylistDetailScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = onRefresh) {
+                        Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = Color.White)
+                    }
                     if (tracks.isNotEmpty()) {
                         IconButton(onClick = onPlayAll) {
                             Icon(Icons.Default.PlayArrow, contentDescription = "Play all", tint = Color(0xFFE90060))
@@ -305,7 +350,13 @@ fun PlaylistDetailScreen(
                     IconButton(onClick = onSharePlaylist) {
                         Icon(Icons.Default.Share, contentDescription = "Share playlist", tint = Color.White)
                     }
-                    if (!isSystem) {
+                    if (canEdit) {
+                        IconButton(onClick = {
+                            renameField = playlistName
+                            showRenameDialog = true
+                        }) {
+                            Icon(Icons.Default.Edit, contentDescription = "Rename playlist", tint = Color.White)
+                        }
                         IconButton(onClick = { imagePickerLauncher.launch("image/*") }) {
                             Icon(Icons.Default.Image, contentDescription = if (fullArtUrl != null) "Change image" else "Add image", tint = Color.White)
                         }
@@ -321,7 +372,7 @@ fun PlaylistDetailScreen(
             )
         },
         floatingActionButton = {
-            if (!isSystem) {
+            if (canEdit) {
                 FloatingActionButton(
                     onClick = { showAddTracksDialog = true },
                     containerColor = Color(0xFFE90060)
@@ -352,13 +403,15 @@ fun PlaylistDetailScreen(
                         color = Color.Gray
                     )
                     Spacer(modifier = Modifier.height(16.dp))
-                    Button(
-                        onClick = { showAddTracksDialog = true },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE90060))
-                    ) {
-                        Icon(Icons.Default.Add, contentDescription = null)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Add Tracks")
+                    if (canEdit) {
+                        Button(
+                            onClick = { showAddTracksDialog = true },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE90060))
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Add Tracks")
+                        }
                     }
                 }
             } else {
@@ -367,33 +420,84 @@ fun PlaylistDetailScreen(
                     contentPadding = PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    items(tracks) { track ->
+                    itemsIndexed(tracks, key = { _, t -> t.id }) { index, track ->
                         PlaylistTrackItem(
                             track = track,
                             rowArtUrl = fullArtUrl,
                             onClick = { onTrackClick(track) },
-                            onRemove = if (!isSystem) { { onRemoveTrack(track.id) } } else null
+                            onRemove = if (canEdit) { { onRemoveTrack(track.id) } } else null,
+                            showReorder = canEdit,
+                            onMoveUp = if (canEdit && index > 0) {
+                                { onReorderTrack(index, -1) }
+                            } else null,
+                            onMoveDown = if (canEdit && index < tracks.lastIndex) {
+                                { onReorderTrack(index, 1) }
+                            } else null
                         )
                     }
                 }
             }
         }
     }
-    
+
+    if (showRenameDialog && canEdit) {
+        AlertDialog(
+            onDismissRequest = { showRenameDialog = false },
+            title = { Text("Rename playlist", color = Color.White) },
+            text = {
+                OutlinedTextField(
+                    value = renameField,
+                    onValueChange = { renameField = it },
+                    singleLine = true,
+                    label = { Text("Name") },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Color(0xFFE90060),
+                        unfocusedBorderColor = Color.Gray,
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        cursorColor = Color(0xFFE90060)
+                    )
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onRename(renameField.trim())
+                        showRenameDialog = false
+                    },
+                    enabled = renameField.isNotBlank()
+                ) {
+                    Text("Save", color = Color(0xFFE90060))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRenameDialog = false }) {
+                    Text("Cancel", color = Color.Gray)
+                }
+            },
+            containerColor = Color(0xFF1A1D2E)
+        )
+    }
+
     // Add Tracks Dialog
     if (showAddTracksDialog) {
         val existingTrackIds = tracks.map { it.id }.toSet()
         val availableTracks = allTracks.filter { it.id !in existingTrackIds }
-        
+
         AlertDialog(
-            onDismissRequest = { 
-                showAddTracksDialog = false 
+            onDismissRequest = {
+                showAddTracksDialog = false
                 selectedTrackIds = emptySet()
             },
             title = { Text("Add Tracks", color = Color.White) },
             text = {
-                if (availableTracks.isEmpty()) {
-                    Text("All tracks are already in this playlist", color = Color.Gray)
+                if (allTracks.isEmpty()) {
+                    Text(
+                        "Your library could not be loaded or is empty. Open the menu, pull to refresh the library, and try again.",
+                        color = Color.Gray
+                    )
+                } else if (availableTracks.isEmpty()) {
+                    Text("All library tracks are already in this playlist", color = Color.Gray)
                 } else {
                     LazyColumn(
                         modifier = Modifier.heightIn(max = 400.dp)
@@ -479,7 +583,10 @@ fun PlaylistTrackItem(
     track: Track,
     rowArtUrl: String? = null,
     onClick: () -> Unit,
-    onRemove: (() -> Unit)? = null
+    onRemove: (() -> Unit)? = null,
+    showReorder: Boolean = false,
+    onMoveUp: (() -> Unit)? = null,
+    onMoveDown: (() -> Unit)? = null
 ) {
     Card(
         modifier = Modifier
@@ -522,7 +629,18 @@ fun PlaylistTrackItem(
                     overflow = TextOverflow.Ellipsis
                 )
             }
-            
+            if (showReorder) {
+                if (onMoveUp != null) {
+                    IconButton(onClick = onMoveUp) {
+                        Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Move up", tint = Color.Gray)
+                    }
+                }
+                if (onMoveDown != null) {
+                    IconButton(onClick = onMoveDown) {
+                        Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Move down", tint = Color.Gray)
+                    }
+                }
+            }
             if (onRemove != null) {
                 IconButton(onClick = onRemove) {
                     Icon(Icons.Default.Delete, contentDescription = "Remove", tint = Color.Gray)

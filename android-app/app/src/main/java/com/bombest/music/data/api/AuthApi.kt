@@ -16,6 +16,10 @@ interface AuthApi {
 
     @GET("auth/me")
     suspend fun getMe(@Header("Authorization") token: String): UserResponse
+
+    /** Exchange a refresh token for a fresh access token. Called by JwtAuthenticator on 401. */
+    @POST("auth/refresh")
+    suspend fun refresh(@Header("Authorization") refreshToken: String): RefreshResponse
     
     @POST("auth/passkey/login/options")
     suspend fun getPasskeyLoginOptions(@Body request: PasskeyOptionsRequest = PasskeyOptionsRequest()): PasskeyLoginOptions
@@ -55,7 +59,13 @@ data class GenericResponse(val success: Boolean, val message: String? = null, va
 
 data class LoginRequest(val username: String, val password: String)
 data class RegisterRequest(val username: String, val password: String, val invite_code: String)
-data class AuthResponse(val access_token: String, val user: User)
+data class AuthResponse(
+    val access_token: String,
+    val refresh_token: String? = null,  // Present in responses issued by post-C6 backend.
+    val expires_in: Long? = null,       // Seconds until access_token expires.
+    val user: User
+)
+data class RefreshResponse(val access_token: String, val expires_in: Long? = null)
 data class UserResponse(val id: Int, val username: String, val role: String)
 data class User(val id: Int, val username: String, val role: String)
 

@@ -3,8 +3,10 @@ package com.bombest.music.ui.viewmodel
 import androidx.lifecycle.viewModelScope
 import android.content.ComponentName
 import android.content.Context
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
@@ -50,10 +52,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // Progress State
     val currentPosition = mutableStateOf(0L)
     val duration = mutableStateOf(0L)
+    val isBuffering = mutableStateOf(false)
+
+    // Cast State — true when a Chromecast session is active (audio is on the remote device)
+    var isCastConnected by mutableStateOf(false)
+        private set
 
     // A-B Loop State
     val loopStartMs = mutableStateOf<Long?>(null)
     val loopEndMs = mutableStateOf<Long?>(null)
+
+    // Library loading state
+    enum class LibraryState { LOADING, LOADED, EMPTY, ERROR }
+    val libraryState = mutableStateOf(LibraryState.LOADING)
+
+    // Playback error (user-facing message, null = no error)
+    val playbackError = mutableStateOf<String?>(null)
 
     // Beat grid for bar-snapping loops
     val barTimesMs = mutableStateOf<List<Long>>(emptyList())
@@ -70,8 +84,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var downloadManager: DownloadManager? = null
     private var musicRepository: MusicRepository? = null
 
-    // Visualizer State - now uses server-side pre-computed waveform data
-    val visualizerAmplitudes = mutableStateListOf<Float>()
+    // Visualizer State — immutable list reference so one snapshot write per frame
+    // (mutableStateListOf triggers N snapshot writes for N bar updates; this triggers 1)
+    var visualizerAmplitudes by androidx.compose.runtime.mutableStateOf<List<Float>>(emptyList())
+        private set
     private var visualizer: android.media.audiofx.Visualizer? = null
     
     // Server waveform data
@@ -83,6 +99,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val shuffleHistory = mutableListOf<Int>()
     private val unplayedIndices = mutableSetOf<Int>()
     
+    init {
+        observeCastState()
+    }
+
+    private fun observeCastState() {
+        val castContext = runCatching {
+            com.google.android.gms.cast.framework.CastContext.getSharedInstance(getApplication())
+        }.getOrNull() ?: return
+        castContext.addCastStateListener { state ->
+            isCastConnected = state == com.google.android.gms.cast.framework.CastState.CONNECTED
+        }
+    }
+
     private fun requestAudioSessionId() {
         android.util.Log.d("MainViewModel", "requestAudioSessionId called, mediaBrowser: $mediaBrowser")
         
@@ -238,31 +267,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun updateAmplitudesInternal(newAmplitudes: List<Float>) {
-        viewModelScope.launch(Dispatchers.Main) { 
-             if (visualizerAmplitudes.size != newAmplitudes.size) {
-                 visualizerAmplitudes.clear()
-                 visualizerAmplitudes.addAll(newAmplitudes)
-             } else {
-                 for (i in 0 until newAmplitudes.size) {
-                     val old = visualizerAmplitudes[i]
-                     val target = newAmplitudes[i]
-                     visualizerAmplitudes[i] = old + (target - old) * 0.4f 
-                 }
-             }
-             
-             // Forward audio data to haptic engine
-             if (newAmplitudes.size >= 3) {
-                 // Calculate frequency band averages: low (0-20%), mid (20-60%), high (60-100%)
-                 val lowEnd = (newAmplitudes.size * 0.2).toInt()
-                 val midEnd = (newAmplitudes.size * 0.6).toInt()
-                 
-                 val low = if (lowEnd > 0) newAmplitudes.subList(0, lowEnd).average().toFloat() else 0f
-                 val mid = newAmplitudes.subList(lowEnd, midEnd).average().toFloat()
-                 val high = newAmplitudes.subList(midEnd, newAmplitudes.size).average().toFloat()
-                 val overall = newAmplitudes.average().toFloat()
-                 
-                 HapticGrooveEngine.onAmplitudeUpdate(overall, low, mid, high)
-             }
+        // Lerp on the calling (Default) dispatcher before touching Main — keeps the
+        // arithmetic off the UI thread and reduces the Main dispatch to a single assignment.
+        val current = visualizerAmplitudes
+        val smoothed = if (current.size == newAmplitudes.size) {
+            List(newAmplitudes.size) { i ->
+                current[i] + (newAmplitudes[i] - current[i]) * 0.4f
+            }
+        } else {
+            newAmplitudes.toList()
+        }
+        viewModelScope.launch(Dispatchers.Main) {
+            // Single reference swap = one Compose snapshot write instead of N index writes
+            visualizerAmplitudes = smoothed
+            if (smoothed.size >= 3) {
+                val lowEnd = (smoothed.size * 0.2).toInt().coerceAtLeast(1)
+                val midEnd = (smoothed.size * 0.6).toInt()
+                val low = smoothed.subList(0, lowEnd).average().toFloat()
+                val mid = smoothed.subList(lowEnd, midEnd).average().toFloat()
+                val high = smoothed.subList(midEnd, smoothed.size).average().toFloat()
+                HapticGrooveEngine.onAmplitudeUpdate(smoothed.average().toFloat(), low, mid, high)
+            }
         }
     }
 
@@ -380,7 +405,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         if (mediaBrowser != null) return
         
-        val sessionToken = SessionToken(context, ComponentName(context, BombestMediaService::class.java))
+        val sessionToken = SessionToken(context.applicationContext, ComponentName(context.applicationContext, BombestMediaService::class.java))
         
         val browserListener = object : MediaBrowser.Listener {
             override fun onChildrenChanged(
@@ -396,7 +421,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
-        browserFuture = MediaBrowser.Builder(context, sessionToken)
+        browserFuture = MediaBrowser.Builder(context.applicationContext, sessionToken)
             .setListener(browserListener)
             .buildAsync()
         
@@ -411,7 +436,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 // Request Audio Session ID for Visualizer
                 requestAudioSessionId()
             } catch (e: Exception) {
-                e.printStackTrace()
+                android.util.Log.e("MainViewModel", "MediaBrowser init failed", e)
             }
         }, MoreExecutors.directExecutor())
     }
@@ -447,7 +472,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             override fun onPlaybackStateChanged(playbackState: Int) {
                 if (playbackState == Player.STATE_READY) {
                     updateDuration()
+                    playbackError.value = null // Clear error on successful playback
                 }
+                isBuffering.value = playbackState == Player.STATE_BUFFERING
+            }
+
+            override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                val msg = when (error.errorCode) {
+                    androidx.media3.common.PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
+                    androidx.media3.common.PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT ->
+                        "Network error — check your connection"
+                    androidx.media3.common.PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS ->
+                        "Server error — try again later"
+                    androidx.media3.common.PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED,
+                    androidx.media3.common.PlaybackException.ERROR_CODE_PARSING_MANIFEST_UNSUPPORTED ->
+                        "Unsupported audio format"
+                    else -> "Playback error: ${error.message}"
+                }
+                android.util.Log.e("MainViewModel", "Player error: $msg", error)
+                playbackError.value = msg
             }
         })
     }
@@ -570,10 +613,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     
     private fun fetchChildren() {
         android.util.Log.d("MainViewModel", "Fetching children for ${currentParentId.value}...")
-        
+
         // Use currentParentId
         val parentId = currentParentId.value
-        
+        libraryState.value = LibraryState.LOADING
+
         val childrenFuture = mediaBrowser?.getChildren(parentId, 0, Int.MAX_VALUE, null)
         childrenFuture?.addListener({
              try {
@@ -581,9 +625,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                  android.util.Log.d("MainViewModel", "Got children: ${result.value?.size}")
                  playlist.clear()
                  result.value?.let { playlist.addAll(it) }
-             } catch(e: Exception) { 
+                 libraryState.value = if (playlist.isEmpty()) LibraryState.EMPTY else LibraryState.LOADED
+             } catch(e: Exception) {
                 android.util.Log.e("MainViewModel", "Error getting children", e)
-                e.printStackTrace() 
+                libraryState.value = LibraryState.ERROR
              }
         }, MoreExecutors.directExecutor())
     }
@@ -656,6 +701,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun playMedia(mediaItem: MediaItem) {
         mediaBrowser?.let { browser ->
+            // Shuffle is a virtual item — send only it so the service can
+            // expand it from librarySnapshot with SecureRandom ordering.
+            if (mediaItem.mediaId == BombestMediaService.SPECIAL_SHUFFLE_ALL) {
+                browser.setMediaItems(listOf(mediaItem), 0, 0)
+                browser.prepare()
+                browser.play()
+                return@let
+            }
+
             val snapshot = playlist.toList()
             val index = snapshot.indexOfFirst { it.mediaId == mediaItem.mediaId }
             if (index != -1) {
@@ -780,6 +834,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val currentDownloads = downloads.value.toMutableSet()
                 currentDownloads.add(trackId)
                 downloads.value = currentDownloads
+                patchTrackUriInPlayerAndPlaylist(trackId, dm, streamUrl)
                 android.util.Log.d("MainViewModel", "Track downloaded: $trackId")
             } else {
                 android.util.Log.e("MainViewModel", "Download failed: ${result.exceptionOrNull()?.message}")
@@ -798,9 +853,38 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val currentDownloads = downloads.value.toMutableSet()
                 currentDownloads.remove(trackId)
                 downloads.value = currentDownloads
+                val repo = musicRepository ?: MusicRepository(getApplication())
+                val streamUrl = repo.getStreamUrl(trackId.toIntOrNull() ?: return@launch)
+                patchTrackUriInPlayerAndPlaylist(trackId, dm, streamUrl)
                 android.util.Log.d("MainViewModel", "Download removed: $trackId")
             } else {
                 android.util.Log.e("MainViewModel", "Remove failed: ${result.exceptionOrNull()?.message}")
+            }
+        }
+    }
+
+    /** Offline-first: point queue + ExoPlayer at file URI or back to HTTPS after remove. */
+    private fun patchTrackUriInPlayerAndPlaylist(trackId: String, dm: DownloadManager, streamUrl: String) {
+        val playUri = dm.playbackUriForTrack(trackId, streamUrl)
+        val mime = dm.mimeTypeForPlayback(trackId, null)
+        for (i in playlist.indices) {
+            if (playlist[i].mediaId == trackId) {
+                playlist[i] = playlist[i].buildUpon()
+                    .setUri(playUri)
+                    .setMimeType(mime)
+                    .build()
+            }
+        }
+        mediaBrowser?.let { browser ->
+            val idx = browser.currentMediaItemIndex
+            if (idx < 0) return@let
+            val cur = browser.currentMediaItem
+            if (cur != null && cur.mediaId == trackId) {
+                val newItem = cur.buildUpon()
+                    .setUri(playUri)
+                    .setMimeType(mime)
+                    .build()
+                browser.replaceMediaItem(idx, newItem)
             }
         }
     }

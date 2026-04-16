@@ -107,3 +107,7 @@ $RECYCLE.BIN/
 .vscode/
 *.swp
 *.swo
+
+# Dev tooling and GSD review artifacts (not committed)
+install-genymotion.sh
+UI-REVIEW.md

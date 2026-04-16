@@ -29,9 +29,30 @@ else
   echo "Instance: $INSTANCE_ID"
 fi
 
+# Prune policy — opt-in and scoped:
+#   PRUNE=0 (default): don't prune. Deploys stay focused on "pull + restart."
+#   PRUNE=images: remove only dangling images after the new container is started
+#                 (safe — running containers pin their images, so the new image
+#                 is never removed regardless of whether the container is healthy).
+#   PRUNE=all:    full `docker system prune -f --filter until=24h` (the old
+#                 behavior — can touch unused containers/networks/volumes).
+# Pruning runs AFTER the new container starts so a failed deploy doesn't
+# also wipe rollback candidates.
+PRUNE="${PRUNE:-0}"
+case "$PRUNE" in
+  0|images|all) ;;
+  *) echo "Invalid PRUNE='$PRUNE'. Use 0 (default), images, or all."; exit 1 ;;
+esac
+
+PRUNE_CMD=""
+case "$PRUNE" in
+  images) PRUNE_CMD="sudo docker image prune -f;" ;;
+  all)    PRUNE_CMD="sudo docker system prune -f --filter 'until=24h';" ;;
+esac
+
 # SSM command: source env file (if present), pull image, stop/rm existing container, run new one
 # Use semicolons so we can pass one string; SSM requires JSON-escaped parameters
-COMMAND="source /home/ec2-user/.env.bombest 2>/dev/null || true; export S3_BUCKET=\${S3_BUCKET:-bombest-beats-music}; export S3_REGION=\${S3_REGION:-us-west-2}; sudo docker pull $DOCKER_IMAGE; sudo docker stop bombest-beats 2>/dev/null || true; sudo docker rm bombest-beats 2>/dev/null || true; sudo docker run -d --name bombest-beats -p 8338:8338 --restart unless-stopped -v /data/beets:/app/music -e \"S3_BUCKET=\$S3_BUCKET\" -e \"AWS_ACCESS_KEY_ID=\$AWS_ACCESS_KEY_ID\" -e \"AWS_SECRET_ACCESS_KEY=\$AWS_SECRET_ACCESS_KEY\" -e \"S3_REGION=\$S3_REGION\" $DOCKER_IMAGE; echo Container deployed."
+COMMAND="source /home/ec2-user/.env.bombest 2>/dev/null || true; export S3_BUCKET=\${S3_BUCKET:-bombest-beats-music}; export S3_REGION=\${S3_REGION:-us-west-2}; sudo docker pull $DOCKER_IMAGE; sudo docker stop bombest-beats 2>/dev/null || true; sudo docker rm bombest-beats 2>/dev/null || true; sudo docker run -d --name bombest-beats -p 8338:8338 --restart unless-stopped -v /data/beets:/app/music -e \"S3_BUCKET=\$S3_BUCKET\" -e \"AWS_ACCESS_KEY_ID=\$AWS_ACCESS_KEY_ID\" -e \"AWS_SECRET_ACCESS_KEY=\$AWS_SECRET_ACCESS_KEY\" -e \"S3_REGION=\$S3_REGION\" $DOCKER_IMAGE; ${PRUNE_CMD}echo Container deployed."
 
 echo "Sending SSM command (pull + run container)..."
 if command -v jq &>/dev/null; then
@@ -54,15 +75,15 @@ fi
 
 echo "Command ID: $CMD_ID"
 echo "Waiting for command to complete..."
-for i in $(seq 1 30); do
+for i in $(seq 1 60); do
   STATUS=$(aws ssm get-command-invocation --region "$REGION" \
     --command-id "$CMD_ID" --instance-id "$INSTANCE_ID" \
     --query 'Status' --output text 2>/dev/null || echo "Pending")
   case "$STATUS" in
     Success) echo "Done."; exit 0 ;;
     Failed|Cancelled) echo "Command $STATUS."; aws ssm get-command-invocation --region "$REGION" --command-id "$CMD_ID" --instance-id "$INSTANCE_ID" --query 'StandardErrorContent' --output text 2>/dev/null; exit 1 ;;
-    InProgress|Pending) sleep 2 ;;
-    *) sleep 2 ;;
+    InProgress|Pending) sleep 3 ;;
+    *) sleep 3 ;;
   esac
 done
 echo "Timeout waiting for command."
