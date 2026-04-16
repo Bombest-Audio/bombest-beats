@@ -31,6 +31,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Cap concurrent ffmpeg workers. Each ffmpeg process uses 30-80 MB RSS; more
+# than 2-3 on the production instance (916 MB RAM, historically 0 swap)
+# saturates memory and triggers the OOM killer. Callers block until a slot
+# opens — waveform generation and streaming transcodes share this limit.
+_ffmpeg_sem = threading.Semaphore(2)
+
 from datetime import datetime, timedelta, timezone
 
 from flask_jwt_extended import (
@@ -480,10 +486,11 @@ def generate_waveform_peaks(audio_path, num_peaks=200):
         temp_wav = audio_path + '.temp.wav'
         
         # Use ffmpeg to convert to mono WAV for easy reading
-        subprocess.run(
-            ['ffmpeg', '-y', '-i', audio_path, '-ac', '1', '-ar', '22050', temp_wav],
-            check=True, capture_output=True
-        )
+        with _ffmpeg_sem:
+            subprocess.run(
+                ['ffmpeg', '-y', '-i', audio_path, '-ac', '1', '-ar', '22050', temp_wav],
+                check=True, capture_output=True
+            )
         
         # Read WAV file
         with wave.open(temp_wav, 'rb') as wav:
@@ -3508,41 +3515,44 @@ def _transcode_generator(file_path, bitrate='256k'):
     # A PIPE would deadlock because we read stdout incrementally and never drain stderr.
     stderr_fd, stderr_path = tempfile.mkstemp(prefix='bombest-transcode-stderr-', suffix='.log')
     proc = None
-    try:
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=stderr_fd)
-        os.close(stderr_fd)
-        stderr_fd = -1
-        while True:
-            chunk = proc.stdout.read(65536)
-            if not chunk:
-                break
-            yield chunk
-    finally:
-        if proc is not None:
-            # Client may have disconnected mid-stream — don't let ffmpeg hang on a closed pipe.
-            if proc.poll() is None:
-                proc.terminate()
+    # Hold the semaphore for the full stream lifetime so in-flight transcodes
+    # count against the cap — not just until Popen returns.
+    with _ffmpeg_sem:
+        try:
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=stderr_fd)
+            os.close(stderr_fd)
+            stderr_fd = -1
+            while True:
+                chunk = proc.stdout.read(65536)
+                if not chunk:
+                    break
+                yield chunk
+        finally:
+            if proc is not None:
+                # Client may have disconnected mid-stream — don't let ffmpeg hang on a closed pipe.
+                if proc.poll() is None:
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                        proc.wait()
+                if proc.returncode not in (0, -15):  # 0 = OK, -15 = SIGTERM from our kill path
+                    try:
+                        with open(stderr_path, 'r', errors='replace') as f:
+                            tail = f.read()[-2000:]
+                        logger.warning("ffmpeg exit %s for %s: %s", proc.returncode, file_path, tail)
+                    except OSError:
+                        pass
+            if stderr_fd >= 0:
                 try:
-                    proc.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
-                    proc.wait()
-            if proc.returncode not in (0, -15):  # 0 = OK, -15 = SIGTERM from our kill path
-                try:
-                    with open(stderr_path, 'r', errors='replace') as f:
-                        tail = f.read()[-2000:]
-                    logger.warning("ffmpeg exit %s for %s: %s", proc.returncode, file_path, tail)
+                    os.close(stderr_fd)
                 except OSError:
                     pass
-        if stderr_fd >= 0:
             try:
-                os.close(stderr_fd)
+                os.unlink(stderr_path)
             except OSError:
                 pass
-        try:
-            os.unlink(stderr_path)
-        except OSError:
-            pass
 
 
 @app.route('/stream/<int:track_id>', methods=['GET'])
