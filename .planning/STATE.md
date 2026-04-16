@@ -38,6 +38,7 @@ See: `.planning/PROJECT.md` (updated 2026-03-30)
 ### Roadmap Evolution
 
 - Phase 5 added: E2E UI Tests — page objects, method chaining, AAA pattern, P0 regression flows
+- Phase 7 added: Android Espresso E2E Test Suite with CI Integration — pre-merge gate on main, emoji-triggered on-demand runs via PR comments
 
 ## Blockers
 
