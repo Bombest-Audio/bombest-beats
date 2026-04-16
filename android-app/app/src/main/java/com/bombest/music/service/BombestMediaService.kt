@@ -766,16 +766,30 @@ class BombestMediaService : MediaLibraryService() {
         // runCatching because getSharedInstance() throws on devices without Play Services.
         val castContext = runCatching {
             com.google.android.gms.cast.framework.CastContext.getSharedInstance(this)
+        }.onFailure { e ->
+            android.util.Log.e("BombestMediaService", "CastContext init failed — Cast unavailable", e)
         }.getOrNull()
         if (castContext != null) {
+            android.util.Log.i("BombestMediaService", "CastContext ready, initializing CastPlayer")
             castPlayer = androidx.media3.cast.CastPlayer(castContext).also { cp ->
                 cp.setSessionAvailabilityListener(object : androidx.media3.cast.SessionAvailabilityListener {
-                    override fun onCastSessionAvailable() { switchToPlayer(cp) }
-                    override fun onCastSessionUnavailable() { player?.let { switchToPlayer(it) } }
+                    override fun onCastSessionAvailable() {
+                        android.util.Log.i("BombestMediaService", "Cast session available → switching player")
+                        switchToPlayer(cp)
+                    }
+                    override fun onCastSessionUnavailable() {
+                        android.util.Log.i("BombestMediaService", "Cast session lost → switching back to ExoPlayer")
+                        player?.let { switchToPlayer(it) }
+                    }
                 })
                 // Already in a Cast session when service starts (e.g. cold-start while casting)
-                if (cp.isCastSessionAvailable) switchToPlayer(cp)
+                if (cp.isCastSessionAvailable) {
+                    android.util.Log.i("BombestMediaService", "Cast session already active at service start")
+                    switchToPlayer(cp)
+                }
             }
+        } else {
+            android.util.Log.w("BombestMediaService", "CastContext unavailable — Cast disabled")
         }
 
         fetchLibrary(player)
@@ -943,14 +957,27 @@ class BombestMediaService : MediaLibraryService() {
 
         val targetItems = if (target is androidx.media3.cast.CastPlayer) {
             items.map { item ->
-                val uri = item.localConfiguration?.uri ?: return@map item
-                val castUri = if (uri.getQueryParameter("transcode") == null)
-                    uri.buildUpon()
-                        .appendQueryParameter("transcode", "aac")
-                        .appendQueryParameter("bitrate", "256")
-                        .build()
-                else uri
-                item.buildUpon().setUri(castUri).setMimeType("audio/mp4").build()
+                // Transcode every source to MP3 for Cast.
+                //
+                // Why not raw pass-through?
+                //   - FLAC/WAV files are 30-100 MB; the Cast DMR's <audio> element buffers
+                //     before playing → 10-30 s delay or session timeout.
+                //   - The frag-MP4 (AAC) path has Accept-Ranges:none / no Content-Length,
+                //     which also stalls the DMR's buffer.
+                //
+                // Why MP3 specifically?
+                //   - Progressive streaming format: Chrome starts playing from frame 1,
+                //     no container header needed — identical behaviour to internet radio.
+                //   - Universally supported by the Default Media Receiver.
+                //   - 256 kbps keeps quality close to lossless originals while cutting
+                //     typical FLAC sizes by ~5x for fast Cast start.
+                val trackId = item.mediaId.toIntOrNull() ?: return@map item
+                val castUrl = repository.getCastStreamUrl(trackId)
+                android.util.Log.d("BombestMediaService", "Cast item ${item.mediaId}: $castUrl")
+                item.buildUpon()
+                    .setUri(android.net.Uri.parse(castUrl))
+                    .setMimeType(androidx.media3.common.MimeTypes.AUDIO_MPEG)
+                    .build()
             }
         } else items
 

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- Main App Theme -->
-    <style name="Theme.BombestBeats" parent="android:Theme.Material.NoActionBar">
+    <style name="Theme.BombestBeats" parent="Theme.Material3.DayNight.NoActionBar">
         <item name="android:colorPrimary">@color/colorPrimary</item>
         <item name="android:colorPrimaryDark">@color/colorPrimaryDark</item>
         <item name="android:colorAccent">@color/colorAccent</item>

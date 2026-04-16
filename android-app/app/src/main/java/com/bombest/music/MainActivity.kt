@@ -5,7 +5,7 @@ import android.content.Intent
 import android.os.Bundle
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
-import androidx.activity.ComponentActivity
+import androidx.appcompat.app.AppCompatActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -102,7 +102,7 @@ private fun trackToMediaItem(
         .build()
 }
 
-class MainActivity : ComponentActivity() {
+class MainActivity : AppCompatActivity() {
     
     private val mainViewModel: MainViewModel by viewModels()
     private lateinit var passkeyManager: PasskeyManager

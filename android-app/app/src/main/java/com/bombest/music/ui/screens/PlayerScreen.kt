@@ -252,7 +252,13 @@ fun TopRow(onClose: () -> Unit, onRegisterPasskey: () -> Unit = {}, showCastButt
             if (showCastButton) {
                 AndroidView(
                     factory = { ctx ->
-                        androidx.mediarouter.app.MediaRouteButton(ctx).also { btn ->
+                        // MediaRouteButton reads colorBackground from its theme and throws
+                        // if it is transparent. Wrap with an opaque Material theme.
+                        val themedCtx = android.view.ContextThemeWrapper(
+                            ctx,
+                            com.google.android.material.R.style.Theme_MaterialComponents_DayNight
+                        )
+                        androidx.mediarouter.app.MediaRouteButton(themedCtx).also { btn ->
                             com.google.android.gms.cast.framework.CastButtonFactory
                                 .setUpMediaRouteButton(ctx, btn)
                         }

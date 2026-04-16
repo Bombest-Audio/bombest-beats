@@ -18,7 +18,7 @@ import struct
 import time
 import threading
 from flask import Flask, request, jsonify, send_file, Response
-from flask_cors import CORS
+from flask_cors import CORS, cross_origin
 from werkzeug.utils import secure_filename
 
 # Module-level logger (INFO default, stderr). Route handlers and helpers should
@@ -3464,10 +3464,24 @@ def _wants_aac_transcode(args):
     )
 
 
+def _wants_mp3_transcode(args):
+    """Client opts into MP3 transcode via ?transcode=mp3.
+
+    Used by the Chromecast (Cast DMR) path: MP3 is a progressive streaming format —
+    Chrome's <audio> element can start playing from the first frame without knowing the
+    Content-Length, identical to how internet radio streams work.  Raw FLAC/WAV would
+    require the DMR to buffer the entire file (30-100 MB) before playback begins.
+    """
+    return args.get('transcode', '').lower() == 'mp3'
+
+
 def _should_transcode(file_path, args):
     """Transcode only when the client explicitly asks AND the source is transcodeable."""
     ext = os.path.splitext(file_path)[1].lower()
-    return _wants_aac_transcode(args) and ext in _TRANSCODEABLE_EXTS
+    return (
+        (_wants_aac_transcode(args) or _wants_mp3_transcode(args))
+        and ext in _TRANSCODEABLE_EXTS
+    )
 
 
 def _pass_through_content_type(file_path):
@@ -3555,7 +3569,64 @@ def _transcode_generator(file_path, bitrate='256k'):
                 pass
 
 
+def _mp3_transcode_generator(file_path, bitrate='256k'):
+    """Yield MP3 chunks by piping file_path through ffmpeg.
+
+    Unlike the AAC/frag-MP4 path, MP3 is a headerless streaming format: Chrome (and
+    the Cast Default Media Receiver) can start decoding from the very first frame.
+    This eliminates the 'wait for Content-Length' stall that fragmented MP4 causes on
+    the Cast <audio> element and makes all source formats (FLAC, WAV, MP3, OGG) start
+    quickly and reliably over Chromecast.
+    """
+    cmd = [
+        'ffmpeg', '-y', '-i', file_path,
+        '-vn',
+        '-c:a', 'libmp3lame',
+        '-b:a', bitrate,
+        '-f', 'mp3',
+        'pipe:1'
+    ]
+    stderr_fd, stderr_path = tempfile.mkstemp(prefix='bombest-transcode-mp3-stderr-', suffix='.log')
+    proc = None
+    with _ffmpeg_sem:
+        try:
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=stderr_fd)
+            os.close(stderr_fd)
+            stderr_fd = -1
+            while True:
+                chunk = proc.stdout.read(65536)
+                if not chunk:
+                    break
+                yield chunk
+        finally:
+            if proc is not None:
+                if proc.poll() is None:
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                        proc.wait()
+                if proc.returncode not in (0, -15):
+                    try:
+                        with open(stderr_path, 'r', errors='replace') as f:
+                            tail = f.read()[-2000:]
+                        logger.warning("ffmpeg mp3 exit %s for %s: %s", proc.returncode, file_path, tail)
+                    except OSError:
+                        pass
+            if stderr_fd >= 0:
+                try:
+                    os.close(stderr_fd)
+                except OSError:
+                    pass
+            try:
+                os.unlink(stderr_path)
+            except OSError:
+                pass
+
+
 @app.route('/stream/<int:track_id>', methods=['GET'])
+@cross_origin(origins="*")   # Cast DMR fetches from gstatic origin — must allow all
 def stream_track(track_id):
     """Stream audio file directly from upload server to bypass beets CORS issues"""
     try:
@@ -3588,7 +3659,8 @@ def stream_track(track_id):
         except ValueError:
             bitrate = '256k'
 
-        if _wants_aac_transcode(request.args) and not _ffmpeg_available():
+        if (_wants_aac_transcode(request.args) or _wants_mp3_transcode(request.args)) \
+                and not _ffmpeg_available():
             return _ffmpeg_unavailable_response()
 
         transcoded_headers = {
@@ -3599,6 +3671,12 @@ def stream_track(track_id):
         # --- Local Strategy (preferred — avoids S3 download for transcode) ---
         if os.path.exists(file_path):
             if _should_transcode(file_path, request.args):
+                if _wants_mp3_transcode(request.args):
+                    return Response(
+                        _mp3_transcode_generator(file_path, bitrate),
+                        mimetype='audio/mpeg',
+                        headers=transcoded_headers,
+                    )
                 return Response(
                     _transcode_generator(file_path, bitrate),
                     mimetype='audio/mp4',
@@ -3642,6 +3720,21 @@ def stream_track(track_id):
                             os.unlink(tmp_path)
                             logger.warning("S3 get_object error (transcode): %s", e)
                             return jsonify({'error': 'S3 error'}), 502
+
+                        if _wants_mp3_transcode(request.args):
+                            def generate_s3_mp3_transcode():
+                                try:
+                                    yield from _mp3_transcode_generator(tmp_path, bitrate)
+                                finally:
+                                    try:
+                                        os.unlink(tmp_path)
+                                    except OSError:
+                                        pass
+                            return Response(
+                                generate_s3_mp3_transcode(),
+                                mimetype='audio/mpeg',
+                                headers=transcoded_headers,
+                            )
 
                         def generate_s3_transcode():
                             try:
