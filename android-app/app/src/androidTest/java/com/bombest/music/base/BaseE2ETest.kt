@@ -22,13 +22,18 @@ abstract class BaseE2ETest {
 
     val device: UiDevice = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
 
-    val testUsername: String get() = BuildConfig.TEST_USERNAME
-    val testPassword: String get() = BuildConfig.TEST_PASSWORD
+    private fun getTestCredential(argumentKey: String, fallbackValue: String): String {
+        val argumentValue = InstrumentationRegistry.getArguments().getString(argumentKey)
+        return argumentValue?.takeIf { it.isNotBlank() } ?: fallbackValue
+    }
+
+    val testUsername: String get() = getTestCredential("test.username", BuildConfig.TEST_USERNAME)
+    val testPassword: String get() = getTestCredential("test.password", BuildConfig.TEST_PASSWORD)
 
     @Before
     fun setup() {
         assumeTrue(
-            "Skipping E2E test: set test.username and test.password in local.properties",
+            "Skipping E2E test: provide test.username and test.password via instrumentation runner arguments or local.properties",
             testUsername.isNotEmpty() && testPassword.isNotEmpty()
         )
         val ctx = InstrumentationRegistry.getInstrumentation().targetContext
