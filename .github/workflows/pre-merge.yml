@@ -197,7 +197,8 @@ jobs:
         with:
           name: e2e-failure-artifacts-${{ github.run_number }}
           path: |
-            android-app/build/outputs/androidTest-results/
+            android-app/app/build/outputs/androidTest-results/
+            android-app/app/build/reports/androidTests/connected/
             logcat.txt
           retention-days: 7
 
