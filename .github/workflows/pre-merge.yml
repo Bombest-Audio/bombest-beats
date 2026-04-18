@@ -113,9 +113,113 @@ jobs:
           npm ci
           npm run build
 
+  e2e-android:
+    name: E2E Android tests
+    needs: test
+    if: |
+      success() &&
+      github.event.issue.pull_request != null &&
+      (contains(github.event.comment.body, '🚀') || contains(github.event.comment.body, ':run-tests:') ||
+       (contains(github.event.comment.body, ':run-test:') && contains(github.event.comment.body, 'android'))) &&
+      (github.event.comment.author_association == 'MEMBER' || github.event.comment.author_association == 'OWNER' || github.event.comment.author_association == 'COLLABORATOR')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate CI credentials are configured
+        run: |
+          if [ -z "$CI_TEST_USERNAME" ] || [ -z "$CI_TEST_PASSWORD" ]; then
+            echo "ERROR: CI_TEST_USERNAME and/or CI_TEST_PASSWORD secrets are not set."
+            echo "Create a 'ci' user on beats.bom.best and add the secrets to this repo."
+            exit 1
+          fi
+        env:
+          CI_TEST_USERNAME: ${{ secrets.CI_TEST_USERNAME }}
+          CI_TEST_PASSWORD: ${{ secrets.CI_TEST_PASSWORD }}
+
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/pull/${{ github.event.issue.number }}/head
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: wrapper
+          cache-read-only: false
+
+      - name: AVD cache
+        uses: actions/cache@v4
+        id: avd-cache
+        with:
+          path: |
+            ~/.android/avd/*
+            ~/.android/adb*
+          key: avd-pixel5-api34-x86_64
+
+      - name: Create AVD
+        if: steps.avd-cache.outputs.cache-hit != 'true'
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: pixel_5
+          force-avd-creation: false
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          script: echo "AVD created"
+
+      - name: Run E2E tests
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: pixel_5
+          force-avd-creation: false
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          script: |
+            cd android-app
+            ./gradlew connectedAndroidTest --no-daemon \
+              -Pandroid.testInstrumentationRunnerArguments.test.username="${{ secrets.CI_TEST_USERNAME }}" \
+              -Pandroid.testInstrumentationRunnerArguments.test.password="${{ secrets.CI_TEST_PASSWORD }}"
+
+      - name: Capture logcat
+        if: failure()
+        run: adb logcat -d > logcat.txt
+
+      - name: Upload test artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-failure-artifacts-${{ github.run_number }}
+          path: |
+            android-app/app/build/outputs/androidTest-results/
+            android-app/app/build/reports/androidTests/connected/
+            logcat.txt
+          retention-days: 7
+
+      - name: Post E2E result comment
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          if [ "$JOB_STATUS" = "success" ]; then
+            ICON="✅"
+            MSG="E2E tests passed (Login, Playback, Playlist CRUD)"
+          else
+            ICON="❌"
+            MSG="E2E tests FAILED — check artifacts for JUnit XML and logcat"
+          fi
+          gh pr comment ${{ github.event.issue.number }} --body "$ICON **E2E Android:** $MSG"
+
   merge:
     name: Merge PR
-    needs: test
+    needs: [test, e2e-android]
     if: success() && needs.test.outputs.merge_requested == 'true'
     runs-on: ubuntu-latest
     steps:

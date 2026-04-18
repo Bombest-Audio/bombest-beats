@@ -134,6 +134,17 @@
 
 **Status**: Complete (2026-04-13)
 
+### Phase 7: Android Espresso E2E Test Suite with CI Integration
+
+**Goal:** Wire the existing P0 Espresso test suite (login, playback, playlist flows) into GitHub Actions CI as a pre-merge gate and on-demand emoji-triggered run via PR comments.
+**Requirements**: TEST-01, TEST-02, TEST-03, TEST-04
+**Depends on:** Phase 6
+**Plans:** 1/2 plans executed
+
+Plans:
+- [x] 07-01-PLAN.md — Add e2e-android job to pre-merge.yml (emulator-runner, credential injection, artifact upload, PR comment, merge gate)
+- [ ] 07-02-PLAN.md — Create CI test account on beats.bom.best, seed library, set GitHub secrets
+
 ---
 
 *Roadmap created: 2026-03-30*

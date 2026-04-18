@@ -282,7 +282,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             visualizerAmplitudes = smoothed
             if (smoothed.size >= 3) {
                 val lowEnd = (smoothed.size * 0.2).toInt().coerceAtLeast(1)
-                val midEnd = (smoothed.size * 0.6).toInt()
+                val midEnd = (smoothed.size * 0.6).toInt().coerceAtLeast(lowEnd + 1)
+                    .coerceAtMost(smoothed.size - 1)
                 val low = smoothed.subList(0, lowEnd).average().toFloat()
                 val mid = smoothed.subList(lowEnd, midEnd).average().toFloat()
                 val high = smoothed.subList(midEnd, smoothed.size).average().toFloat()
