@@ -191,11 +191,11 @@ jobs:
           force-avd-creation: false
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true
-          script: |
-            cd android-app
-            ./gradlew connectedAndroidTest --no-daemon \
-              -Pandroid.testInstrumentationRunnerArguments.test.username="${{ secrets.CI_TEST_USERNAME }}" \
-              -Pandroid.testInstrumentationRunnerArguments.test.password="${{ secrets.CI_TEST_PASSWORD }}"
+          script: >-
+            cd android-app &&
+            ./gradlew connectedAndroidTest --no-daemon
+            -Pandroid.testInstrumentationRunnerArguments.test.username="${{ secrets.CI_TEST_USERNAME }}"
+            -Pandroid.testInstrumentationRunnerArguments.test.password="${{ secrets.CI_TEST_PASSWORD }}"
 
       - name: Capture logcat
         if: failure()
