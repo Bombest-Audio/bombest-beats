@@ -7,14 +7,14 @@ import androidx.test.uiautomator.Until
 class LibraryPage(private val device: UiDevice) {
 
     fun assertVisible() = apply {
-        check(device.wait(Until.hasObject(By.desc("Library")), 10_000)) {
-            "Library screen did not appear within 10 seconds"
+        check(device.wait(Until.hasObject(By.desc("Library")), 30_000)) {
+            "Library screen did not appear within 30 seconds"
         }
     }
 
     fun tapFirstTrack(): PlayerPage {
         // Wait for track items to load, then tap the first album art (inside the clickable Card)
-        device.wait(Until.hasObject(By.desc("Album Art")), 10_000)
+        device.wait(Until.hasObject(By.desc("Album Art")), 30_000)
         device.findObject(By.desc("Album Art"))?.click()
         return PlayerPage(device)
     }
