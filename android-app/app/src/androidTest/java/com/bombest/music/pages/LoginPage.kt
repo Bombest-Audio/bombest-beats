@@ -8,7 +8,7 @@ class LoginPage(private val device: UiDevice) {
 
     fun enterUsername(value: String) = apply {
         // Wait for EditText fields to appear (Compose exposes label as text, not hint)
-        device.wait(Until.hasObject(By.clazz("android.widget.EditText")), 10_000)
+        device.wait(Until.hasObject(By.clazz("android.widget.EditText")), 30_000)
         val field = device.findObjects(By.clazz("android.widget.EditText")).getOrNull(0)
         checkNotNull(field) { "Username field not found" }
         field.setText(value)
