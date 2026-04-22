@@ -2,6 +2,7 @@ import Foundation
 import AVFoundation
 import MediaPlayer
 import Combine
+import Accelerate
 
 class AudioService: NSObject, ObservableObject {
     static let shared = AudioService()
@@ -19,13 +20,23 @@ class AudioService: NSObject, ObservableObject {
     
     @Published var isShuffleOn: Bool = false
     @Published var repeatMode: RepeatMode = .off
-    
+
+    @Published var amplitudes: [Float] = Array(repeating: 0, count: 30)
+    @Published var frequencyBands: FrequencyBands = .zero
+    @Published var loopStartTime: TimeInterval? = nil
+    @Published var loopEndTime: TimeInterval? = nil
+
     // MARK: - Private Properties
     private var originalQueue: [Track] = [] // Backs the queue when shuffled
-    
+
     private let player = AVQueuePlayer()
     private var timeObserver: Any?
     private var cancellables = Set<AnyCancellable>()
+
+    private let audioEngine = AVAudioEngine()
+    private var fftSetup: FFTSetup?
+    private let fftSize = 1024
+    private var loopEnforcementObserver: Any?
     
     // MARK: - API
     private let baseURL = "https://beats.bom.best"
@@ -33,17 +44,29 @@ class AudioService: NSObject, ObservableObject {
     override init() {
         super.init()
         setupAudioSession()
+        setupAudioEngine()
         setupRemoteCommands()
         setupTimeObserver()
-        
+
+        // Subscribe frequencyBands to Groove Engine (D-09: same FFT tap feeds both visualizer and haptics)
+        $frequencyBands
+            .receive(on: RunLoop.main)
+            .sink { [weak self] bands in
+                guard self?.isPlaying == true else { return }
+                if bands.low > 0.5  { HapticsManager.shared.playGroove(band: .low,  intensity: bands.low) }
+                if bands.mid > 0.5  { HapticsManager.shared.playGroove(band: .mid,  intensity: bands.mid) }
+                if bands.high > 0.6 { HapticsManager.shared.playGroove(band: .high, intensity: bands.high) }
+            }
+            .store(in: &cancellables)
+
         // When item finishes, handle auto-advance
         NotificationCenter.default.addObserver(self, selector: #selector(playerDidFinishPlaying), name: .AVPlayerItemDidPlayToEndTime, object: nil)
     }
-    
+
     deinit {
-        if let observer = timeObserver {
-            player.removeTimeObserver(observer)
-        }
+        if let observer = timeObserver { player.removeTimeObserver(observer) }
+        if let loop = loopEnforcementObserver { player.removeTimeObserver(loop) }
+        if let setup = fftSetup { vDSP_destroy_fftsetup(setup) }
     }
     
     @objc private func playerDidFinishPlaying(note: NSNotification) {
@@ -148,6 +171,7 @@ class AudioService: NSObject, ObservableObject {
     }
     
     private func loadAndPlay(_ track: Track) {
+        deactivateLoop() // prevents stale loop from prior track
         player.removeAllItems()
         
         // 1. Check Cache
@@ -273,7 +297,115 @@ class AudioService: NSObject, ObservableObject {
     }
     
     // MARK: - Setup
-    
+
+    private func setupAudioEngine() {
+        let log2n = vDSP_Length(log2(Float(fftSize)))
+        fftSetup = vDSP_create_fftsetup(log2n, FFTRadix(FFT_RADIX2))
+
+        let outputNode = audioEngine.outputNode
+        let format = outputNode.inputFormat(forBus: 0)
+
+        audioEngine.outputNode.installTap(
+            onBus: 0,
+            bufferSize: AVAudioFrameCount(fftSize),
+            format: format
+        ) { [weak self] buffer, _ in
+            self?.processAudioBuffer(buffer)
+        }
+
+        do {
+            try audioEngine.start()
+        } catch {
+            print("[Audio] AVAudioEngine start failed: \(error.localizedDescription)")
+        }
+    }
+
+    private func processAudioBuffer(_ buffer: AVAudioPCMBuffer) {
+        guard let setup = fftSetup,
+              let channelData = buffer.floatChannelData?[0] else { return }
+        let frameCount = Int(buffer.frameLength)
+        guard frameCount >= fftSize else { return }
+
+        var magnitudes = [Float](repeating: 0, count: fftSize / 2)
+        var realParts = [Float](UnsafeBufferPointer(start: channelData, count: fftSize))
+        var imagParts = [Float](repeating: 0, count: fftSize)
+
+        // Apply Hann window
+        var window = [Float](repeating: 0, count: fftSize)
+        vDSP_hann_window(&window, vDSP_Length(fftSize), Int32(vDSP_HANN_NORM))
+        vDSP_vmul(&realParts, 1, window, 1, &realParts, 1, vDSP_Length(fftSize))
+
+        realParts.withUnsafeMutableBufferPointer { realBuf in
+            imagParts.withUnsafeMutableBufferPointer { imagBuf in
+                var splitComplex = DSPSplitComplex(realp: realBuf.baseAddress!, imagp: imagBuf.baseAddress!)
+                let log2n = vDSP_Length(log2(Float(fftSize)))
+                vDSP_ctoz(
+                    UnsafeRawPointer(realBuf.baseAddress!).bindMemory(to: DSPComplex.self, capacity: fftSize / 2),
+                    2, &splitComplex, 1, vDSP_Length(fftSize / 2)
+                )
+                vDSP_fft_zrip(setup, &splitComplex, 1, log2n, FFTDirection(FFT_FORWARD))
+                vDSP_zvmags(&splitComplex, 1, &magnitudes, 1, vDSP_Length(fftSize / 2))
+            }
+        }
+
+        // Map to 30 amplitude bands for visualizer
+        let bandCount = 30
+        var bands = [Float](repeating: 0, count: bandCount)
+        let binsPerBand = magnitudes.count / bandCount
+        for i in 0..<bandCount {
+            let start = i * binsPerBand
+            let end = min(start + binsPerBand, magnitudes.count)
+            bands[i] = magnitudes[start..<end].reduce(0, +) / Float(binsPerBand)
+        }
+
+        // Normalize
+        let maxVal = bands.max() ?? 1.0
+        let normalized = maxVal > 0.001 ? bands.map { $0 / maxVal } : [Float](repeating: 0, count: bandCount)
+
+        // 3 frequency bands for Groove Engine (D-07)
+        let lowBand = normalized[0..<5].reduce(0, +) / 5.0
+        let midBand = normalized[5..<15].reduce(0, +) / 10.0
+        let highBand = normalized[15..<30].reduce(0, +) / 15.0
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.amplitudes = normalized
+            self.frequencyBands = FrequencyBands(low: lowBand, mid: midBand, high: highBand)
+        }
+    }
+
+    // MARK: - A-B Loop
+
+    func snapToBeat(_ rawTime: TimeInterval, bpm: Float) -> TimeInterval {
+        let beatInterval = bpm > 0 ? 60.0 / Double(bpm) : 0.1
+        return (rawTime / beatInterval).rounded() * beatInterval
+    }
+
+    func activateLoop() {
+        guard loopStartTime != nil, loopEndTime != nil else { return }
+        deactivateLoop() // remove any prior observer
+        let interval = CMTime(seconds: 0.05, preferredTimescale: 600)
+        loopEnforcementObserver = player.addPeriodicTimeObserver(
+            forInterval: interval, queue: .main
+        ) { [weak self] time in
+            guard let self,
+                  let end = self.loopEndTime,
+                  let start = self.loopStartTime else { return }
+            if time.seconds >= end {
+                self.seek(to: start)
+            }
+        }
+    }
+
+    func deactivateLoop() {
+        if let obs = loopEnforcementObserver {
+            player.removeTimeObserver(obs)
+            loopEnforcementObserver = nil
+        }
+        loopStartTime = nil
+        loopEndTime = nil
+    }
+
     private func setupAudioSession() {
         do {
             // Configure audio session - Category: Playback, Mode: Default
