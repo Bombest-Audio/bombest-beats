@@ -63,7 +63,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          BASE=$(gh pr view ${{ github.event.issue.number }} --json baseRefName -q .baseRefName)
+          BASE=$(gh pr view ${{ github.event.issue.number }} --repo ${{ github.repository }} --json baseRefName -q .baseRefName)
           if [ "$BASE" != "main" ]; then
             echo "PR targets $BASE; pre-merge only runs for PRs targeting main"
             exit 1
