@@ -70,7 +70,7 @@ struct PlayerView: View {
                             let artURL: URL? = {
                                 guard let track = audioService.currentTrack else { return nil }
                                 if let albumId = track.album_id {
-                                    return URL(string: "https://beats.bom.best/track/\(track.id)/art")
+                                    return URL(string: "https://beats.bom.best/album/\(albumId)/art")
                                 }
                                 return URL(string: "https://beats.bom.best/track/\(track.id)/art")
                             }()
@@ -191,7 +191,6 @@ struct PlayerView: View {
                 if value.translation.height > 100 { isPresented = false }
             }
         )
-        .onReceive(audioService.$amplitudes) { _ in }
     }
 
     private func formatTime(_ seconds: Double) -> String {
