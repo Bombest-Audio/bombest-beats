@@ -26,11 +26,35 @@ struct Track: Codable, Identifiable {
     let album: String?
     let length: Double?
     let path: String?
-    let album_id: Int? // JSON snake_case
-    var bpm: Float = 0 // defaults to 0 when absent from JSON — prevents crashes on old library_cache.json
+    let album_id: Int?
+    var bpm: Float
 
     var displayTitle: String { title ?? path?.components(separatedBy: "/").last ?? "Unknown Track" }
     var displayArtist: String { artist ?? "Unknown Artist" }
+
+    // Custom decoder: bpm absent from old library_cache.json and some backend responses
+    enum CodingKeys: String, CodingKey {
+        case id, title, artist, album, length, path, album_id, bpm
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id       = try c.decode(Int.self,    forKey: .id)
+        title    = try c.decodeIfPresent(String.self, forKey: .title)
+        artist   = try c.decodeIfPresent(String.self, forKey: .artist)
+        album    = try c.decodeIfPresent(String.self, forKey: .album)
+        length   = try c.decodeIfPresent(Double.self, forKey: .length)
+        path     = try c.decodeIfPresent(String.self, forKey: .path)
+        album_id = try c.decodeIfPresent(Int.self,    forKey: .album_id)
+        bpm      = try c.decodeIfPresent(Float.self,  forKey: .bpm) ?? 0
+    }
+
+    // Memberwise init used by PlaylistTrack.asTrack and tests
+    init(id: Int, title: String?, artist: String?, album: String?,
+         length: Double?, path: String?, album_id: Int?, bpm: Float = 0) {
+        self.id = id; self.title = title; self.artist = artist; self.album = album
+        self.length = length; self.path = path; self.album_id = album_id; self.bpm = bpm
+    }
 }
 
 struct LibraryResponse: Codable {
