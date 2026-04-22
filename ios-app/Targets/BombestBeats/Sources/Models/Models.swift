@@ -27,13 +27,21 @@ struct Track: Codable, Identifiable {
     let length: Double
     let path: String?
     let album_id: Int? // JSON snake_case
-    
+    var bpm: Float = 0 // defaults to 0 when absent from JSON — prevents crashes on old library_cache.json
+
     var displayTitle: String { title ?? path?.components(separatedBy: "/").last ?? "Unknown Track" }
     var displayArtist: String { artist ?? "Unknown Artist" }
 }
 
 struct LibraryResponse: Codable {
     let items: [Track]
+}
+
+struct FrequencyBands {
+    let low: Float   // 0–200Hz approx — kick/bass
+    let mid: Float   // 200Hz–2kHz approx — snare/vocal
+    let high: Float  // 2kHz+ approx — hi-hat/cymbal
+    static let zero = FrequencyBands(low: 0, mid: 0, high: 0)
 }
 
 
