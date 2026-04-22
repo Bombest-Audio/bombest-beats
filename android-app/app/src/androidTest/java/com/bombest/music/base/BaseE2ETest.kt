@@ -87,6 +87,11 @@ abstract class BaseE2ETest {
         // the continuous GC thrash (heap at 0-1% free) that blocks Compose composition.
         device.executeShellCommand("am stopservice -n $pkg/com.bombest.music.service.BombestMediaService")
         device.waitForIdle()
+        // Give ART's concurrent GC 15 seconds to fully reclaim the service heap.
+        // Without this sleep, the next test's By.pkg() wait starts while GC is still
+        // in full swing — continuous GC pauses stall the Compose main thread and prevent
+        // any accessibility nodes from appearing for 60+ seconds.
+        Thread.sleep(15_000)
         // Fire-and-forget am start: kick off LoginActivity so it begins rendering in the
         // background while JUnit transitions to the next test. By the time setup() runs
         // its 60-second wait, LoginActivity is already rendered or well underway —
