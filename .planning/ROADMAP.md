@@ -159,6 +159,17 @@ Plans:
 - [x] 08-04-PLAN.md — A-B loop UI in PlayerView + real visualizer wiring (Wave 2, depends 08-01)
 - [x] 08-05-PLAN.md — CarPlay MPPlayableContentManager + entitlement + BombestApp wiring (Wave 3, depends 08-01, 08-02)
 
+### Phase 9: Android Espresso tests in CI
+
+**Goal:** Get all 4 Android Espresso tests (LoginFlowTest, PlaybackFlowTest, PlaylistFlowTest, AndroidAutoBrowseTest) passing on 3 consecutive CI runs on PR #36 (test/verify-e2e-android-ci → main). Root cause identified: missing KVM permissions step in pre-merge.yml causes hardware acceleration to be disabled.
+**Requirements**: TBD
+**Depends on:** Phase 8
+**Plans:** 2 plans
+
+Plans:
+- [ ] 09-01-PLAN.md — Add KVM permissions step, remove assumeTrue skip, add timeout + pin emulator-runner (Wave 1)
+- [ ] 09-02-PLAN.md — Trigger 3 consecutive green CI runs, merge PR #36 to main (Wave 2)
+
 ---
 
 *Roadmap created: 2026-03-30*
