@@ -36,11 +36,13 @@ class APIService {
 
     func request<T: Decodable>(_ endpoint: String, method: String = "GET", body: Data? = nil) async throws -> T {
         var lastError: Error?
-        let startIndex = currentURLIndex
 
-        for urlIndex in startIndex..<baseURLs.count {
+        // Calling baseURL here runs the cooldown-reset check before each attempt
+        for _ in 0..<baseURLs.count {
+            let currentBase = baseURL   // may reset currentURLIndex to 0 via cooldown
+            let urlIndex = currentURLIndex
             do {
-                guard let url = URL(string: "\(baseURLs[urlIndex])\(endpoint)") else {
+                guard let url = URL(string: "\(currentBase)\(endpoint)") else {
                     throw APIError.invalidURL
                 }
                 var req = URLRequest(url: url, timeoutInterval: 10)
