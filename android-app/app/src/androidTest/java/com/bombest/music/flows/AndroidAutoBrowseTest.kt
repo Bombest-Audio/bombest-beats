@@ -18,7 +18,6 @@ import org.junit.Assume.assumeTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
-import java.util.concurrent.CancellationException
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
@@ -44,8 +43,6 @@ class AndroidAutoBrowseTest {
     private val device: UiDevice =
         UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
 
-    private val context = ApplicationProvider.getApplicationContext<android.content.Context>()
-
     @Before
     fun launchApp() {
         // Start the app so BombestMediaService is warm before we try to bind.
@@ -63,6 +60,7 @@ class AndroidAutoBrowseTest {
 
     @Test
     fun browseRoot_returnsExpectedCategories() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         val token = SessionToken(
             context,
             ComponentName(context, BombestMediaService::class.java),
