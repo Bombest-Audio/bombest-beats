@@ -3,7 +3,9 @@ import SwiftUI
 struct TrackRow: View {
     let track: Track
     let action: () -> Void
-    
+
+    @ObservedObject private var favorites = FavoritesManager.shared
+
     var body: some View {
         Button(action: action) {
             HStack(spacing: 16) {
@@ -31,8 +33,13 @@ struct TrackRow: View {
                 
                 Spacer()
                 
-                Image(systemName: "ellipsis")
-                    .foregroundColor(.gray)
+                Button(action: {
+                    favorites.toggle(trackId: track.id)
+                }) {
+                    Image(systemName: favorites.isFavorited(trackId: track.id) ? "heart.fill" : "heart")
+                        .foregroundColor(favorites.isFavorited(trackId: track.id) ? Color("NeonPurple") : .gray)
+                }
+                .buttonStyle(.plain)
             }
             .padding(.horizontal)
             .padding(.vertical, 8)
