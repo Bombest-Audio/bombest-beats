@@ -5,10 +5,6 @@ struct GraffitiVisualizer: View {
     var isPlaying: Bool = true
     var colors: [Color] = [Color("NeonOrange"), Color("NeonPink"), Color("NeonPurple")]
 
-    // Smooth animated bars driven by TimelineView
-    @State private var animatedAmplitudes: [Float] = Array(repeating: 0, count: 30)
-    @State private var phase: Double = 0
-
     private let barCount = 30
 
     var body: some View {
@@ -18,17 +14,17 @@ struct GraffitiVisualizer: View {
                 let height = size.height
                 let barWidth = width / CGFloat(barCount)
                 let t = timeline.date.timeIntervalSinceReferenceDate
+                let half = barCount / 2
+                // Hoisted: O(n) check once per frame, not once per bar
+                let hasRealData = amplitudes.contains { $0 > 0.01 }
 
                 for i in 0..<barCount {
                     let x = CGFloat(i) * barWidth + barWidth / 2
 
                     // Mirror: low freqs in center, highs fan out to both edges
-                    let half = barCount / 2
                     let ampIndex = i < half ? (half - 1 - i) : (i - half)
 
-                    // If we have real data, use it; otherwise animate smoothly
                     let realAmp = ampIndex < amplitudes.count ? amplitudes[ampIndex] : 0
-                    let hasRealData = amplitudes.contains { $0 > 0.01 }
 
                     let amp: CGFloat
                     if hasRealData {

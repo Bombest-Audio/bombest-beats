@@ -6,14 +6,14 @@ struct SearchView: View {
 
     var body: some View {
         NavigationStack {
-            VStack {
-                if case .loading = viewModel.loadState {
+            Group {
+                switch viewModel.loadState {
+                case .loading:
                     ProgressView()
                         .tint(Color("NeonPurple"))
                         .scaleEffect(1.2)
                         .padding()
-                }
-                if case .failed(let message) = viewModel.loadState {
+                case .failed(let message):
                     VStack(spacing: 12) {
                         Image(systemName: "exclamationmark.triangle")
                             .font(.largeTitle).foregroundColor(.orange)
@@ -25,32 +25,27 @@ struct SearchView: View {
                             .buttonStyle(.borderedProminent)
                             .tint(Color("NeonPurple"))
                     }.padding()
-                }
-
-                if viewModel.searchText.isEmpty {
-                    ContentUnavailableView(
-                        "Search Music",
-                        systemImage: "magnifyingglass",
-                        description: Text("Find your favorite tracks, artists, and albums.")
-                    )
-                } else if viewModel.results.isEmpty {
-                    // Only show "no results" when not loading
-                    if case .loading = viewModel.loadState {
-                        EmptyView()
-                    } else {
+                default:
+                    if viewModel.searchText.isEmpty {
+                        ContentUnavailableView(
+                            "Search Music",
+                            systemImage: "magnifyingglass",
+                            description: Text("Find your favorite tracks, artists, and albums.")
+                        )
+                    } else if viewModel.results.isEmpty {
                         ContentUnavailableView.search(text: viewModel.searchText)
-                    }
-                } else {
-                    List {
-                        ForEach(viewModel.results) { track in
-                            TrackRow(track: track) {
-                                audioService.play(track, queue: viewModel.results)
+                    } else {
+                        List {
+                            ForEach(viewModel.results) { track in
+                                TrackRow(track: track) {
+                                    audioService.play(track, queue: viewModel.results)
+                                }
+                                .listRowBackground(Color.clear)
+                                .listRowSeparator(.hidden)
                             }
-                            .listRowBackground(Color.clear)
-                            .listRowSeparator(.hidden)
                         }
+                        .listStyle(.plain)
                     }
-                    .listStyle(.plain)
                 }
             }
             .background(Color("DeepNavy").ignoresSafeArea())

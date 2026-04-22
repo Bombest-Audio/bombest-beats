@@ -181,6 +181,12 @@ jobs:
           force-avd-creation: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot
           disable-animations: true
+          # Single Gradle invocation keeps the app process alive throughout all tests.
+          # A cold second process (from force-stop + new am-instrument) requires JIT
+          # recompilation of Compose classes that takes 18+ seconds on this swiftshader
+          # emulator — long enough for both the By.pkg() and EditText waits to time out.
+          # BaseE2ETest.tearDown() calls am-stopservice + Thread.sleep(15 s) between
+          # tests to drain BombestMediaService heap without killing the JVM.
           script: >-
             cd android-app &&
             ./gradlew connectedAndroidTest --no-daemon

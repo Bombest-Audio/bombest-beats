@@ -37,8 +37,11 @@ struct LibraryView: View {
                     case .empty:
                         ContentUnavailableView("No Songs Found", systemImage: "music.note")
                     case .loaded:
-                        EmptyView()  // fall through to content below
+                        EmptyView()
                     }
+
+                    // Content only renders when fully loaded — prevents error+content mixed state
+                    if case .loaded = viewModel.loadState {
 
                     // Quick Actions / Sections
                     VStack(alignment: .leading) {
@@ -95,6 +98,7 @@ struct LibraryView: View {
                             }
                         }
                     }
+                    } // end if .loaded
                 }
                 .padding(.vertical)
             }
