@@ -106,10 +106,13 @@ struct PlayerView: View {
 
                         // Visualizer
                         if isVisualizerEnabled {
-                            GraffitiVisualizer(amplitudes: audioService.amplitudes)
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 120)
-                                .opacity(0.85)
+                            GraffitiVisualizer(
+                                amplitudes: audioService.amplitudes,
+                                isPlaying: audioService.isPlaying
+                            )
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 120)
+                            .opacity(0.85)
                         } else {
                             Spacer().frame(height: 120)
                         }
