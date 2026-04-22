@@ -20,7 +20,7 @@ class PlaylistDetailViewModel: ObservableObject {
             loadState = .loading
             do {
                 let response: PlaylistTracksResponse = try await api.request("/playlists/\(playlistId)/tracks")
-                self.tracks = response.items
+                self.tracks = response.tracks.map { $0.asTrack }
                 loadState = tracks.isEmpty ? .empty : .loaded
             } catch {
                 print("Playlist Fetch Error: \(error)")
