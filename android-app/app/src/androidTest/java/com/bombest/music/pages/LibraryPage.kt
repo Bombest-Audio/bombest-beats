@@ -7,7 +7,10 @@ import androidx.test.uiautomator.Until
 class LibraryPage(private val device: UiDevice) {
 
     fun assertVisible() = apply {
-        check(device.wait(Until.hasObject(By.desc("Library")), 30_000)) {
+        // "bombest beats" is the TopAppBar title — always visible once on the library screen,
+        // regardless of library-loading state. Using By.text() is more reliable than
+        // By.desc() on a non-interactive Compose Box on API 29 emulators.
+        check(device.wait(Until.hasObject(By.text("bombest beats")), 30_000)) {
             "Library screen did not appear within 30 seconds"
         }
     }
