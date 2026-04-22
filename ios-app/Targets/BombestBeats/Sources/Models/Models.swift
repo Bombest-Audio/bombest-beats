@@ -139,6 +139,15 @@ struct PasskeyRegisterResponse: Codable {
     let message: String?
 }
 
+// MARK: - View State
+enum LoadState {
+    case idle
+    case loading
+    case loaded
+    case failed(String)
+    case empty  // successful fetch, zero results
+}
+
 // MARK: - Dashboard
 struct DashboardResponse: Codable {
     let total_plays: Int
