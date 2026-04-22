@@ -3,6 +3,7 @@ import SwiftUI
 struct LibraryView: View {
     @StateObject private var viewModel = LibraryViewModel()
     @EnvironmentObject var audioService: AudioService
+    @ObservedObject private var favorites = FavoritesManager.shared
 
     var body: some View {
         NavigationStack {
@@ -70,10 +71,19 @@ struct LibraryView: View {
 
                     // All Songs
                     VStack(alignment: .leading) {
-                        Text("All Songs")
-                            .font(.title2)
-                            .fontWeight(.bold)
-                            .padding(.horizontal)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("All Songs")
+                                .font(.title2)
+                                .fontWeight(.bold)
+                                .padding(.horizontal)
+
+                            if !favorites.favoriteIds.isEmpty {
+                                Text("\(favorites.favoriteIds.count) favorited")
+                                    .font(.caption)
+                                    .foregroundColor(Color("NeonPurple").opacity(0.8))
+                                    .padding(.horizontal)
+                            }
+                        }
 
                         LazyVStack(spacing: 0) {
                             ForEach(viewModel.songs) { track in
