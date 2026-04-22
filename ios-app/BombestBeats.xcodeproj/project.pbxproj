@@ -11,6 +11,7 @@
 		0398BB1F1451C7FD96D2BEFE /* SprayPaintProgress.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB9AF199E3C446FB3BED5CE4 /* SprayPaintProgress.swift */; };
 		04D1665AB24791DC5DD5A2B9 /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBEF487E093571C1B8D8235E /* LibraryView.swift */; };
 		0FCCBA7D2175A642FD57FFA7 /* PlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 137326B8515A4F120A54E0FB /* PlayerView.swift */; };
+		0FD67032DA5441749833D6A3 /* CarPlayManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9654EE64709ABF465E0E37D /* CarPlayManager.swift */; };
 		101CB30C55A9598F545B9565 /* MainTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24FFEBF856DF23951BCDA3AF /* MainTabView.swift */; };
 		143448211C2E68B3BEC5464F /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73D4C3B7ACA6921CD03929B4 /* DashboardView.swift */; };
 		23E168F7E8ACBFFE160F717C /* OscilloscopeVisualizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C62D36C708FB0A63585A28E /* OscilloscopeVisualizer.swift */; };
@@ -31,6 +32,7 @@
 		97C23930D8A77C0DA8DB1F38 /* LibraryCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A87AA67928BA8EFF980E2D8A /* LibraryCard.swift */; };
 		9BD0B256A860750494A362A6 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3603363B75A3AC56AAB085F9 /* Models.swift */; };
 		9D15100041208329687F4D4B /* MiniPlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B08D17EEC9A4A03361D07B9F /* MiniPlayerView.swift */; };
+		A1F2CF540D26BEE08F866371 /* FavoritesManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51C74B8408CB477FBF795470 /* FavoritesManager.swift */; };
 		A3726A3E871073984011A650 /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EF221829BD80715811A4EC6 /* LoginView.swift */; };
 		AF09A519B1D9DDD4908C4087 /* CachedImage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97E1FFD62AC976A949C496DE /* CachedImage.swift */; };
 		B559D1CDA9EF15D39C90393B /* SearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 281DADC8EDE5E59DCB101907 /* SearchView.swift */; };
@@ -72,6 +74,7 @@
 		3FE8EAA1D2F4F27318CD76ED /* BombestBeats-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "BombestBeats-Info.plist"; sourceTree = "<group>"; };
 		49D6CB91CA702C2A832AF7F4 /* VUMeterProgress.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VUMeterProgress.swift; sourceTree = "<group>"; };
 		4FB00CDCB9CCC20F083D37C9 /* GraffitiVisualizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GraffitiVisualizer.swift; sourceTree = "<group>"; };
+		51C74B8408CB477FBF795470 /* FavoritesManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FavoritesManager.swift; sourceTree = "<group>"; };
 		6381D339EF19D71C60F9811C /* AudioService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioService.swift; sourceTree = "<group>"; };
 		72E5956533019920A200A384 /* APIService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIService.swift; sourceTree = "<group>"; };
 		73D4C3B7ACA6921CD03929B4 /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
@@ -94,6 +97,7 @@
 		E00517A6670CED1EBDDBDD5B /* FileCacheService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileCacheService.swift; sourceTree = "<group>"; };
 		E45E93E5A56570B386802021 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		E5EE3E9DA9DB1135E2A34BC7 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		E9654EE64709ABF465E0E37D /* CarPlayManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarPlayManager.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -120,6 +124,8 @@
 			children = (
 				72E5956533019920A200A384 /* APIService.swift */,
 				6381D339EF19D71C60F9811C /* AudioService.swift */,
+				E9654EE64709ABF465E0E37D /* CarPlayManager.swift */,
+				51C74B8408CB477FBF795470 /* FavoritesManager.swift */,
 				E00517A6670CED1EBDDBDD5B /* FileCacheService.swift */,
 				BF022BC651D0BA649DCE3E27 /* HapticsManager.swift */,
 				A762B026EDA6BA6441D3E844 /* ImageCacheService.swift */,
@@ -344,6 +350,8 @@
 				9BD0B256A860750494A362A6 /* Models.swift in Sources */,
 				706E4840D1C59861CF96B45B /* APIService.swift in Sources */,
 				786FD81260A8D83867B14B52 /* AudioService.swift in Sources */,
+				0FD67032DA5441749833D6A3 /* CarPlayManager.swift in Sources */,
+				A1F2CF540D26BEE08F866371 /* FavoritesManager.swift in Sources */,
 				C7F9159EDC47829FC5163C48 /* FileCacheService.swift in Sources */,
 				BFE21149BED9C086239CC32F /* HapticsManager.swift in Sources */,
 				2B7ACFB254552C80B2198196 /* ImageCacheService.swift in Sources */,
