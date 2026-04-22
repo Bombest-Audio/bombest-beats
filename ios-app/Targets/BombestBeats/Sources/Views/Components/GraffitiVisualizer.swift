@@ -2,52 +2,69 @@ import SwiftUI
 
 struct GraffitiVisualizer: View {
     let amplitudes: [Float]
+    var isPlaying: Bool = true
     var colors: [Color] = [Color("NeonOrange"), Color("NeonPink"), Color("NeonPurple")]
-    
-    var body: some View {
-        TimelineView(.animation) { timeline in
-            Canvas { context, size in
 
+    private let barCount = 30
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
+            Canvas { context, size in
                 let width = size.width
                 let height = size.height
-                let centerY = height / 2
-                
-                // Draw misty background texture
-                // ...
-                
-                let barCount = amplitudes.count
-                let barWidth = width / CGFloat(max(barCount, 1))
-                
-                for (index, amplitude) in amplitudes.enumerated() {
-                    let x = CGFloat(index) * barWidth + barWidth / 2
-                    // Interpolate color
-                    let color = colors[index % colors.count] // Simple cycle for now
-                    
-                    let intensity = CGFloat(amplitude)
-                    let sprayHeight = height * 0.5 * intensity
-                    
-                    // Draw spray stroke
-                    var path = Path()
+                let barWidth = width / CGFloat(barCount)
+                let t = timeline.date.timeIntervalSinceReferenceDate
+                let half = barCount / 2
+                // Hoisted: O(n) check once per frame, not once per bar
+                let hasRealData = amplitudes.contains { $0 > 0.01 }
+
+                for i in 0..<barCount {
+                    let x = CGFloat(i) * barWidth + barWidth / 2
+
+                    // Mirror: low freqs in center, highs fan out to both edges
+                    let ampIndex = i < half ? (half - 1 - i) : (i - half)
+
+                    let realAmp = ampIndex < amplitudes.count ? amplitudes[ampIndex] : 0
+
+                    let amp: CGFloat
+                    if hasRealData {
+                        amp = CGFloat(realAmp)
+                    } else if isPlaying {
+                        // Smooth pseudo-random animation — symmetric about center
+                        let freq1 = 0.8 + Double(ampIndex) * 0.15
+                        let freq2 = 1.3 + Double(ampIndex) * 0.07
+                        let wave = sin(t * freq1 + Double(ampIndex) * 0.4) * 0.4
+                              + sin(t * freq2 + Double(ampIndex) * 0.9) * 0.3
+                        // Shape: higher in center (low freqs), lower at edges (high freqs)
+                        let midBoost = 1.0 - Double(ampIndex) / Double(half) * 0.5
+                        amp = CGFloat(max(0, (wave + 0.5) * midBoost * 0.85))
+                    } else {
+                        amp = 0
+                    }
+
+                    let barHeight = max(2, height * 0.9 * amp)
+                    let color = colors[i % colors.count]
+
+                    // Main bar — ellipse for spray-paint look
                     let rect = CGRect(
-                        x: x - barWidth/2,
-                        y: centerY - sprayHeight/2,
-                        width: barWidth,
-                        height: sprayHeight
+                        x: x - barWidth * 0.4,
+                        y: height / 2 - barHeight / 2,
+                        width: barWidth * 0.8,
+                        height: barHeight
                     )
-                    path.addEllipse(in: rect)
-                    
-                    context.fill(path, with: .color(color.opacity(0.7)))
-                    
-                    // Add "drips" or "spray particles"
-                    if intensity > 0.5 {
-                        let particleCount = Int(intensity * 10)
+                    context.fill(Path(ellipseIn: rect), with: .color(color.opacity(0.75)))
+
+                    // Spray particles on taller bars
+                    if amp > 0.45 {
+                        let particleCount = Int(amp * 8)
                         for _ in 0..<particleCount {
-                            let px = x + CGFloat.random(in: -10...10)
-                            let py = centerY + CGFloat.random(in: -sprayHeight...sprayHeight)
-                            let pSize = CGFloat.random(in: 1...3)
-                            
-                            let particlePath = Path(ellipseIn: CGRect(x: px, y: py, width: pSize, height: pSize))
-                            context.fill(particlePath, with: .color(color.opacity(0.5)))
+                            let px = x + CGFloat.random(in: -barWidth...barWidth)
+                            let py = height / 2 + CGFloat.random(in: -barHeight * 0.6...barHeight * 0.6)
+                            let pSize = CGFloat.random(in: 1...2.5)
+                            context.fill(
+                                Path(ellipseIn: CGRect(x: px, y: py, width: pSize, height: pSize)),
+                                with: .color(color.opacity(0.4))
+                            )
                         }
                     }
                 }

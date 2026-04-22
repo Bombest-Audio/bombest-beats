@@ -5,27 +5,31 @@ class PlaylistDetailViewModel: ObservableObject {
     let playlistId: Int
     @Published var name: String
     @Published var tracks: [Track] = []
-    @Published var isLoading = false
-    
+    @Published var loadState: LoadState = .idle
+
     private let api = APIService.shared
-    
+
     init(playlist: Playlist) {
         self.playlistId = playlist.id
         self.name = playlist.name
         // Do not auto-fetch, view will trigger it
     }
-    
+
     func fetchTracks() {
-        Task {
-            @MainActor in
-            isLoading = true
+        Task { @MainActor in
+            loadState = .loading
             do {
                 let response: PlaylistTracksResponse = try await api.request("/playlists/\(playlistId)/tracks")
-                self.tracks = response.items
+                self.tracks = response.tracks.map { $0.asTrack }
+                loadState = tracks.isEmpty ? .empty : .loaded
             } catch {
                 print("Playlist Fetch Error: \(error)")
+                loadState = .failed(error.localizedDescription)
             }
-            isLoading = false
         }
+    }
+
+    func retry() {
+        fetchTracks()
     }
 }

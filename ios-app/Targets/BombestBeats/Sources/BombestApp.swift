@@ -26,6 +26,10 @@ struct BombestApp: App {
             .environmentObject(audioService)
             .environmentObject(authViewModel)
             .preferredColorScheme(.dark) // Force dark mode for that premium feel
+            .task {
+                // Configure CarPlay after the scene is set up (D-14: build now, entitlement needed for shipping)
+                CarPlayManager.shared.configure(audioService: audioService)
+            }
         }
     }
     

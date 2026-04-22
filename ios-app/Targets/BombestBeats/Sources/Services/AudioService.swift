@@ -1,7 +1,8 @@
 import Foundation
 import AVFoundation
 import MediaPlayer
-import Combine
+import MediaToolbox
+import Accelerate
 
 class AudioService: NSObject, ObservableObject {
     static let shared = AudioService()
@@ -19,13 +20,36 @@ class AudioService: NSObject, ObservableObject {
     
     @Published var isShuffleOn: Bool = false
     @Published var repeatMode: RepeatMode = .off
-    
+
+    @Published var amplitudes: [Float] = Array(repeating: 0, count: 30)
+    @Published var frequencyBands: FrequencyBands = .zero
+    @Published var loopStartTime: TimeInterval? = nil
+    @Published var loopEndTime: TimeInterval? = nil
+
     // MARK: - Private Properties
     private var originalQueue: [Track] = [] // Backs the queue when shuffled
-    
+
     private let player = AVQueuePlayer()
     private var timeObserver: Any?
-    private var cancellables = Set<AnyCancellable>()
+
+    // FFT runs via MTAudioProcessingTap on AVPlayerItem (not AVAudioEngine)
+    private var fftSetup: FFTSetup?
+    private let fftSize = 1024
+    private var tapSampleRate: Float = 44100.0
+    private var currentTap: MTAudioProcessingTap?
+    private var smoothedAmplitudes = [Float](repeating: 0, count: 30)
+    // Pre-allocated scratch buffers — avoid per-callback heap allocs on the audio thread
+    private lazy var hannWindow: [Float] = {
+        var w = [Float](repeating: 0, count: fftSize)
+        vDSP_hann_window(&w, vDSP_Length(fftSize), Int32(vDSP_HANN_NORM))
+        return w
+    }()
+    private lazy var fftScratch: (windowed: [Float], imag: [Float], mag: [Float]) = (
+        windowed: [Float](repeating: 0, count: fftSize),
+        imag:     [Float](repeating: 0, count: fftSize),
+        mag:      [Float](repeating: 0, count: fftSize / 2)
+    )
+    private var loopEnforcementObserver: Any?
     
     // MARK: - API
     private let baseURL = "https://beats.bom.best"
@@ -33,17 +57,19 @@ class AudioService: NSObject, ObservableObject {
     override init() {
         super.init()
         setupAudioSession()
+        setupAudioEngine()
         setupRemoteCommands()
         setupTimeObserver()
-        
+
+        // Groove Engine: rising-edge + cooldown to avoid constant buzzing
         // When item finishes, handle auto-advance
         NotificationCenter.default.addObserver(self, selector: #selector(playerDidFinishPlaying), name: .AVPlayerItemDidPlayToEndTime, object: nil)
     }
-    
+
     deinit {
-        if let observer = timeObserver {
-            player.removeTimeObserver(observer)
-        }
+        if let observer = timeObserver { player.removeTimeObserver(observer) }
+        if let loop = loopEnforcementObserver { player.removeTimeObserver(loop) }
+        if let setup = fftSetup { vDSP_destroy_fftsetup(setup) }
     }
     
     @objc private func playerDidFinishPlaying(note: NSNotification) {
@@ -148,6 +174,7 @@ class AudioService: NSObject, ObservableObject {
     }
     
     private func loadAndPlay(_ track: Track) {
+        deactivateLoop() // prevents stale loop from prior track
         player.removeAllItems()
         
         // 1. Check Cache
@@ -223,8 +250,9 @@ class AudioService: NSObject, ObservableObject {
             }
         }
         
+        installAudioTap(on: item)
         player.insert(item, after: nil)
-        
+
         self.currentTrack = track
         player.play()
         isPlaying = true
@@ -273,7 +301,180 @@ class AudioService: NSObject, ObservableObject {
     }
     
     // MARK: - Setup
-    
+
+    private func setupAudioEngine() {
+        let log2n = vDSP_Length(log2(Float(fftSize)))
+        fftSetup = vDSP_create_fftsetup(log2n, FFTRadix(FFT_RADIX2))
+    }
+
+    // Attach an MTAudioProcessingTap to the given AVPlayerItem so FFT runs
+    // on the actual decoded PCM — AVQueuePlayer bypasses AVAudioEngine entirely.
+    func installAudioTap(on item: AVPlayerItem) {
+        currentTap = nil
+
+        guard let fftSetup else { return }
+
+        // Use unretained pointer — AudioService is a singleton so lifetime is safe.
+        let selfPtr = Unmanaged.passUnretained(self).toOpaque()
+
+        var callbacks = MTAudioProcessingTapCallbacks(
+            version: kMTAudioProcessingTapCallbacksVersion_0,
+            clientInfo: selfPtr,
+            init: { _, clientInfo, tapStorageOut in tapStorageOut.pointee = clientInfo },
+            finalize: { _ in },
+            prepare: { tap, maxFrames, processingFormat in
+                let storage = MTAudioProcessingTapGetStorage(tap)
+                let service = Unmanaged<AudioService>.fromOpaque(storage).takeUnretainedValue()
+                let fmt = processingFormat.pointee
+                service.tapSampleRate = Float(fmt.mSampleRate)
+                // Guard: only Float32 non-interleaved is safe to read directly
+                let isFloat32 = fmt.mFormatFlags & kAudioFormatFlagIsFloat != 0
+                let isNonInterleaved = fmt.mFormatFlags & kAudioFormatFlagIsNonInterleaved != 0
+                if !isFloat32 || !isNonInterleaved {
+                    print("[Audio] Tap format is not Float32 non-interleaved — FFT disabled for this asset")
+                }
+            },
+            unprepare: nil,
+            process: { tap, numberFrames, _, bufferList, numberFramesOut, _ in
+                MTAudioProcessingTapGetSourceAudio(tap, numberFrames, bufferList, nil, nil, numberFramesOut)
+                let storage = MTAudioProcessingTapGetStorage(tap)
+                let service = Unmanaged<AudioService>.fromOpaque(storage).takeUnretainedValue()
+                let buf = bufferList.pointee.mBuffers
+                guard let data = buf.mData else { return }
+                let count = Int(numberFramesOut.pointee)
+                service.processRawSamples(data.assumingMemoryBound(to: Float.self), count: count)
+            }
+        )
+
+        var tapOut: MTAudioProcessingTap?
+        let status = MTAudioProcessingTapCreate(kCFAllocatorDefault, &callbacks,
+                                                kMTAudioProcessingTapCreationFlag_PostEffects, &tapOut)
+        guard status == noErr, let tap = tapOut else {
+            print("[Audio] MTAudioProcessingTapCreate failed: \(status)")
+            return
+        }
+        currentTap = tap
+
+        let audioTracks = (item.asset as? AVURLAsset)?.tracks(withMediaType: .audio)
+            ?? item.tracks.compactMap { $0.assetTrack }.filter { $0.mediaType == .audio }
+
+        guard let track = audioTracks.first else { return }
+        let params = AVMutableAudioMixInputParameters(track: track)
+        params.audioTapProcessor = tap
+        let mix = AVMutableAudioMix()
+        mix.inputParameters = [params]
+        item.audioMix = mix
+    }
+
+    func processRawSamples(_ samples: UnsafePointer<Float>, count: Int) {
+        guard let setup = fftSetup, count >= fftSize else { return }
+        var realParts = [Float](UnsafeBufferPointer(start: samples, count: fftSize))
+        processFFT(&realParts, setup: setup)
+    }
+
+    private func processAudioBuffer(_ buffer: AVAudioPCMBuffer) {
+        guard let setup = fftSetup,
+              let channelData = buffer.floatChannelData?[0] else { return }
+        let frameCount = Int(buffer.frameLength)
+        guard frameCount >= fftSize else { return }
+        var realParts = [Float](UnsafeBufferPointer(start: channelData, count: fftSize))
+        processFFT(&realParts, setup: setup)
+    }
+
+    private func processFFT(_ realPartsIn: inout [Float], setup: FFTSetup) {
+        // Use pre-allocated scratch buffers — no heap alloc on the audio thread
+        vDSP_vmul(&realPartsIn, 1, &hannWindow, 1, &fftScratch.windowed, 1, vDSP_Length(fftSize))
+
+        fftScratch.windowed.withUnsafeMutableBufferPointer { realBuf in
+            fftScratch.imag.withUnsafeMutableBufferPointer { imagBuf in
+                var splitComplex = DSPSplitComplex(realp: realBuf.baseAddress!, imagp: imagBuf.baseAddress!)
+                let log2n = vDSP_Length(log2(Float(fftSize)))
+                vDSP_ctoz(
+                    UnsafeRawPointer(realBuf.baseAddress!).bindMemory(to: DSPComplex.self, capacity: fftSize / 2),
+                    2, &splitComplex, 1, vDSP_Length(fftSize / 2)
+                )
+                vDSP_fft_zrip(setup, &splitComplex, 1, log2n, FFTDirection(FFT_FORWARD))
+                vDSP_zvmags(&splitComplex, 1, &fftScratch.mag, 1, vDSP_Length(fftSize / 2))
+            }
+        }
+
+        // Log-spaced frequency bands: 60Hz–16kHz spread across 30 bars
+        let bandCount = 30
+        var bands = [Float](repeating: 0, count: bandCount)
+        let binHz = tapSampleRate / Float(fftSize)
+        let minFreq: Float = 60.0
+        let maxFreq: Float = 16000.0
+        for i in 0..<bandCount {
+            let fLow  = minFreq * pow(maxFreq / minFreq, Float(i)     / Float(bandCount))
+            let fHigh = minFreq * pow(maxFreq / minFreq, Float(i + 1) / Float(bandCount))
+            let binLow  = max(1, Int(fLow  / binHz))
+            let binHigh = min(fftScratch.mag.count - 1, Int(fHigh / binHz))
+            guard binLow <= binHigh else { continue }
+            let slice = fftScratch.mag[binLow...binHigh]
+            bands[i] = slice.reduce(0, +) / Float(slice.count)
+        }
+
+        // Sqrt companding: boosts quieter bins so all bars are visible
+        bands = bands.map { sqrt($0) }
+
+        // Normalize to 0–1
+        let maxVal = bands.max() ?? 1.0
+        let normalized = maxVal > 0.001 ? bands.map { $0 / maxVal } : [Float](repeating: 0, count: bandCount)
+
+        // Exponential smoothing: fast attack (0.35), slow decay (0.08)
+        for i in 0..<bandCount {
+            let target = normalized[i]
+            let prev = smoothedAmplitudes[i]
+            smoothedAmplitudes[i] = target > prev
+                ? prev + 0.35 * (target - prev)
+                : prev + 0.08 * (target - prev)
+        }
+        let smoothed = smoothedAmplitudes
+
+        // 3 frequency bands for Groove Engine
+        let lowBand = smoothed[0..<5].reduce(0, +) / 5.0
+        let midBand = smoothed[5..<15].reduce(0, +) / 10.0
+        let highBand = smoothed[15..<30].reduce(0, +) / 15.0
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.amplitudes = smoothed
+            self.frequencyBands = FrequencyBands(low: lowBand, mid: midBand, high: highBand)
+        }
+    }
+
+    // MARK: - A-B Loop
+
+    func snapToBeat(_ rawTime: TimeInterval, bpm: Float) -> TimeInterval {
+        let beatInterval = bpm > 0 ? 60.0 / Double(bpm) : 0.1
+        return (rawTime / beatInterval).rounded() * beatInterval
+    }
+
+    func activateLoop() {
+        guard loopStartTime != nil, loopEndTime != nil else { return }
+        deactivateLoop() // remove any prior observer
+        let interval = CMTime(seconds: 0.05, preferredTimescale: 600)
+        loopEnforcementObserver = player.addPeriodicTimeObserver(
+            forInterval: interval, queue: .main
+        ) { [weak self] time in
+            guard let self,
+                  let end = self.loopEndTime,
+                  let start = self.loopStartTime else { return }
+            if time.seconds >= end {
+                self.seek(to: start)
+            }
+        }
+    }
+
+    func deactivateLoop() {
+        if let obs = loopEnforcementObserver {
+            player.removeTimeObserver(obs)
+            loopEnforcementObserver = nil
+        }
+        loopStartTime = nil
+        loopEndTime = nil
+    }
+
     private func setupAudioSession() {
         do {
             // Configure audio session - Category: Playback, Mode: Default

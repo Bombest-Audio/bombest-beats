@@ -24,16 +24,48 @@ struct Track: Codable, Identifiable {
     let title: String?
     let artist: String?
     let album: String?
-    let length: Double
+    let length: Double?
     let path: String?
-    let album_id: Int? // JSON snake_case
-    
+    let album_id: Int?
+    var bpm: Float
+
     var displayTitle: String { title ?? path?.components(separatedBy: "/").last ?? "Unknown Track" }
     var displayArtist: String { artist ?? "Unknown Artist" }
+
+    // Custom decoder: bpm absent from old library_cache.json and some backend responses
+    enum CodingKeys: String, CodingKey {
+        case id, title, artist, album, length, path, album_id, bpm
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id       = try c.decode(Int.self,    forKey: .id)
+        title    = try c.decodeIfPresent(String.self, forKey: .title)
+        artist   = try c.decodeIfPresent(String.self, forKey: .artist)
+        album    = try c.decodeIfPresent(String.self, forKey: .album)
+        length   = try c.decodeIfPresent(Double.self, forKey: .length)
+        path     = try c.decodeIfPresent(String.self, forKey: .path)
+        album_id = try c.decodeIfPresent(Int.self,    forKey: .album_id)
+        bpm      = try c.decodeIfPresent(Float.self,  forKey: .bpm) ?? 0
+    }
+
+    // Memberwise init used by PlaylistTrack.asTrack and tests
+    init(id: Int, title: String?, artist: String?, album: String?,
+         length: Double?, path: String?, album_id: Int?, bpm: Float = 0) {
+        self.id = id; self.title = title; self.artist = artist; self.album = album
+        self.length = length; self.path = path; self.album_id = album_id; self.bpm = bpm
+    }
 }
 
 struct LibraryResponse: Codable {
     let items: [Track]
+}
+
+struct FrequencyBands {
+    let low: Float   // 0–200Hz approx — kick/bass
+    let mid: Float   // 200Hz–2kHz approx — snare/vocal
+    let high: Float  // 2kHz+ approx — hi-hat/cymbal
+    static let zero = FrequencyBands(low: 0, mid: 0, high: 0)
 }
 
 
@@ -50,7 +82,20 @@ struct PlaylistsResponse: Codable {
 }
 
 struct PlaylistTracksResponse: Codable {
-    let items: [Track]
+    let tracks: [PlaylistTrack]
+}
+
+struct PlaylistTrack: Codable, Identifiable {
+    let id: Int
+    let title: String?
+    let artist: String?
+    let album: String?
+    let duration: Double?
+    let path: String?
+
+    var asTrack: Track {
+        Track(id: id, title: title, artist: artist, album: album, length: duration, path: path, album_id: nil)
+    }
 }
 struct PasskeyLoginOptions: Codable {
     let challenge: String
@@ -129,6 +174,15 @@ struct PasskeyAttestationResponse: Codable {
 struct PasskeyRegisterResponse: Codable {
     let success: Bool
     let message: String?
+}
+
+// MARK: - View State
+enum LoadState {
+    case idle
+    case loading
+    case loaded
+    case failed(String)
+    case empty  // successful fetch, zero results
 }
 
 // MARK: - Dashboard

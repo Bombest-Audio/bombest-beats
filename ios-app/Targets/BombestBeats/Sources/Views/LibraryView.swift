@@ -3,33 +3,53 @@ import SwiftUI
 struct LibraryView: View {
     @StateObject private var viewModel = LibraryViewModel()
     @EnvironmentObject var audioService: AudioService
-    
+    @ObservedObject private var favorites = FavoritesManager.shared
+
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
-                    
+
                     // Header
                     Text("Library")
                         .font(.system(size: 34, weight: .bold, design: .rounded))
                         .padding(.horizontal)
-                    
-                    if let error = viewModel.errorMessage {
-                        Text("Error: \(error)")
-                            .foregroundColor(.red)
+
+                    // State guard — show loading/error/empty before content
+                    switch viewModel.loadState {
+                    case .idle, .loading:
+                        ProgressView()
+                            .tint(Color("NeonPurple"))
+                            .scaleEffect(1.2)
                             .padding()
-                            .background(Color.red.opacity(0.1))
-                            .cornerRadius(8)
-                            .padding(.horizontal)
+                    case .failed(let message):
+                        VStack(spacing: 12) {
+                            Image(systemName: "exclamationmark.triangle")
+                                .font(.largeTitle).foregroundColor(.orange)
+                            Text(message)
+                                .foregroundColor(.gray)
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal)
+                            Button("Retry") { viewModel.refreshData() }
+                                .buttonStyle(.borderedProminent)
+                                .tint(Color("NeonPurple"))
+                        }.padding()
+                    case .empty:
+                        ContentUnavailableView("No Songs Found", systemImage: "music.note")
+                    case .loaded:
+                        EmptyView()
                     }
-                    
+
+                    // Content only renders when fully loaded — prevents error+content mixed state
+                    if case .loaded = viewModel.loadState {
+
                     // Quick Actions / Sections
                     VStack(alignment: .leading) {
                         Text("Playlists")
                             .font(.title2)
                             .fontWeight(.bold)
                             .padding(.horizontal)
-                        
+
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 16) {
                                 ForEach(viewModel.playlists) { playlist in
@@ -41,7 +61,7 @@ struct LibraryView: View {
                                         )
                                     }
                                 }
-                                
+
                                 if viewModel.playlists.isEmpty {
                                     Text("No playlists yet")
                                         .foregroundColor(.gray)
@@ -51,14 +71,23 @@ struct LibraryView: View {
                             .padding(.horizontal)
                         }
                     }
-                    
+
                     // All Songs
                     VStack(alignment: .leading) {
-                        Text("All Songs")
-                            .font(.title2)
-                            .fontWeight(.bold)
-                            .padding(.horizontal)
-                        
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("All Songs")
+                                .font(.title2)
+                                .fontWeight(.bold)
+                                .padding(.horizontal)
+
+                            if !favorites.favoriteIds.isEmpty {
+                                Text("\(favorites.favoriteIds.count) favorited")
+                                    .font(.caption)
+                                    .foregroundColor(Color("NeonPurple").opacity(0.8))
+                                    .padding(.horizontal)
+                            }
+                        }
+
                         LazyVStack(spacing: 0) {
                             ForEach(viewModel.songs) { track in
                                 TrackRow(track: track) {
@@ -69,6 +98,7 @@ struct LibraryView: View {
                             }
                         }
                     }
+                    } // end if .loaded
                 }
                 .padding(.vertical)
             }
