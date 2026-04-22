@@ -2683,7 +2683,10 @@ def assetlinks():
     formatted_fingerprint = ":".join(fingerprint[i:i+2] for i in range(0, len(fingerprint), 2))
     
     return jsonify([{
-        "relation": ["delegate_permission/common.handle_all_urls"],
+        "relation": [
+            "delegate_permission/common.handle_all_urls",
+            "delegate_permission/common.get_login_creds",
+        ],
         "target": {
             "namespace": "android_app",
             "package_name": "com.bombest.music",
