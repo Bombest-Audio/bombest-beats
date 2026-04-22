@@ -2219,12 +2219,16 @@ RP_ID = "beats.bom.best"
 RP_NAME = "bombest beats"
 RP_ORIGIN_WEB = "https://beats.bom.best"
 # Android origin: android:apk-key-hash:<base64url of SHA256 fingerprint>
-# SHA256: 2C:A4:5B:A8:27:2C:C9:57:F9:AC:0D:DA:85:D5:F1:CF:D9:DF:F8:49:34:C8:58:52:4B:C4:34:5B:30:99:36:E8
+# Release SHA256: 2C:A4:5B:A8:27:2C:C9:57:F9:AC:0D:DA:85:D5:F1:CF:D9:DF:F8:49:34:C8:58:52:4B:C4:34:5B:30:99:36:E8
+# Debug SHA256:   46:09:4F:44:F0:38:4A:DB:9B:95:34:9C:D5:81:53:6A:40:65:49:EB:DA:B0:6F:25:CF:2D:E3:75:3C:EB:F2:14
 # Convert hex to bytes then base64url
 _android_sha256_hex = "2CA45BA8272CC957F9AC0DDA85D5F1CFD9DFF84934C858524BC4345B309936E8"
+_android_sha256_debug_hex = "46094F44F0384ADB9B95349CD581536A406549EBDAB06F25CF2DE3753CEBF214"
 _android_sha256_bytes = bytes.fromhex(_android_sha256_hex)
+_android_sha256_debug_bytes = bytes.fromhex(_android_sha256_debug_hex)
 RP_ORIGIN_ANDROID = "android:apk-key-hash:" + base64.urlsafe_b64encode(_android_sha256_bytes).decode().rstrip('=')
-RP_ORIGINS = [RP_ORIGIN_WEB, RP_ORIGIN_ANDROID]
+RP_ORIGIN_ANDROID_DEBUG = "android:apk-key-hash:" + base64.urlsafe_b64encode(_android_sha256_debug_bytes).decode().rstrip('=')
+RP_ORIGINS = [RP_ORIGIN_WEB, RP_ORIGIN_ANDROID, RP_ORIGIN_ANDROID_DEBUG]
 
 def _get_rp_id_and_origin():
     """Derive rp_id and origin from request so passkeys work from localhost or production."""
@@ -2677,11 +2681,9 @@ def create_invite():
 @app.route('/.well-known/assetlinks.json')
 def assetlinks():
     """Serve Android Asset Links for Passkey verification"""
-    # Use the calculated hash from above
-    fingerprint = _android_sha256_hex # "2CA45BA8..."
-    # Format as colon-separated octets for assetlinks
-    formatted_fingerprint = ":".join(fingerprint[i:i+2] for i in range(0, len(fingerprint), 2))
-    
+    def fmt(hex_str):
+        return ":".join(hex_str[i:i+2] for i in range(0, len(hex_str), 2))
+
     return jsonify([{
         "relation": [
             "delegate_permission/common.handle_all_urls",
@@ -2690,7 +2692,10 @@ def assetlinks():
         "target": {
             "namespace": "android_app",
             "package_name": "com.bombest.music",
-            "sha256_cert_fingerprints": [formatted_fingerprint]
+            "sha256_cert_fingerprints": [
+                fmt(_android_sha256_hex),
+                fmt(_android_sha256_debug_hex),
+            ]
         }
     }])
 
