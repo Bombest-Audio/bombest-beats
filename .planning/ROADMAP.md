@@ -145,6 +145,20 @@ Plans:
 - [x] 07-01-PLAN.md — Add e2e-android job to pre-merge.yml (emulator-runner, credential injection, artifact upload, PR comment, merge gate)
 - [ ] 07-02-PLAN.md — Create CI test account on beats.bom.best, seed library, set GitHub secrets
 
+### Phase 8: get the iOS version up to parity with android
+
+**Goal:** Close all 7 functional gaps between iOS and Android: A-B loop, Haptic Groove Engine, real audio analysis for visualizers, CarPlay, favorites, Cloudflare→EC2 failover, and error recovery states.
+**Requirements**: IOS-AB-LOOP, IOS-HAPTIC-GROOVE, IOS-AUDIO-ANALYSIS, IOS-CARPLAY, IOS-FAVORITES, IOS-FAILOVER, IOS-ERROR-RECOVERY
+**Depends on:** Phase 7
+**Plans:** 5 plans
+
+Plans:
+- [ ] 08-01-PLAN.md — AVAudioEngine FFT pipeline + A-B loop state + Haptic Groove Engine (Wave 1)
+- [ ] 08-02-PLAN.md — APIService Cloudflare→EC2 failover + LoadState error recovery for all data screens (Wave 1)
+- [ ] 08-03-PLAN.md — FavoritesManager + TrackRow heart toggle + LibraryView indicator (Wave 1)
+- [ ] 08-04-PLAN.md — A-B loop UI in PlayerView + real visualizer wiring (Wave 2, depends 08-01)
+- [ ] 08-05-PLAN.md — CarPlay MPPlayableContentManager + entitlement + BombestApp wiring (Wave 3, depends 08-01, 08-02)
+
 ---
 
 *Roadmap created: 2026-03-30*
