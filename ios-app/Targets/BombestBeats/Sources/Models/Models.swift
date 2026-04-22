@@ -58,7 +58,20 @@ struct PlaylistsResponse: Codable {
 }
 
 struct PlaylistTracksResponse: Codable {
-    let items: [Track]
+    let tracks: [PlaylistTrack]
+}
+
+struct PlaylistTrack: Codable, Identifiable {
+    let id: Int
+    let title: String?
+    let artist: String?
+    let album: String?
+    let duration: Double?
+    let path: String?
+
+    var asTrack: Track {
+        Track(id: id, title: title, artist: artist, album: album, length: duration, path: path, album_id: nil)
+    }
 }
 struct PasskeyLoginOptions: Codable {
     let challenge: String
