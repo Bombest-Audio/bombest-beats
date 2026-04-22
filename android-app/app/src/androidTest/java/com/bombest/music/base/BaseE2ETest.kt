@@ -15,6 +15,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
+import org.junit.After
 import org.junit.Assume.assumeTrue
 import org.junit.Before
 
@@ -42,16 +43,14 @@ abstract class BaseE2ETest {
         // Clear stored auth token so LoginActivity always shows the login form
         runBlocking { ctx.authDataStore.edit { it.clear() } }
 
-        // Go to home screen then relaunch LoginActivity with a clear task.
-        // --activity-new-task --activity-clear-task: removes any existing activities from the
-        // back stack (e.g. MainActivity left over from a previous test), releases the old
-        // ViewModel and MediaService binding, and starts LoginActivity fresh. This is the
-        // safe alternative to am force-stop (which would also kill the instrumentation process).
+        // Go to home screen then bring LoginActivity to the foreground.
+        // tearDown() below fires an am-start after each test so that LoginActivity is
+        // already rendering (or rendered) by the time the next setup() runs. Reusing
+        // an already-rendered instance is <1 s; a cold start on this API 29 swiftshader
+        // emulator takes 30-60 s due to JIT compilation + GC pressure.
         device.pressHome()
         device.waitForIdle()
-        device.executeShellCommand(
-            "am start --activity-new-task --activity-clear-task -n $pkg/.LoginActivity"
-        )
+        device.executeShellCommand("am start -n $pkg/.LoginActivity")
 
         // Dismiss Android 16 "16KB page size" compatibility warning dialog if it appears
         val compatWarning: UiObject2? = device.wait(Until.findObject(By.text("Android App Compatibility")), 4_000)
@@ -63,6 +62,24 @@ abstract class BaseE2ETest {
         // Wait for our package to be visible in the foreground. LoginActivity can take 6-10s
         // to first-render on a cold API 29 swiftshader emulator; 30s gives plenty of headroom.
         device.wait(Until.hasObject(By.pkg(pkg)), 30_000)
+    }
+
+    @After
+    fun tearDown() {
+        val ctx = InstrumentationRegistry.getInstrumentation().targetContext
+        val pkg = ctx.packageName
+        // Clear auth state so the next test always starts from the login screen.
+        runBlocking { ctx.authDataStore.edit { it.clear() } }
+        // Fire-and-forget am start: kick off LoginActivity so it begins rendering in the
+        // background while JUnit transitions to the next test. By the time setup() runs
+        // its 30-second wait, LoginActivity is already rendered or well underway —
+        // avoiding the 30-60 s cold-start penalty on this slow emulator.
+        device.pressHome()
+        device.waitForIdle()
+        device.executeShellCommand("am start -n $pkg/.LoginActivity")
+        // Give LoginActivity a head start. This short idle let the process begin composing
+        // before the next test's setup() fires.
+        device.waitForIdle()
     }
 
     // ---------------------------------------------------------------------------

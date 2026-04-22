@@ -7,8 +7,10 @@ import androidx.test.uiautomator.Until
 class LoginPage(private val device: UiDevice) {
 
     fun enterUsername(value: String) = apply {
-        // Wait for EditText fields to appear (Compose exposes label as text, not hint)
-        device.wait(Until.hasObject(By.clazz("android.widget.EditText")), 30_000)
+        // Wait for EditText fields to appear (Compose exposes label as text, not hint).
+        // 60 s: on the first render after a cold start on this API 29 swiftshader emulator,
+        // LoginActivity can take 30-60 s to draw its first frame under GC pressure.
+        device.wait(Until.hasObject(By.clazz("android.widget.EditText")), 60_000)
         val field = device.findObjects(By.clazz("android.widget.EditText")).getOrNull(0)
         checkNotNull(field) { "Username field not found" }
         field.setText(value)
