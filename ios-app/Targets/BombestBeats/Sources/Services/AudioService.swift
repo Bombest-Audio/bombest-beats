@@ -1,6 +1,7 @@
 import Foundation
 import AVFoundation
 import MediaPlayer
+import MediaToolbox
 import Combine
 import Accelerate
 
@@ -33,9 +34,12 @@ class AudioService: NSObject, ObservableObject {
     private var timeObserver: Any?
     private var cancellables = Set<AnyCancellable>()
 
-    private let audioEngine = AVAudioEngine()
+    // AVAudioEngine is unused — FFT runs via MTAudioProcessingTap on AVPlayerItem
     private var fftSetup: FFTSetup?
     private let fftSize = 1024
+    private var tapSampleRate: Float = 44100.0
+    private var currentTap: MTAudioProcessingTap?
+    private var smoothedAmplitudes = [Float](repeating: 0, count: 30)
     private var loopEnforcementObserver: Any?
     
     // MARK: - API
@@ -48,17 +52,7 @@ class AudioService: NSObject, ObservableObject {
         setupRemoteCommands()
         setupTimeObserver()
 
-        // Subscribe frequencyBands to Groove Engine (D-09: same FFT tap feeds both visualizer and haptics)
-        $frequencyBands
-            .receive(on: RunLoop.main)
-            .sink { [weak self] bands in
-                guard self?.isPlaying == true else { return }
-                if bands.low > 0.5  { HapticsManager.shared.playGroove(band: .low,  intensity: bands.low) }
-                if bands.mid > 0.5  { HapticsManager.shared.playGroove(band: .mid,  intensity: bands.mid) }
-                if bands.high > 0.6 { HapticsManager.shared.playGroove(band: .high, intensity: bands.high) }
-            }
-            .store(in: &cancellables)
-
+        // Groove Engine: rising-edge + cooldown to avoid constant buzzing
         // When item finishes, handle auto-advance
         NotificationCenter.default.addObserver(self, selector: #selector(playerDidFinishPlaying), name: .AVPlayerItemDidPlayToEndTime, object: nil)
     }
@@ -247,8 +241,9 @@ class AudioService: NSObject, ObservableObject {
             }
         }
         
+        installAudioTap(on: item)
         player.insert(item, after: nil)
-        
+
         self.currentTrack = track
         player.play()
         isPlaying = true
@@ -301,23 +296,64 @@ class AudioService: NSObject, ObservableObject {
     private func setupAudioEngine() {
         let log2n = vDSP_Length(log2(Float(fftSize)))
         fftSetup = vDSP_create_fftsetup(log2n, FFTRadix(FFT_RADIX2))
+    }
 
-        let outputNode = audioEngine.mainMixerNode
-        let format = outputNode.outputFormat(forBus: 0)
+    // Attach an MTAudioProcessingTap to the given AVPlayerItem so FFT runs
+    // on the actual decoded PCM — AVQueuePlayer bypasses AVAudioEngine entirely.
+    func installAudioTap(on item: AVPlayerItem) {
+        currentTap = nil
 
-        audioEngine.mainMixerNode.installTap(
-            onBus: 0,
-            bufferSize: AVAudioFrameCount(fftSize),
-            format: format
-        ) { [weak self] buffer, _ in
-            self?.processAudioBuffer(buffer)
+        guard let fftSetup else { return }
+
+        // Use unretained pointer — AudioService is a singleton so lifetime is safe.
+        let selfPtr = Unmanaged.passUnretained(self).toOpaque()
+
+        var callbacks = MTAudioProcessingTapCallbacks(
+            version: kMTAudioProcessingTapCallbacksVersion_0,
+            clientInfo: selfPtr,
+            init: { _, clientInfo, tapStorageOut in tapStorageOut.pointee = clientInfo },
+            finalize: { _ in },
+            prepare: { tap, maxFrames, processingFormat in
+                let storage = MTAudioProcessingTapGetStorage(tap)
+                let service = Unmanaged<AudioService>.fromOpaque(storage).takeUnretainedValue()
+                service.tapSampleRate = Float(processingFormat.pointee.mSampleRate)
+            },
+            unprepare: nil,
+            process: { tap, numberFrames, _, bufferList, numberFramesOut, _ in
+                MTAudioProcessingTapGetSourceAudio(tap, numberFrames, bufferList, nil, nil, numberFramesOut)
+                let storage = MTAudioProcessingTapGetStorage(tap)
+                let service = Unmanaged<AudioService>.fromOpaque(storage).takeUnretainedValue()
+                let buf = bufferList.pointee.mBuffers
+                guard let data = buf.mData else { return }
+                let count = Int(numberFramesOut.pointee)
+                service.processRawSamples(data.assumingMemoryBound(to: Float.self), count: count)
+            }
+        )
+
+        var tapOut: MTAudioProcessingTap?
+        let status = MTAudioProcessingTapCreate(kCFAllocatorDefault, &callbacks,
+                                                kMTAudioProcessingTapCreationFlag_PostEffects, &tapOut)
+        guard status == noErr, let tap = tapOut else {
+            print("[Audio] MTAudioProcessingTapCreate failed: \(status)")
+            return
         }
+        currentTap = tap
 
-        do {
-            try audioEngine.start()
-        } catch {
-            print("[Audio] AVAudioEngine start failed: \(error.localizedDescription)")
-        }
+        let audioTracks = (item.asset as? AVURLAsset)?.tracks(withMediaType: .audio)
+            ?? item.tracks.compactMap { $0.assetTrack }.filter { $0.mediaType == .audio }
+
+        guard let track = audioTracks.first else { return }
+        let params = AVMutableAudioMixInputParameters(track: track)
+        params.audioTapProcessor = tap
+        let mix = AVMutableAudioMix()
+        mix.inputParameters = [params]
+        item.audioMix = mix
+    }
+
+    func processRawSamples(_ samples: UnsafePointer<Float>, count: Int) {
+        guard let setup = fftSetup, count >= fftSize else { return }
+        var realParts = [Float](UnsafeBufferPointer(start: samples, count: fftSize))
+        processFFT(&realParts, setup: setup)
     }
 
     private func processAudioBuffer(_ buffer: AVAudioPCMBuffer) {
@@ -325,9 +361,14 @@ class AudioService: NSObject, ObservableObject {
               let channelData = buffer.floatChannelData?[0] else { return }
         let frameCount = Int(buffer.frameLength)
         guard frameCount >= fftSize else { return }
+        var realParts = [Float](UnsafeBufferPointer(start: channelData, count: fftSize))
+        processFFT(&realParts, setup: setup)
+    }
+
+    private func processFFT(_ realPartsIn: inout [Float], setup: FFTSetup) {
+        var realParts = realPartsIn
 
         var magnitudes = [Float](repeating: 0, count: fftSize / 2)
-        var realParts = [Float](UnsafeBufferPointer(start: channelData, count: fftSize))
         var imagParts = [Float](repeating: 0, count: fftSize)
 
         // Apply Hann window
@@ -350,28 +391,47 @@ class AudioService: NSObject, ObservableObject {
             }
         }
 
-        // Map to 30 amplitude bands for visualizer
+        // Log-spaced frequency bands: 60Hz–16kHz spread across 30 bars
         let bandCount = 30
         var bands = [Float](repeating: 0, count: bandCount)
-        let binsPerBand = magnitudes.count / bandCount
+        let binHz = tapSampleRate / Float(fftSize)
+        let minFreq: Float = 60.0
+        let maxFreq: Float = 16000.0
         for i in 0..<bandCount {
-            let start = i * binsPerBand
-            let end = min(start + binsPerBand, magnitudes.count)
-            bands[i] = magnitudes[start..<end].reduce(0, +) / Float(binsPerBand)
+            let fLow  = minFreq * pow(maxFreq / minFreq, Float(i)     / Float(bandCount))
+            let fHigh = minFreq * pow(maxFreq / minFreq, Float(i + 1) / Float(bandCount))
+            let binLow  = max(1, Int(fLow  / binHz))
+            let binHigh = min(magnitudes.count - 1, Int(fHigh / binHz))
+            guard binLow <= binHigh else { continue }
+            let slice = magnitudes[binLow...binHigh]
+            bands[i] = slice.reduce(0, +) / Float(slice.count)
         }
 
-        // Normalize
+        // Sqrt companding: boosts quieter bins so all bars are visible
+        bands = bands.map { sqrt($0) }
+
+        // Normalize to 0–1
         let maxVal = bands.max() ?? 1.0
         let normalized = maxVal > 0.001 ? bands.map { $0 / maxVal } : [Float](repeating: 0, count: bandCount)
 
-        // 3 frequency bands for Groove Engine (D-07)
-        let lowBand = normalized[0..<5].reduce(0, +) / 5.0
-        let midBand = normalized[5..<15].reduce(0, +) / 10.0
-        let highBand = normalized[15..<30].reduce(0, +) / 15.0
+        // Exponential smoothing: fast attack (0.35), slow decay (0.08)
+        for i in 0..<bandCount {
+            let target = normalized[i]
+            let prev = smoothedAmplitudes[i]
+            smoothedAmplitudes[i] = target > prev
+                ? prev + 0.35 * (target - prev)
+                : prev + 0.08 * (target - prev)
+        }
+        let smoothed = smoothedAmplitudes
+
+        // 3 frequency bands for Groove Engine
+        let lowBand = smoothed[0..<5].reduce(0, +) / 5.0
+        let midBand = smoothed[5..<15].reduce(0, +) / 10.0
+        let highBand = smoothed[15..<30].reduce(0, +) / 15.0
 
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            self.amplitudes = normalized
+            self.amplitudes = smoothed
             self.frequencyBands = FrequencyBands(low: lowBand, mid: midBand, high: highBand)
         }
     }

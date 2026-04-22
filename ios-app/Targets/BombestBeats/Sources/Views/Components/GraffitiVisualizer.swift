@@ -22,21 +22,25 @@ struct GraffitiVisualizer: View {
                 for i in 0..<barCount {
                     let x = CGFloat(i) * barWidth + barWidth / 2
 
+                    // Mirror: low freqs in center, highs fan out to both edges
+                    let half = barCount / 2
+                    let ampIndex = i < half ? (half - 1 - i) : (i - half)
+
                     // If we have real data, use it; otherwise animate smoothly
-                    let realAmp = i < amplitudes.count ? amplitudes[i] : 0
+                    let realAmp = ampIndex < amplitudes.count ? amplitudes[ampIndex] : 0
                     let hasRealData = amplitudes.contains { $0 > 0.01 }
 
                     let amp: CGFloat
                     if hasRealData {
                         amp = CGFloat(realAmp)
                     } else if isPlaying {
-                        // Smooth pseudo-random animation when playing but no FFT data
-                        let freq1 = 0.8 + Double(i) * 0.15
-                        let freq2 = 1.3 + Double(i) * 0.07
-                        let wave = sin(t * freq1 + Double(i) * 0.4) * 0.4
-                              + sin(t * freq2 + Double(i) * 0.9) * 0.3
-                        // Shape: higher in mids
-                        let midBoost = 1.0 - abs(Double(i) - Double(barCount) * 0.45) / Double(barCount) * 0.8
+                        // Smooth pseudo-random animation — symmetric about center
+                        let freq1 = 0.8 + Double(ampIndex) * 0.15
+                        let freq2 = 1.3 + Double(ampIndex) * 0.07
+                        let wave = sin(t * freq1 + Double(ampIndex) * 0.4) * 0.4
+                              + sin(t * freq2 + Double(ampIndex) * 0.9) * 0.3
+                        // Shape: higher in center (low freqs), lower at edges (high freqs)
+                        let midBoost = 1.0 - Double(ampIndex) / Double(half) * 0.5
                         amp = CGFloat(max(0, (wave + 0.5) * midBoost * 0.85))
                     } else {
                         amp = 0
