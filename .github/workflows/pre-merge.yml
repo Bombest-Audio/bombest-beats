@@ -159,6 +159,11 @@ jobs:
           gradle-version: wrapper
           cache-read-only: false
 
+      - name: Pre-build debug and test APKs
+        run: |
+          cd android-app
+          ./gradlew assembleDebug assembleDebugAndroidTest --no-daemon
+
       - name: Run E2E tests
         uses: reactivecircus/android-emulator-runner@v2
         with:
