@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Executing Phase 08
-last_updated: "2026-04-22T06:02:54.720Z"
+last_updated: "2026-04-22T06:05:41.283Z"
 progress:
   total_phases: 8
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 9
-  completed_plans: 6
-  percent: 67
+  completed_plans: 7
+  percent: 78
 ---
 
 # Project State: Bombest Beats
@@ -38,7 +38,7 @@ Plan: 1 of 5
 **Milestone:** Play Store Release
 **Phase:** 3 (Play Store Listing)
 **Plan:** —
-**Progress:** [███████░░░] 67%
+**Progress:** [████████░░] 78%
 
 ## Decisions
 
@@ -51,6 +51,7 @@ Plan: 1 of 5
 - [Phase 08]: LoadState enum defined in Models.swift; APIService uses plain class mutation not actor isolation
 - [Phase 08-03]: @ObservedObject in TrackRow (not isFavorited() call) so heart icon re-renders reactively; heart button .buttonStyle(.plain) prevents tap propagation to row action
 - [Phase 08-04]: SprayPaintProgress moved out of artwork ZStack overlay into A-B HStack row — circular scrubber no longer overlays artwork, matching D-04 parity layout
+- [Phase 08]: CarPlay: Playlists-first browse tree (D-15), entitlement declared now for future App Store submission (D-14), .task modifier for AudioService wiring
 
 ## Notes
 

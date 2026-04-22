@@ -150,14 +150,14 @@ Plans:
 **Goal:** Close all 7 functional gaps between iOS and Android: A-B loop, Haptic Groove Engine, real audio analysis for visualizers, CarPlay, favorites, Cloudflare→EC2 failover, and error recovery states.
 **Requirements**: IOS-AB-LOOP, IOS-HAPTIC-GROOVE, IOS-AUDIO-ANALYSIS, IOS-CARPLAY, IOS-FAVORITES, IOS-FAILOVER, IOS-ERROR-RECOVERY
 **Depends on:** Phase 7
-**Plans:** 4/5 plans executed
+**Plans:** 5/5 plans complete
 
 Plans:
 - [x] 08-01-PLAN.md — AVAudioEngine FFT pipeline + A-B loop state + Haptic Groove Engine (Wave 1)
 - [x] 08-02-PLAN.md — APIService Cloudflare→EC2 failover + LoadState error recovery for all data screens (Wave 1)
 - [x] 08-03-PLAN.md — FavoritesManager + TrackRow heart toggle + LibraryView indicator (Wave 1)
 - [x] 08-04-PLAN.md — A-B loop UI in PlayerView + real visualizer wiring (Wave 2, depends 08-01)
-- [ ] 08-05-PLAN.md — CarPlay MPPlayableContentManager + entitlement + BombestApp wiring (Wave 3, depends 08-01, 08-02)
+- [x] 08-05-PLAN.md — CarPlay MPPlayableContentManager + entitlement + BombestApp wiring (Wave 3, depends 08-01, 08-02)
 
 ---
 
