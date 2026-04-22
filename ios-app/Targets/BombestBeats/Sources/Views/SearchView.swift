@@ -3,25 +3,43 @@ import SwiftUI
 struct SearchView: View {
     @StateObject private var viewModel = SearchViewModel()
     @EnvironmentObject var audioService: AudioService
-    
+
     var body: some View {
         NavigationStack {
             VStack {
-                if viewModel.isLoading {
+                if case .loading = viewModel.loadState {
                     ProgressView()
                         .tint(Color("NeonPurple"))
                         .scaleEffect(1.2)
                         .padding()
                 }
-                
+                if case .failed(let message) = viewModel.loadState {
+                    VStack(spacing: 12) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(.largeTitle).foregroundColor(.orange)
+                        Text(message)
+                            .foregroundColor(.gray)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal)
+                        Button("Retry") { viewModel.retry() }
+                            .buttonStyle(.borderedProminent)
+                            .tint(Color("NeonPurple"))
+                    }.padding()
+                }
+
                 if viewModel.searchText.isEmpty {
                     ContentUnavailableView(
                         "Search Music",
                         systemImage: "magnifyingglass",
                         description: Text("Find your favorite tracks, artists, and albums.")
                     )
-                } else if viewModel.results.isEmpty && !viewModel.isLoading {
-                    ContentUnavailableView.search(text: viewModel.searchText)
+                } else if viewModel.results.isEmpty {
+                    // Only show "no results" when not loading
+                    if case .loading = viewModel.loadState {
+                        EmptyView()
+                    } else {
+                        ContentUnavailableView.search(text: viewModel.searchText)
+                    }
                 } else {
                     List {
                         ForEach(viewModel.results) { track in
