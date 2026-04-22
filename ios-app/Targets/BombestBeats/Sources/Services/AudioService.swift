@@ -302,10 +302,10 @@ class AudioService: NSObject, ObservableObject {
         let log2n = vDSP_Length(log2(Float(fftSize)))
         fftSetup = vDSP_create_fftsetup(log2n, FFTRadix(FFT_RADIX2))
 
-        let outputNode = audioEngine.outputNode
-        let format = outputNode.inputFormat(forBus: 0)
+        let outputNode = audioEngine.mainMixerNode
+        let format = outputNode.outputFormat(forBus: 0)
 
-        audioEngine.outputNode.installTap(
+        audioEngine.mainMixerNode.installTap(
             onBus: 0,
             bufferSize: AVAudioFrameCount(fftSize),
             format: format
