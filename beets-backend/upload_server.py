@@ -2409,27 +2409,28 @@ def passkey_register_verify():
             expected_rp_id=rp_id,
             expected_origin=origins,
         )
-        
-        # Store the credential
+
+        credential_id_b64 = bytes_to_base64url(verification.credential_id)
+
+        # Store the credential; ignore if a concurrent request already inserted it.
         conn = sqlite3.connect(USERS_DB)
         cursor = conn.cursor()
         cursor.execute('''
-            INSERT INTO passkey_credentials (user_id, credential_id, public_key, sign_count)
+            INSERT OR IGNORE INTO passkey_credentials (user_id, credential_id, public_key, sign_count)
             VALUES (?, ?, ?, ?)
         ''', (
             current_user_id,
-            bytes_to_base64url(verification.credential_id),
+            credential_id_b64,
             bytes_to_base64url(verification.credential_public_key),
             verification.sign_count,
         ))
         conn.commit()
         conn.close()
-        
-        # Clean up challenge
-        _passkey_challenge_pop(current_user_id)
 
+        _passkey_challenge_pop(current_user_id)
         return jsonify({'success': True, 'message': 'Passkey registered successfully'})
     except Exception as e:
+        logging.exception("passkey_register_verify failed for user %s", current_user_id)
         _passkey_challenge_pop(current_user_id)
         err_msg = str(e)
         if 'already registered' in err_msg.lower() or 'credentials already' in err_msg.lower():
