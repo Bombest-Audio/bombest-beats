@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: unknown
-last_updated: "2026-04-16T07:15:55.805Z"
+status: Executing Phase 08
+last_updated: "2026-04-22T05:48:31.687Z"
 progress:
-  total_phases: 7
+  total_phases: 8
   completed_phases: 1
-  total_plans: 4
-  completed_plans: 2
-  percent: 50
+  total_plans: 9
+  completed_plans: 3
+  percent: 33
 ---
 
 # Project State: Bombest Beats
@@ -19,7 +19,7 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-03-30)
 
 **Core value:** Android app available on public Play Store — installable, signed, working on Pixel
-**Current focus:** Phase 07 — android-espresso-e2e-test-suite-with-ci-integration
+**Current focus:** Phase 08 — get-the-ios-version-up-to-parity-with-android
 
 ## Phase Status
 
@@ -33,12 +33,12 @@ See: `.planning/PROJECT.md` (updated 2026-03-30)
 
 ## Current Position
 
-Phase: 07 (android-espresso-e2e-test-suite-with-ci-integration) — EXECUTING
-Plan: 1 of 2
+Phase: 08 (get-the-ios-version-up-to-parity-with-android) — EXECUTING
+Plan: 1 of 5
 **Milestone:** Play Store Release
 **Phase:** 3 (Play Store Listing)
 **Plan:** —
-**Progress:** [█████░░░░░] 50%
+**Progress:** [███░░░░░░░] 33%
 
 ## Decisions
 
@@ -46,6 +46,8 @@ Plan: 1 of 2
 - Switched screenshot capture from `verses_pixel` emulator to real Pixel 9 (serial `47070DLAQ0014L`) after emulator clock drift caused SSL handshake failures against `beats.bom.best`.
 - [Phase 07]: Used x86_64 arch for Android emulator on ubuntu-latest — GitHub free runners only support KVM on x86_64, not arm64
 - [Phase 07]: Guard step validates CI secrets before Gradle invocation — prevents silent assumeTrue skips returning green with 0 tests
+- [Phase 08-01]: FFT tap on AVAudioEngine.outputNode captures AVQueuePlayer audio; fallback to mainMixerNode if silent on real device
+- [Phase 08-01]: FrequencyBands not Codable — pure computed value type, 30-band visualizer + 3-band haptic from same FFT pass
 
 ## Notes
 
