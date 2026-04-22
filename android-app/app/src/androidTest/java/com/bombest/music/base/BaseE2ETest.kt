@@ -42,10 +42,16 @@ abstract class BaseE2ETest {
         // Clear stored auth token so LoginActivity always shows the login form
         runBlocking { ctx.authDataStore.edit { it.clear() } }
 
-        // Go to home screen then relaunch via am start (guarantees foreground on Android 16)
+        // Go to home screen then relaunch LoginActivity with a clear task.
+        // --activity-new-task --activity-clear-task: removes any existing activities from the
+        // back stack (e.g. MainActivity left over from a previous test), releases the old
+        // ViewModel and MediaService binding, and starts LoginActivity fresh. This is the
+        // safe alternative to am force-stop (which would also kill the instrumentation process).
         device.pressHome()
         device.waitForIdle()
-        device.executeShellCommand("am start -n $pkg/.LoginActivity")
+        device.executeShellCommand(
+            "am start --activity-new-task --activity-clear-task -n $pkg/.LoginActivity"
+        )
 
         // Dismiss Android 16 "16KB page size" compatibility warning dialog if it appears
         val compatWarning: UiObject2? = device.wait(Until.findObject(By.text("Android App Compatibility")), 4_000)
@@ -54,8 +60,9 @@ abstract class BaseE2ETest {
             device.waitForIdle()
         }
 
-        // Wait for our package to be visible in the foreground
-        device.wait(Until.hasObject(By.pkg(pkg)), 10_000)
+        // Wait for our package to be visible in the foreground. LoginActivity can take 6-10s
+        // to first-render on a cold API 29 swiftshader emulator; 30s gives plenty of headroom.
+        device.wait(Until.hasObject(By.pkg(pkg)), 30_000)
     }
 
     // ---------------------------------------------------------------------------
