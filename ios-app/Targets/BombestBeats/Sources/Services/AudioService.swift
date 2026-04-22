@@ -2,7 +2,6 @@ import Foundation
 import AVFoundation
 import MediaPlayer
 import MediaToolbox
-import Combine
 import Accelerate
 
 class AudioService: NSObject, ObservableObject {
@@ -32,14 +31,24 @@ class AudioService: NSObject, ObservableObject {
 
     private let player = AVQueuePlayer()
     private var timeObserver: Any?
-    private var cancellables = Set<AnyCancellable>()
 
-    // AVAudioEngine is unused — FFT runs via MTAudioProcessingTap on AVPlayerItem
+    // FFT runs via MTAudioProcessingTap on AVPlayerItem (not AVAudioEngine)
     private var fftSetup: FFTSetup?
     private let fftSize = 1024
     private var tapSampleRate: Float = 44100.0
     private var currentTap: MTAudioProcessingTap?
     private var smoothedAmplitudes = [Float](repeating: 0, count: 30)
+    // Pre-allocated scratch buffers — avoid per-callback heap allocs on the audio thread
+    private lazy var hannWindow: [Float] = {
+        var w = [Float](repeating: 0, count: fftSize)
+        vDSP_hann_window(&w, vDSP_Length(fftSize), Int32(vDSP_HANN_NORM))
+        return w
+    }()
+    private lazy var fftScratch: (windowed: [Float], imag: [Float], mag: [Float]) = (
+        windowed: [Float](repeating: 0, count: fftSize),
+        imag:     [Float](repeating: 0, count: fftSize),
+        mag:      [Float](repeating: 0, count: fftSize / 2)
+    )
     private var loopEnforcementObserver: Any?
     
     // MARK: - API
@@ -316,7 +325,14 @@ class AudioService: NSObject, ObservableObject {
             prepare: { tap, maxFrames, processingFormat in
                 let storage = MTAudioProcessingTapGetStorage(tap)
                 let service = Unmanaged<AudioService>.fromOpaque(storage).takeUnretainedValue()
-                service.tapSampleRate = Float(processingFormat.pointee.mSampleRate)
+                let fmt = processingFormat.pointee
+                service.tapSampleRate = Float(fmt.mSampleRate)
+                // Guard: only Float32 non-interleaved is safe to read directly
+                let isFloat32 = fmt.mFormatFlags & kAudioFormatFlagIsFloat != 0
+                let isNonInterleaved = fmt.mFormatFlags & kAudioFormatFlagIsNonInterleaved != 0
+                if !isFloat32 || !isNonInterleaved {
+                    print("[Audio] Tap format is not Float32 non-interleaved — FFT disabled for this asset")
+                }
             },
             unprepare: nil,
             process: { tap, numberFrames, _, bufferList, numberFramesOut, _ in
@@ -366,20 +382,11 @@ class AudioService: NSObject, ObservableObject {
     }
 
     private func processFFT(_ realPartsIn: inout [Float], setup: FFTSetup) {
-        var realParts = realPartsIn
+        // Use pre-allocated scratch buffers — no heap alloc on the audio thread
+        vDSP_vmul(&realPartsIn, 1, &hannWindow, 1, &fftScratch.windowed, 1, vDSP_Length(fftSize))
 
-        var magnitudes = [Float](repeating: 0, count: fftSize / 2)
-        var imagParts = [Float](repeating: 0, count: fftSize)
-
-        // Apply Hann window
-        var window = [Float](repeating: 0, count: fftSize)
-        vDSP_hann_window(&window, vDSP_Length(fftSize), Int32(vDSP_HANN_NORM))
-        var windowedParts = [Float](repeating: 0, count: fftSize)
-        vDSP_vmul(&realParts, 1, window, 1, &windowedParts, 1, vDSP_Length(fftSize))
-        realParts = windowedParts
-
-        realParts.withUnsafeMutableBufferPointer { realBuf in
-            imagParts.withUnsafeMutableBufferPointer { imagBuf in
+        fftScratch.windowed.withUnsafeMutableBufferPointer { realBuf in
+            fftScratch.imag.withUnsafeMutableBufferPointer { imagBuf in
                 var splitComplex = DSPSplitComplex(realp: realBuf.baseAddress!, imagp: imagBuf.baseAddress!)
                 let log2n = vDSP_Length(log2(Float(fftSize)))
                 vDSP_ctoz(
@@ -387,7 +394,7 @@ class AudioService: NSObject, ObservableObject {
                     2, &splitComplex, 1, vDSP_Length(fftSize / 2)
                 )
                 vDSP_fft_zrip(setup, &splitComplex, 1, log2n, FFTDirection(FFT_FORWARD))
-                vDSP_zvmags(&splitComplex, 1, &magnitudes, 1, vDSP_Length(fftSize / 2))
+                vDSP_zvmags(&splitComplex, 1, &fftScratch.mag, 1, vDSP_Length(fftSize / 2))
             }
         }
 
@@ -401,9 +408,9 @@ class AudioService: NSObject, ObservableObject {
             let fLow  = minFreq * pow(maxFreq / minFreq, Float(i)     / Float(bandCount))
             let fHigh = minFreq * pow(maxFreq / minFreq, Float(i + 1) / Float(bandCount))
             let binLow  = max(1, Int(fLow  / binHz))
-            let binHigh = min(magnitudes.count - 1, Int(fHigh / binHz))
+            let binHigh = min(fftScratch.mag.count - 1, Int(fHigh / binHz))
             guard binLow <= binHigh else { continue }
-            let slice = magnitudes[binLow...binHigh]
+            let slice = fftScratch.mag[binLow...binHigh]
             bands[i] = slice.reduce(0, +) / Float(slice.count)
         }
 
