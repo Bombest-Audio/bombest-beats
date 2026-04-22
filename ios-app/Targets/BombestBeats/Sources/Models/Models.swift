@@ -24,7 +24,7 @@ struct Track: Codable, Identifiable {
     let title: String?
     let artist: String?
     let album: String?
-    let length: Double
+    let length: Double?
     let path: String?
     let album_id: Int? // JSON snake_case
     var bpm: Float = 0 // defaults to 0 when absent from JSON — prevents crashes on old library_cache.json
