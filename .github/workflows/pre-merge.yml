@@ -177,7 +177,7 @@ jobs:
 
       - name: Capture logcat
         if: failure()
-        run: adb logcat -d > logcat.txt
+        run: timeout 30 adb logcat -d > logcat.txt || true
 
       - name: Upload test artifacts
         if: failure()
