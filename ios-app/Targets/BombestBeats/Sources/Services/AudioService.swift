@@ -333,7 +333,9 @@ class AudioService: NSObject, ObservableObject {
         // Apply Hann window
         var window = [Float](repeating: 0, count: fftSize)
         vDSP_hann_window(&window, vDSP_Length(fftSize), Int32(vDSP_HANN_NORM))
-        vDSP_vmul(&realParts, 1, window, 1, &realParts, 1, vDSP_Length(fftSize))
+        var windowedParts = [Float](repeating: 0, count: fftSize)
+        vDSP_vmul(&realParts, 1, window, 1, &windowedParts, 1, vDSP_Length(fftSize))
+        realParts = windowedParts
 
         realParts.withUnsafeMutableBufferPointer { realBuf in
             imagParts.withUnsafeMutableBufferPointer { imagBuf in
