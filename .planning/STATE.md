@@ -57,6 +57,7 @@ Plan: 1 of 2
 
 - Phase 5 added: E2E UI Tests — page objects, method chaining, AAA pattern, P0 regression flows
 - Phase 7 added: Android Espresso E2E Test Suite with CI Integration — pre-merge gate on main, emoji-triggered on-demand runs via PR comments
+- Phase 8 added: get the iOS version up to parity with android
 
 ## Blockers
 
