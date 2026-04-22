@@ -20,7 +20,7 @@ struct PlayerView: View {
             )
             .ignoresSafeArea()
 
-            VStack(spacing: 32) {
+            VStack(spacing: 0) {
                 // Header
                 HStack {
                     Button(action: {
@@ -40,55 +40,50 @@ struct PlayerView: View {
                         .padding()
                 }
 
-                Spacer()
-
-                // 2. Artwork & Progress
-                ZStack {
-                    // Artwork
-                    let artURL: URL? = {
-                        if let track = audioService.currentTrack {
-                            if let albumId = track.album_id {
-                                return URL(string: "https://bom.best/beats/api/album/\(albumId)/art")
-                            } else {
-                                return URL(string: "https://bom.best/beats/api/track/\(track.id)/art")
-                            }
+                // 2. Artwork
+                let artURL: URL? = {
+                    if let track = audioService.currentTrack {
+                        if let albumId = track.album_id {
+                            return URL(string: "https://bom.best/beats/api/album/\(albumId)/art")
+                        } else {
+                            return URL(string: "https://bom.best/beats/api/track/\(track.id)/art")
                         }
-                        return nil
-                    }()
+                    }
+                    return nil
+                }()
 
-                    CachedImage(
-                        url: artURL,
-                        placeholder: "music.note"
-                    )
-                    .frame(width: 280, height: 280)
-                    .cornerRadius(140) // Circle
+                CachedImage(url: artURL, placeholder: "music.note")
+                    .frame(width: 200, height: 200)
+                    .cornerRadius(100)
                     .clipped()
-                }
-
-                Spacer()
+                    .padding(.top, 8)
 
                 // 3. Visualizer
                 if isVisualizerEnabled {
                     GraffitiVisualizer(amplitudes: audioService.amplitudes)
-                        .frame(height: 120)
+                        .frame(height: 48)
                         .opacity(0.8)
+                        .padding(.top, 12)
                 } else {
-                     Spacer().frame(height: 120)
+                    Spacer().frame(height: 48 + 12)
                 }
 
                 // 4. Metadata
-                VStack(spacing: 8) {
+                VStack(spacing: 4) {
                     Text(audioService.currentTrack?.displayTitle ?? "Not Playing")
                         .font(.title2)
                         .fontWeight(.bold)
                         .foregroundColor(.white)
+                        .lineLimit(1)
 
                     Text(audioService.currentTrack?.displayArtist ?? "Unknown Artist")
-                        .font(.title3)
+                        .font(.subheadline)
                         .foregroundColor(.gray)
+                        .lineLimit(1)
                 }
+                .padding(.top, 12)
 
-                // Loop active indicator (shown only when both A and B are set)
+                // Loop active indicator
                 if audioService.loopStartTime != nil && audioService.loopEndTime != nil {
                     HStack(spacing: 4) {
                         Image(systemName: "repeat")
@@ -103,20 +98,18 @@ struct PlayerView: View {
                         .font(.caption)
                         .foregroundColor(.gray)
                     }
-                    .padding(.horizontal)
+                    .padding(.top, 6)
                 }
 
-                // A-B Loop Controls + Scrubber (per D-04: A/B buttons flanking the scrubber)
+                // A-B Loop Controls + Scrubber
                 HStack(spacing: 12) {
                     // A button
                     Button(action: {
                         if audioService.loopStartTime != nil && audioService.loopEndTime != nil {
-                            // Both set — tapping A clears the loop
                             audioService.deactivateLoop()
                         } else {
                             let bpm = audioService.currentTrack?.bpm ?? 0
                             audioService.loopStartTime = audioService.snapToBeat(audioService.currentTime, bpm: bpm)
-                            // If both A and B are now set, activate
                             if audioService.loopEndTime != nil { audioService.activateLoop() }
                         }
                     }) {
@@ -132,7 +125,6 @@ struct PlayerView: View {
                     .buttonStyle(.plain)
                     .frame(width: 36)
 
-                    // Scrubber (unchanged SprayPaintProgress)
                     SprayPaintProgress(
                         progress: Binding(
                             get: {
@@ -144,7 +136,7 @@ struct PlayerView: View {
                                 audioService.seek(to: time)
                             }
                         ),
-                        size: 300,
+                        size: 240,
                         onEditingChanged: { editing in
                             isScrubbing = editing
                             if editing {
@@ -159,12 +151,10 @@ struct PlayerView: View {
                     // B button
                     Button(action: {
                         if audioService.loopStartTime != nil && audioService.loopEndTime != nil {
-                            // Both set — tapping B clears the loop
                             audioService.deactivateLoop()
                         } else {
                             let bpm = audioService.currentTrack?.bpm ?? 0
                             let snapTime = audioService.snapToBeat(audioService.currentTime, bpm: bpm)
-                            // B must be after A
                             if let start = audioService.loopStartTime, snapTime > start {
                                 audioService.loopEndTime = snapTime
                                 audioService.activateLoop()
@@ -183,6 +173,7 @@ struct PlayerView: View {
                     .buttonStyle(.plain)
                     .frame(width: 36)
                 }
+                .padding(.top, 8)
 
                 // 5. Controls
                 HStack(spacing: 30) {
@@ -232,7 +223,10 @@ struct PlayerView: View {
                             .foregroundColor(audioService.repeatMode != .off ? Color("NeonPurple") : .gray)
                     }
                 }
+                .padding(.top, 12)
+                .padding(.bottom, 32)
             }
+            .padding(.horizontal, 24)
         }
         .gesture(
             DragGesture()
