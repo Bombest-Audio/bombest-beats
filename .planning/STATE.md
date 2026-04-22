@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: Executing Phase 08
-last_updated: "2026-04-22T06:05:41.283Z"
+status: Executing Phase 09
+last_updated: "2026-04-22T17:31:11.258Z"
 progress:
-  total_phases: 8
+  total_phases: 9
   completed_phases: 2
-  total_plans: 9
-  completed_plans: 7
-  percent: 78
+  total_plans: 11
+  completed_plans: 8
+  percent: 73
 ---
 
 # Project State: Bombest Beats
@@ -19,7 +19,7 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-03-30)
 
 **Core value:** Android app available on public Play Store — installable, signed, working on Pixel
-**Current focus:** Phase 08 — get-the-ios-version-up-to-parity-with-android
+**Current focus:** Phase 09 — android-espresso-tests-in-ci
 
 ## Phase Status
 
@@ -33,12 +33,12 @@ See: `.planning/PROJECT.md` (updated 2026-03-30)
 
 ## Current Position
 
-Phase: 08 (get-the-ios-version-up-to-parity-with-android) — EXECUTING
-Plan: 1 of 5
+Phase: 09 (android-espresso-tests-in-ci) — EXECUTING
+Plan: 1 of 2
 **Milestone:** Play Store Release
 **Phase:** 3 (Play Store Listing)
 **Plan:** —
-**Progress:** [████████░░] 78%
+**Progress:** [███████░░░] 73%
 
 ## Decisions
 
@@ -52,6 +52,8 @@ Plan: 1 of 5
 - [Phase 08-03]: @ObservedObject in TrackRow (not isFavorited() call) so heart icon re-renders reactively; heart button .buttonStyle(.plain) prevents tap propagation to row action
 - [Phase 08-04]: SprayPaintProgress moved out of artwork ZStack overlay into A-B HStack row — circular scrubber no longer overlays artwork, matching D-04 parity layout
 - [Phase 08]: CarPlay: Playlists-first browse tree (D-15), entitlement declared now for future App Store submission (D-14), .task modifier for AudioService wiring
+- [Phase 09]: KVM udev permissions step is required before android-emulator-runner — missing step was root cause of all 10 CI failures on PR #36
+- [Phase 09]: assumeTrue(false)/return is a silent skip anti-pattern in CI — replaced with throw AssertionError so bind failures produce visible hard failures
 
 ## Notes
 
