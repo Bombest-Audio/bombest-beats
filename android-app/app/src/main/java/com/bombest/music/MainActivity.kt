@@ -16,6 +16,7 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -29,6 +30,9 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -43,6 +47,7 @@ import com.bombest.music.ui.screens.*
 import com.bombest.music.ui.theme.BombestBeatsTheme
 import com.bombest.music.ui.viewmodel.MainViewModel
 import com.bombest.music.ui.viewmodel.PlaylistViewModel
+import com.bombest.music.utils.BugReportManager
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.rememberCoroutineScope
@@ -110,14 +115,11 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
-        // Initialize PasskeyManager
         val authRepository = AuthRepository(this, NetworkModule.authApi)
         passkeyManager = PasskeyManager(this, authRepository)
         
-        // Initialize DownloadManager
         mainViewModel.initDownloadManager(this)
         
-        // Initialize Haptic Groove Engine
         HapticGrooveEngine.initialize(this)
         
         WindowCompat.setDecorFitsSystemWindows(window, false)
@@ -193,9 +195,14 @@ fun MainContent(
     var isMenuOpen by remember { mutableStateOf(false) }
     var currentScreen by remember { mutableStateOf(Screen.LIBRARY) }
     var selectedPlaylistId by remember { mutableStateOf<Int?>(null) }
-    val context = androidx.compose.ui.platform.LocalContext.current
+    val context = LocalContext.current
+    val view = LocalView.current
     val scope = rememberCoroutineScope()
     val downloadManager = remember { DownloadManager.getInstance(context) }
+
+    var showBugReportConfirm by remember { mutableStateOf(false) }
+    var isBugReportRunning by remember { mutableStateOf(false) }
+    var bugReportResult by remember { mutableStateOf<BugReportManager.Result?>(null) }
     
     val playlistViewModel: PlaylistViewModel = viewModel()
 
@@ -223,7 +230,15 @@ fun MainContent(
                 Scaffold(
                     topBar = {
                         TopAppBar(
-                            title = { Text("bombest beats", fontWeight = FontWeight.Bold) },
+                            title = {
+                                Text(
+                                    "bombest beats",
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.pointerInput(Unit) {
+                                        detectTapGestures(onLongPress = { showBugReportConfirm = true })
+                                    }
+                                )
+                            },
                             navigationIcon = {
                                 IconButton(onClick = { 
                                     if (viewModel.canNavigateUp.value) {
@@ -252,14 +267,11 @@ fun MainContent(
                             currentMediaItem = viewModel.currentMediaItem.value,
                             onTrackClick = { item ->
                                 if (item.mediaId == "playlists") {
-                                    // Switch to Playlists screen for rich UI
                                     playlistViewModel.loadPlaylists()
                                     currentScreen = Screen.PLAYLISTS
                                 } else if (item.mediaMetadata.isBrowsable == true) {
-                                    // Browse folder
                                     viewModel.browseId(item.mediaId)
                                 } else {
-                                    // Play track
                                     viewModel.playMedia(item)
                                 }
                             },
@@ -271,7 +283,6 @@ fun MainContent(
                             onDismissError = { viewModel.playbackError.value = null }
                         )
                         
-                        // Handle back button for library navigation
                         BackHandler(enabled = viewModel.canNavigateUp.value) {
                             viewModel.navigateUp()
                         }
@@ -458,7 +469,6 @@ fun MainContent(
             modifier = Modifier.fillMaxSize()
         ) {
             viewModel.currentMediaItem.value?.let { mediaItem ->
-                // Observe FavoritesManager state reactively
                 val favoriteTrackIds by FavoritesManager.favoritedTrackIds.collectAsState()
                 val trackId = mediaItem.mediaId.toIntOrNull()
                 val isFavorite = trackId?.let { favoriteTrackIds.contains(it) } ?: viewModel.favorites.value.contains(mediaItem.mediaId)
@@ -501,7 +511,6 @@ fun MainContent(
             }
         }
         
-        // Global Mini Player - appears on all screens except fullscreen player
         if (!isPlayerOpen && viewModel.currentMediaItem.value != null) {
             Box(
                 modifier = Modifier
@@ -522,7 +531,103 @@ fun MainContent(
                 )
             }
         }
+
+        // Bug report dialogs
+        if (showBugReportConfirm) {
+            BugReportConfirmDialog(
+                onConfirm = {
+                    showBugReportConfirm = false
+                    isBugReportRunning = true
+                    scope.launch {
+                        bugReportResult = BugReportManager.generate(context, view)
+                        isBugReportRunning = false
+                    }
+                },
+                onDismiss = { showBugReportConfirm = false }
+            )
+        }
+
+        if (isBugReportRunning) {
+            BugReportProgressDialog()
+        }
+
+        bugReportResult?.let { result ->
+            BugReportResultDialog(
+                result = result,
+                onOpenIssue = { url ->
+                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                },
+                onDismiss = { bugReportResult = null }
+            )
+        }
     }
+}
+
+@Composable
+fun BugReportConfirmDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Generate Bug Report?") },
+        text = { Text("Collects the last 500 lines of app logs and takes a screenshot, then files a GitHub issue.") },
+        confirmButton = { TextButton(onClick = onConfirm) { Text("Generate") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+    )
+}
+
+@Composable
+fun BugReportProgressDialog() {
+    AlertDialog(
+        onDismissRequest = {},
+        title = { Text("Generating Report…") },
+        text = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                Text("Collecting logs and taking screenshot…")
+            }
+        },
+        confirmButton = {}
+    )
+}
+
+@Composable
+fun BugReportResultDialog(
+    result: BugReportManager.Result,
+    onOpenIssue: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (result.issueUrl != null) "Bug Report Filed" else "Report Saved Locally") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (result.issueUrl != null) {
+                    Text("GitHub issue created successfully.")
+                } else {
+                    Text("No GitHub token configured — logs saved locally only.")
+                }
+                result.screenshotFile?.let {
+                    Text(
+                        "Screenshot: ${it.name}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            if (result.issueUrl != null) {
+                TextButton(onClick = { onOpenIssue(result.issueUrl) }) { Text("Open Issue") }
+            } else {
+                TextButton(onClick = onDismiss) { Text("OK") }
+            }
+        },
+        dismissButton = if (result.issueUrl != null) {
+            { TextButton(onClick = onDismiss) { Text("Dismiss") } }
+        } else null
+    )
 }
 
 @Composable
