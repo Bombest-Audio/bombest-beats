@@ -3914,7 +3914,7 @@ def get_track_art(track_id):
                 logger.warning("Artwork extraction error: %s", extract_error)
 
         # Return default artwork
-        default_art = os.path.join(os.path.dirname(__file__), 'static', 'no-image.png')
+        default_art = os.path.join(os.path.dirname(__file__), 'static', 'no-image.jpg')
         if os.path.exists(default_art):
             return send_file(default_art)
         
