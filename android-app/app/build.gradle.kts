@@ -30,6 +30,7 @@ android {
 
         buildConfigField("String", "TEST_USERNAME", "\"${localProps.getProperty("test.username", "")}\"")
         buildConfigField("String", "TEST_PASSWORD", "\"${localProps.getProperty("test.password", "")}\"")
+        buildConfigField("String", "GITHUB_BUG_REPORT_TOKEN", "\"${localProps.getProperty("github.bug.report.token", "")}\"")
     }
 
     signingConfigs {
