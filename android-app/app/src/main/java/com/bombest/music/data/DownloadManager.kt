@@ -13,6 +13,7 @@ import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
 import androidx.media3.common.util.BitmapLoader
 import androidx.media3.datasource.DataSourceBitmapLoader
+import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.session.CacheBitmapLoader
 import com.google.common.util.concurrent.MoreExecutors
@@ -94,10 +95,13 @@ class DownloadManager private constructor(private val context: Context) {
     
     // Data source factory for cached streaming with auth
     val cacheDataSourceFactory: CacheDataSource.Factory by lazy {
-        val upstreamFactory = OkHttpDataSource.Factory(okHttpClient)
+        // OkHttp handles http(s)://; DefaultDataSource wraps it to also handle
+        // file:// URIs for locally-downloaded tracks via FileDataSource.
+        val httpFactory = OkHttpDataSource.Factory(okHttpClient)
             .setDefaultRequestProperties(mapOf(
                 "User-Agent" to "BombestBeats-Android"
             ))
+        val upstreamFactory = DefaultDataSource.Factory(context, httpFactory)
         CacheDataSource.Factory()
             .setCache(cache)
             .setUpstreamDataSourceFactory(upstreamFactory)
