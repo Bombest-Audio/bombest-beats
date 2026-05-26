@@ -14,8 +14,22 @@ KEY_NAME="bombest-beats-key"
 SG_NAME="bombest-beats-sg"
 INSTANCE_TAG="bombest-beats"
 PEM_FILE="${KEY_NAME}.pem"
-# Must match the image you push with deploy-aws.sh (DOCKER_USERNAME/bombest-beats:latest)
-DOCKER_IMAGE="${DOCKER_IMAGE:-tomdabomb2u/bombest-beats:latest}"
+# Match the image you push with deploy-aws.sh by deriving from DOCKER_USERNAME
+# (so DOCKER_USERNAME=other ./setup-ec2-aws-cli.sh stays consistent with
+# DOCKER_USERNAME=other ./deploy-aws.sh). Callers can still set DOCKER_IMAGE
+# explicitly to override.
+DOCKER_IMAGE="${DOCKER_IMAGE:-${DOCKER_USERNAME:-thomasphillips3}/bombest-beats:latest}"
+
+# DOCKER_IMAGE gets substituted into the EC2 user-data script later in this
+# file. If the value came from an attacker-controlled DOCKER_USERNAME and
+# contained shell metacharacters, it could corrupt the user-data or end up
+# executed on the new instance. Allowlist the legal Docker reference
+# grammar before any substitution happens.
+if [[ ! "$DOCKER_IMAGE" =~ ^[a-zA-Z0-9._/:@-]+$ ]]; then
+  echo "Error: DOCKER_IMAGE='$DOCKER_IMAGE' contains unsafe characters." >&2
+  echo "Only alphanumerics and . _ / : @ - allowed." >&2
+  exit 1
+fi
 
 echo "Region: $REGION"
 echo "Key pair: $KEY_NAME"

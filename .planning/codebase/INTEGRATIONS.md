@@ -156,7 +156,7 @@
 - Auto-merge: `rocket emoji` comment triggers merge to main after all tests pass
 
 **Backend Deployment:**
-1. `deploy-aws.sh` - Build `linux/amd64` Docker image, push to Docker Hub (`tomdabomb2u/bombest-beats:latest`)
+1. `deploy-aws.sh` - Build `linux/amd64` Docker image, push to Docker Hub (`thomasphillips3/bombest-beats:latest`)
 2. `deploy-container-to-ec2.sh` - Update EC2 container via AWS SSM
 3. `deploy-nginx-to-ec2.sh` - Deploy nginx config to EC2
 4. Orchestrated by `deploy-to-ec2.sh` (runs all three steps)
@@ -168,7 +168,7 @@
 **Docker:**
 - Image: `python:3.12-slim` base
 - Build steps: Install ffmpeg + build-essential, pip install, copy code, Beets import (`beets-backend/Dockerfile`)
-- Docker Hub: `tomdabomb2u/bombest-beats:latest`
+- Docker Hub: `thomasphillips3/bombest-beats:latest`
 - EC2 runtime: `docker run` with `-v /data/beets:/app/music` volume mount
 
 **No iOS CI/CD** - Builds require Xcode on macOS, managed locally via Tuist.

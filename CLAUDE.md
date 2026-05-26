@@ -100,5 +100,5 @@ Tests: Android `assembleDebug`, backend import check, frontend `npm run build`.
 | S3 music | `bombest-beats-music` (us-west-2) |
 | S3 web | `bombest-beats-web` (us-east-1) |
 | CloudFront | `E1RBYOEP5K0UI3` |
-| Docker image | `tomdabomb2u/bombest-beats:latest` |
+| Docker image | `thomasphillips3/bombest-beats:latest` |
 | EC2 data dir | `/data/beets` (bind-mounted as `/app/music`) |

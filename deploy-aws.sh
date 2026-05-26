@@ -5,7 +5,7 @@
 set -e
 
 # Configuration: must match your Docker Hub login (docker login)
-DOCKER_USERNAME="${DOCKER_USERNAME:-tomdabomb2u}"
+DOCKER_USERNAME="${DOCKER_USERNAME:-thomasphillips3}"
 IMAGE_NAME="bombest-beats"
 
 echo "🚀 Deploying Bombest Beats to AWS..."
