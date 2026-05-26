@@ -30,6 +30,7 @@ import com.bombest.music.data.MetricsManager
 import com.bombest.music.data.PerformanceMetricsManager
 import com.bombest.music.data.api.PerfEventPayload
 import com.bombest.music.data.NetworkModule
+import com.bombest.music.data.PlaybackSessionStore
 import com.bombest.music.data.authDataStore
 import com.bombest.music.data.api.Playlist
 import com.bombest.music.data.api.PlaylistApi
@@ -63,6 +64,7 @@ class BombestMediaService : MediaLibraryService() {
     /** Favorites / "Liked songs" system playlist — used for AA root shortcut. */
     private var favoritesPlaylist: Playlist? = null
     private val recentTracksStore by lazy { AutoRecentTracksStore(this) }
+    private val sessionStore by lazy { PlaybackSessionStore(this) }
     private val repository by lazy { MusicRepository(this) }
     private lateinit var downloadManager: DownloadManager
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -288,11 +290,61 @@ class BombestMediaService : MediaLibraryService() {
                 }
                 // Flush perf events on each track change so data arrives promptly
                 PerformanceMetricsManager.flush()
+                // New queue index → cheap savePosition is enough; the queue list
+                // itself didn't change here so we don't trigger the heavy saveQueue.
+                saveCurrentPosition()
             }
 
             override fun onPlaybackStateChanged(playbackState: Int) {
                 // Optional: handle pause/stop logic tracking if needed using rigorous state
                 // For MVP transition-based logging is usually sufficient for "plays"
+            }
+
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                // Save on every play↔pause edge — a pause is the most likely moment
+                // for the user to background or kill the app.
+                if (!isPlaying) saveCurrentPosition()
+            }
+
+            override fun onPositionDiscontinuity(
+                oldPosition: Player.PositionInfo,
+                newPosition: Player.PositionInfo,
+                reason: Int,
+            ) {
+                // Captures user-initiated seeks; transition-driven discontinuities
+                // are already covered by onMediaItemTransition.
+                if (reason == Player.DISCONTINUITY_REASON_SEEK) saveCurrentPosition()
+            }
+
+            override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
+                // Save the new mode now, but DO NOT touch the queue here.
+                // ExoPlayer can flip shuffleModeEnabled before the corresponding
+                // queue swap completes (see SPECIAL_SHUFFLE_ALL handling in
+                // onSetMediaItems); persisting the queue at this moment would
+                // capture the OLD queue with the NEW shuffle flag. The queue
+                // gets saved by onTimelineChanged once the swap settles.
+                saveCurrentPosition()
+            }
+
+            override fun onRepeatModeChanged(repeatMode: Int) {
+                // Repeat mode change doesn't affect the queue, so the cheap save
+                // is sufficient.
+                saveCurrentPosition()
+            }
+
+            override fun onTimelineChanged(
+                timeline: androidx.media3.common.Timeline,
+                reason: Int,
+            ) {
+                // PLAYLIST_CHANGED fires when items are added/removed/replaced —
+                // i.e. exactly when the saved queue would otherwise go stale.
+                // SOURCE_UPDATE fires for things like live-stream window shifts
+                // and is not interesting here. Save the new queue + a fresh
+                // position snapshot together so they're temporally consistent.
+                if (reason == Player.TIMELINE_CHANGE_REASON_PLAYLIST_CHANGED) {
+                    saveCurrentQueue()
+                    saveCurrentPosition()
+                }
             }
 
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
@@ -396,6 +448,27 @@ class BombestMediaService : MediaLibraryService() {
             while (true) {
                 kotlinx.coroutines.delay(60_000)
                 PerformanceMetricsManager.flush()
+            }
+        }
+
+        // Snapshot the listening session every 5s while playing — captures the
+        // mid-song position so an OOM-kill or force-quit leaves a resume point
+        // within ~5s of where the user actually was. Listener hooks handle the
+        // sharper events (transitions, pause, seek, mode changes); this loop
+        // is the safety net for "still playing track X for 4 minutes".
+        // Calls only the cheap savePosition — the queue is persisted from
+        // onTimelineChanged whenever it actually changes, so re-serializing it
+        // every 5s would waste main-thread cycles for no benefit (and
+        // for full-library queues, would be a measurable hit).
+        serviceScope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(5_000)
+                // Use the active session player (ExoPlayer OR CastPlayer after
+                // switchToPlayer), not the field-stored ExoPlayer — see
+                // activePlayer's KDoc. Without this, casting sessions would
+                // never get a periodic position save.
+                val p = activePlayer() ?: continue
+                if (p.isPlaying) saveCurrentPosition()
             }
         }
 
@@ -921,6 +994,127 @@ class BombestMediaService : MediaLibraryService() {
             .build()
     }
 
+    /**
+     * Read the active [Player] for persistence: the one currently bound to
+     * the session, which might be ExoPlayer or [androidx.media3.cast.CastPlayer]
+     * (after [switchToPlayer] swaps it). Falls back to the local ExoPlayer
+     * field for early-startup cases before the session is built.
+     *
+     * Without this, [saveCurrentPosition] would always read from the
+     * field-stored ExoPlayer — but [switchToPlayer] calls `current.stop()`
+     * on it when handing the session over to CastPlayer, leaving its
+     * `currentPosition` at 0. A final-flush in `onDestroy` would then
+     * overwrite the user's valid mid-track position with 0.
+     */
+    private fun activePlayer(): Player? = mediaSession?.player ?: this.player
+
+    /**
+     * Save the cheap, frequently-changing part of the listening session
+     * (position, current id, queue index, shuffle/repeat). Does NOT touch the
+     * persisted queue list — the queue is saved separately via
+     * [saveCurrentQueue] when the timeline changes, which keeps the per-tick
+     * cost low even for full-library queues.
+     *
+     * Reads the player on the calling thread — MUST be called from the main
+     * thread (all callers already are: listener callbacks fire on the
+     * application looper, the periodic loop runs under `serviceScope` /
+     * `Dispatchers.Main`, and the final-flush hooks in `onTaskRemoved` /
+     * `onDestroy` are lifecycle callbacks on main).
+     *
+     * If [sync] is true the write goes through `commit()` instead of `apply()`
+     * — only worth the I/O hit for final-flush calls when the process is
+     * about to exit. Since the payload is tiny (no queue list), `commit()` here
+     * is cheap.
+     */
+    private fun saveCurrentPosition(sync: Boolean = false) {
+        val p = activePlayer() ?: return
+        if (p.mediaItemCount == 0) return
+        sessionStore.savePosition(
+            currentMediaId = p.currentMediaItem?.mediaId,
+            currentIndex = p.currentMediaItemIndex,
+            positionMs = p.currentPosition,
+            shuffleEnabled = p.shuffleModeEnabled,
+            repeatMode = p.repeatMode,
+            sync = sync,
+        )
+    }
+
+    /**
+     * Save the current queue's mediaIds. Called from `onTimelineChanged` when
+     * a `PLAYLIST_CHANGED` event fires (which is exactly when the persisted
+     * queue would otherwise go stale). The in-memory dedup cache inside
+     * [PlaybackSessionStore.saveQueue] short-circuits redundant writes.
+     *
+     * Reads the active session player (see [activePlayer]) so cast sessions
+     * persist the cast-side queue rather than the stopped local ExoPlayer's.
+     */
+    private fun saveCurrentQueue() {
+        val p = activePlayer() ?: return
+        val count = p.mediaItemCount
+        if (count == 0) return
+        val ids = ArrayList<String>(count)
+        for (i in 0 until count) ids.add(p.getMediaItemAt(i).mediaId)
+        sessionStore.saveQueue(ids)
+    }
+
+    /**
+     * Re-hydrate [player] with [saved] resolved against the freshly-loaded
+     * library snapshot. Returns true if a queue was restored; false if the
+     * saved ids couldn't be matched (caller falls back to the default
+     * full-library queue).
+     *
+     * `suspend` because the resolve work (map build + linear lookup over
+     * potentially-large queues) hops to [kotlinx.coroutines.Dispatchers.Default]
+     * so the library-fetch coroutine doesn't block the main looper on a
+     * cold-start restore. The final player calls hop back to Main via the
+     * outer `serviceScope.launch { }` context.
+     */
+    private suspend fun applySavedSession(
+        player: Player,
+        saved: PlaybackSessionStore.SavedSession,
+        snapshot: List<MediaItem>,
+    ): Boolean {
+        val resolved = withContext(Dispatchers.Default) {
+            val byId = snapshot.associateBy { it.mediaId }
+            saved.queueIds.mapNotNull { byId[it] }
+        }
+        if (resolved.isEmpty()) {
+            android.util.Log.w(
+                "BombestMediaService",
+                "Saved session had ${saved.queueIds.size} ids but none resolved against library snapshot — falling back to full library"
+            )
+            return false
+        }
+
+        // Prefer the explicit saved id; otherwise fall back to the saved
+        // queue index (now actually persisted in saved.currentIndex), clamped
+        // to the resolved-queue size; final fallback is 0.
+        val idx = saved.currentMediaId
+            ?.let { id -> resolved.indexOfFirst { it.mediaId == id } }
+            ?.takeIf { it >= 0 }
+            ?: saved.currentIndex.coerceIn(0, resolved.size - 1)
+
+        // Prime the dedup cache BEFORE setMediaItems — ExoPlayer can fire
+        // onTimelineChanged synchronously inside setMediaItems, and that
+        // callback's saveCurrentQueue would otherwise rewrite the same queue
+        // we just loaded.
+        sessionStore.markQueueAsSaved(saved.queueIds)
+        player.setMediaItems(resolved, idx, saved.positionMs)
+        player.shuffleModeEnabled = saved.shuffleEnabled
+        player.repeatMode = saved.repeatMode
+        player.prepare()
+        // Intentionally leaving playWhenReady alone — restore should land the
+        // user back on the same song at the same position, paused, ready to
+        // tap play. Matches Spotify / YouTube Music behaviour and avoids
+        // surprise playback when the user reopens the app to browse.
+
+        android.util.Log.i(
+            "BombestMediaService",
+            "Restored session: ${resolved.size}/${saved.queueIds.size} tracks, idx=$idx, pos=${saved.positionMs}ms, shuffle=${saved.shuffleEnabled}, repeat=${saved.repeatMode}"
+        )
+        return true
+    }
+
     private fun expandPlaybackItems(items: List<MediaItem>): List<MediaItem> {
         val snap = librarySnapshot
         val out = ArrayList<MediaItem>()
@@ -1049,8 +1243,15 @@ class BombestMediaService : MediaLibraryService() {
 
                 // Only set media items when player is idle - don't clobber active playback during refresh
                 if (player.playbackState == Player.STATE_IDLE || player.mediaItemCount == 0) {
-                    player.setMediaItems(mediaItems)
-                    player.prepare()
+                    // Read + parse the saved session off-Main; the player calls
+                    // inside applySavedSession run on Main thanks to the outer
+                    // serviceScope.launch context.
+                    val saved = withContext(Dispatchers.Default) { sessionStore.load() }
+                    val restored = saved != null && applySavedSession(player, saved, mediaItems)
+                    if (!restored) {
+                        player.setMediaItems(mediaItems)
+                        player.prepare()
+                    }
                 }
 
                 // Notify session that children changed
@@ -1074,6 +1275,13 @@ class BombestMediaService : MediaLibraryService() {
             // after the user swipes the phone app from recents.
             return
         }
+        // User swiped away with playback paused / stopped — capture the resume
+        // point synchronously before tearing down so the next launch can pick
+        // up exactly where they left off. Position-only (no queue rewrite) —
+        // the queue is already on disk from the last onTimelineChanged, and a
+        // synchronous commit() of a multi-hundred-element joined string on
+        // Main is the exact ANR risk we're avoiding.
+        saveCurrentPosition(sync = true)
         mediaSession?.player?.run {
             stop()
             clearMediaItems()
@@ -1083,6 +1291,12 @@ class BombestMediaService : MediaLibraryService() {
     }
 
     override fun onDestroy() {
+        // Final resume-point snapshot before the player is released. sync=true
+        // forces commit() so the write is on disk before the process exits —
+        // apply()'s background fsync can lose the last save on a fast kill.
+        // Position-only — see saveCurrentPosition vs saveCurrentQueue split
+        // and the matching comment in onTaskRemoved.
+        runCatching { saveCurrentPosition(sync = true) }
         try {
             connectivityManager.unregisterNetworkCallback(networkCallback)
         } catch (_: Exception) {}
