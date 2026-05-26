@@ -290,8 +290,9 @@ class BombestMediaService : MediaLibraryService() {
                 }
                 // Flush perf events on each track change so data arrives promptly
                 PerformanceMetricsManager.flush()
-                // Persist new queue position so quit-then-resume lands here, not on prior track.
-                saveCurrentSession()
+                // New queue index → cheap savePosition is enough; the queue list
+                // itself didn't change here so we don't trigger the heavy saveQueue.
+                saveCurrentPosition()
             }
 
             override fun onPlaybackStateChanged(playbackState: Int) {
@@ -302,7 +303,7 @@ class BombestMediaService : MediaLibraryService() {
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 // Save on every play↔pause edge — a pause is the most likely moment
                 // for the user to background or kill the app.
-                if (!isPlaying) saveCurrentSession()
+                if (!isPlaying) saveCurrentPosition()
             }
 
             override fun onPositionDiscontinuity(
@@ -312,15 +313,38 @@ class BombestMediaService : MediaLibraryService() {
             ) {
                 // Captures user-initiated seeks; transition-driven discontinuities
                 // are already covered by onMediaItemTransition.
-                if (reason == Player.DISCONTINUITY_REASON_SEEK) saveCurrentSession()
+                if (reason == Player.DISCONTINUITY_REASON_SEEK) saveCurrentPosition()
             }
 
             override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
-                saveCurrentSession()
+                // Save the new mode now, but DO NOT touch the queue here.
+                // ExoPlayer can flip shuffleModeEnabled before the corresponding
+                // queue swap completes (see SPECIAL_SHUFFLE_ALL handling in
+                // onSetMediaItems); persisting the queue at this moment would
+                // capture the OLD queue with the NEW shuffle flag. The queue
+                // gets saved by onTimelineChanged once the swap settles.
+                saveCurrentPosition()
             }
 
             override fun onRepeatModeChanged(repeatMode: Int) {
-                saveCurrentSession()
+                // Repeat mode change doesn't affect the queue, so the cheap save
+                // is sufficient.
+                saveCurrentPosition()
+            }
+
+            override fun onTimelineChanged(
+                timeline: androidx.media3.common.Timeline,
+                reason: Int,
+            ) {
+                // PLAYLIST_CHANGED fires when items are added/removed/replaced —
+                // i.e. exactly when the saved queue would otherwise go stale.
+                // SOURCE_UPDATE fires for things like live-stream window shifts
+                // and is not interesting here. Save the new queue + a fresh
+                // position snapshot together so they're temporally consistent.
+                if (reason == Player.TIMELINE_CHANGE_REASON_PLAYLIST_CHANGED) {
+                    saveCurrentQueue()
+                    saveCurrentPosition()
+                }
             }
 
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
@@ -432,11 +456,15 @@ class BombestMediaService : MediaLibraryService() {
         // within ~5s of where the user actually was. Listener hooks handle the
         // sharper events (transitions, pause, seek, mode changes); this loop
         // is the safety net for "still playing track X for 4 minutes".
+        // Calls only the cheap savePosition — the queue is persisted from
+        // onTimelineChanged whenever it actually changes, so re-serializing it
+        // every 5s would waste main-thread cycles for no benefit (and
+        // for full-library queues, would be a measurable hit).
         serviceScope.launch {
             while (true) {
                 kotlinx.coroutines.delay(5_000)
                 val p = this@BombestMediaService.player ?: continue
-                if (p.isPlaying) saveCurrentSession()
+                if (p.isPlaying) saveCurrentPosition()
             }
         }
 
@@ -963,27 +991,29 @@ class BombestMediaService : MediaLibraryService() {
     }
 
     /**
-     * Snapshot the current queue + position into [sessionStore].
+     * Save the cheap, frequently-changing part of the listening session
+     * (position, current id, queue index, shuffle/repeat). Does NOT touch the
+     * persisted queue list — the queue is saved separately via
+     * [saveCurrentQueue] when the timeline changes, which keeps the per-tick
+     * cost low even for full-library queues.
      *
-     * Reads the player on the calling thread — this MUST be called from the
-     * main thread (all ExoPlayer access points already are: listener callbacks
-     * fire on the application looper, the periodic loop runs under
-     * `serviceScope` which is `Dispatchers.Main`, and the final-flush hooks in
-     * `onTaskRemoved` / `onDestroy` are lifecycle callbacks on main).
+     * Reads the player on the calling thread — MUST be called from the main
+     * thread (all callers already are: listener callbacks fire on the
+     * application looper, the periodic loop runs under `serviceScope` /
+     * `Dispatchers.Main`, and the final-flush hooks in `onTaskRemoved` /
+     * `onDestroy` are lifecycle callbacks on main).
      *
      * If [sync] is true the write goes through `commit()` instead of `apply()`
      * — only worth the I/O hit for final-flush calls when the process is
-     * about to exit.
+     * about to exit. Since the payload is tiny (no queue list), `commit()` here
+     * is cheap.
      */
-    private fun saveCurrentSession(sync: Boolean = false) {
+    private fun saveCurrentPosition(sync: Boolean = false) {
         val p = this.player ?: return
-        val count = p.mediaItemCount
-        if (count == 0) return
-        val ids = ArrayList<String>(count)
-        for (i in 0 until count) ids.add(p.getMediaItemAt(i).mediaId)
-        sessionStore.save(
-            queueIds = ids,
+        if (p.mediaItemCount == 0) return
+        sessionStore.savePosition(
             currentMediaId = p.currentMediaItem?.mediaId,
+            currentIndex = p.currentMediaItemIndex,
             positionMs = p.currentPosition,
             shuffleEnabled = p.shuffleModeEnabled,
             repeatMode = p.repeatMode,
@@ -992,18 +1022,41 @@ class BombestMediaService : MediaLibraryService() {
     }
 
     /**
+     * Save the current queue's mediaIds. Called from `onTimelineChanged` when
+     * a `PLAYLIST_CHANGED` event fires (which is exactly when the persisted
+     * queue would otherwise go stale). The in-memory dedup cache inside
+     * [PlaybackSessionStore.saveQueue] short-circuits redundant writes.
+     */
+    private fun saveCurrentQueue() {
+        val p = this.player ?: return
+        val count = p.mediaItemCount
+        if (count == 0) return
+        val ids = ArrayList<String>(count)
+        for (i in 0 until count) ids.add(p.getMediaItemAt(i).mediaId)
+        sessionStore.saveQueue(ids)
+    }
+
+    /**
      * Re-hydrate [player] with [saved] resolved against the freshly-loaded
      * library snapshot. Returns true if a queue was restored; false if the
      * saved ids couldn't be matched (caller falls back to the default
      * full-library queue).
+     *
+     * `suspend` because the resolve work (map build + linear lookup over
+     * potentially-large queues) hops to [kotlinx.coroutines.Dispatchers.Default]
+     * so the library-fetch coroutine doesn't block the main looper on a
+     * cold-start restore. The final player calls hop back to Main via the
+     * outer `serviceScope.launch { }` context.
      */
-    private fun applySavedSession(
+    private suspend fun applySavedSession(
         player: Player,
         saved: PlaybackSessionStore.SavedSession,
         snapshot: List<MediaItem>,
     ): Boolean {
-        val byId = snapshot.associateBy { it.mediaId }
-        val resolved = saved.queueIds.mapNotNull { byId[it] }
+        val resolved = withContext(Dispatchers.Default) {
+            val byId = snapshot.associateBy { it.mediaId }
+            saved.queueIds.mapNotNull { byId[it] }
+        }
         if (resolved.isEmpty()) {
             android.util.Log.w(
                 "BombestMediaService",
@@ -1012,17 +1065,22 @@ class BombestMediaService : MediaLibraryService() {
             return false
         }
 
-        // Prefer the explicit saved id; fall back to the saved index clamped to
-        // the new (possibly-shrunken) queue, then position 0.
+        // Prefer the explicit saved id; otherwise fall back to the saved
+        // queue index (now actually persisted in saved.currentIndex), clamped
+        // to the resolved-queue size; final fallback is 0.
         val idx = saved.currentMediaId
             ?.let { id -> resolved.indexOfFirst { it.mediaId == id } }
             ?.takeIf { it >= 0 }
-            ?: 0
+            ?: saved.currentIndex.coerceIn(0, resolved.size - 1)
 
         player.setMediaItems(resolved, idx, saved.positionMs)
         player.shuffleModeEnabled = saved.shuffleEnabled
         player.repeatMode = saved.repeatMode
         player.prepare()
+        // setMediaItems above will fire onTimelineChanged → saveCurrentQueue.
+        // Tell the dedup cache the restored queue is already on disk so the
+        // immediate callback doesn't re-write what we just loaded.
+        sessionStore.markQueueAsSaved(saved.queueIds)
         // Intentionally leaving playWhenReady alone — restore should land the
         // user back on the same song at the same position, paused, ready to
         // tap play. Matches Spotify / YouTube Music behaviour and avoids
@@ -1163,7 +1221,10 @@ class BombestMediaService : MediaLibraryService() {
 
                 // Only set media items when player is idle - don't clobber active playback during refresh
                 if (player.playbackState == Player.STATE_IDLE || player.mediaItemCount == 0) {
-                    val saved = sessionStore.load()
+                    // Read + parse the saved session off-Main; the player calls
+                    // inside applySavedSession run on Main thanks to the outer
+                    // serviceScope.launch context.
+                    val saved = withContext(Dispatchers.Default) { sessionStore.load() }
                     val restored = saved != null && applySavedSession(player, saved, mediaItems)
                     if (!restored) {
                         player.setMediaItems(mediaItems)
@@ -1194,8 +1255,11 @@ class BombestMediaService : MediaLibraryService() {
         }
         // User swiped away with playback paused / stopped — capture the resume
         // point synchronously before tearing down so the next launch can pick
-        // up exactly where they left off.
-        saveCurrentSession(sync = true)
+        // up exactly where they left off. Position-only (no queue rewrite) —
+        // the queue is already on disk from the last onTimelineChanged, and a
+        // synchronous commit() of a multi-hundred-element joined string on
+        // Main is the exact ANR risk we're avoiding.
+        saveCurrentPosition(sync = true)
         mediaSession?.player?.run {
             stop()
             clearMediaItems()
@@ -1208,7 +1272,9 @@ class BombestMediaService : MediaLibraryService() {
         // Final resume-point snapshot before the player is released. sync=true
         // forces commit() so the write is on disk before the process exits —
         // apply()'s background fsync can lose the last save on a fast kill.
-        runCatching { saveCurrentSession(sync = true) }
+        // Position-only — see saveCurrentPosition vs saveCurrentQueue split
+        // and the matching comment in onTaskRemoved.
+        runCatching { saveCurrentPosition(sync = true) }
         try {
             connectivityManager.unregisterNetworkCallback(networkCallback)
         } catch (_: Exception) {}
