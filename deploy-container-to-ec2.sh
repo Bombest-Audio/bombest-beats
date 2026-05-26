@@ -18,6 +18,18 @@ REGION="${1:-us-west-2}"
 # Callers can still override DOCKER_IMAGE explicitly for full control.
 DOCKER_IMAGE="${DOCKER_IMAGE:-${DOCKER_USERNAME:-thomasphillips3}/bombest-beats:latest}"
 
+# DOCKER_IMAGE is derived from a caller-supplied env var (DOCKER_USERNAME)
+# and later interpolated unquoted into a shell command string that's piped
+# through SSM and executed on EC2. Allowlist the legal Docker reference
+# grammar — namespaces, names, tags, and SHA256 digests — so a malicious or
+# accidentally-malformed value like `evil; rm -rf /` can't break out of the
+# SSM payload and execute arbitrary commands on the instance.
+if [[ ! "$DOCKER_IMAGE" =~ ^[a-zA-Z0-9._/:@-]+$ ]]; then
+  echo "Error: DOCKER_IMAGE='$DOCKER_IMAGE' contains unsafe characters." >&2
+  echo "Only alphanumerics and . _ / : @ - allowed." >&2
+  exit 1
+fi
+
 if [ -n "$INSTANCE_ID" ]; then
   echo "Using instance: $INSTANCE_ID"
 else
