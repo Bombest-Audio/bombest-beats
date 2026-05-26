@@ -111,13 +111,14 @@ class AuthRepository(private val context: Context, private val authApi: AuthApi)
     private suspend fun saveAuth(token: String, refreshToken: String?, user: User) {
         context.authDataStore.edit { prefs ->
             prefs[TOKEN_KEY] = token
-            // Symmetric with LoginActivity's password/register paths: when the
-            // response omits a refresh token (older backends), explicitly clear
-            // any previously-stored one so we don't carry a stale refresh token
-            // from a prior session alongside this fresh access token + user
-            // identity. JwtAuthenticator would otherwise attempt to refresh
-            // against the wrong session. Affects the passkey login + register
-            // flows that route through this helper.
+            // Callers: [login], [register], [verifyPasskeyLogin]. (Passkey
+            // *register* does NOT route through here — it only adds a
+            // credential to an already-authenticated session.) When the
+            // response omits a refresh token (older backends), explicitly
+            // clear any previously-stored one so we don't carry a stale
+            // refresh token from a prior session alongside this fresh access
+            // token + user identity. JwtAuthenticator would otherwise attempt
+            // to refresh against the wrong session.
             if (refreshToken != null) {
                 prefs[REFRESH_TOKEN_KEY] = refreshToken
             } else {
