@@ -30,6 +30,7 @@ import com.bombest.music.data.MetricsManager
 import com.bombest.music.data.PerformanceMetricsManager
 import com.bombest.music.data.api.PerfEventPayload
 import com.bombest.music.data.NetworkModule
+import com.bombest.music.data.PlaybackSessionStore
 import com.bombest.music.data.authDataStore
 import com.bombest.music.data.api.Playlist
 import com.bombest.music.data.api.PlaylistApi
@@ -63,6 +64,7 @@ class BombestMediaService : MediaLibraryService() {
     /** Favorites / "Liked songs" system playlist — used for AA root shortcut. */
     private var favoritesPlaylist: Playlist? = null
     private val recentTracksStore by lazy { AutoRecentTracksStore(this) }
+    private val sessionStore by lazy { PlaybackSessionStore(this) }
     private val repository by lazy { MusicRepository(this) }
     private lateinit var downloadManager: DownloadManager
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -288,11 +290,37 @@ class BombestMediaService : MediaLibraryService() {
                 }
                 // Flush perf events on each track change so data arrives promptly
                 PerformanceMetricsManager.flush()
+                // Persist new queue position so quit-then-resume lands here, not on prior track.
+                saveCurrentSession()
             }
 
             override fun onPlaybackStateChanged(playbackState: Int) {
                 // Optional: handle pause/stop logic tracking if needed using rigorous state
                 // For MVP transition-based logging is usually sufficient for "plays"
+            }
+
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                // Save on every play↔pause edge — a pause is the most likely moment
+                // for the user to background or kill the app.
+                if (!isPlaying) saveCurrentSession()
+            }
+
+            override fun onPositionDiscontinuity(
+                oldPosition: Player.PositionInfo,
+                newPosition: Player.PositionInfo,
+                reason: Int,
+            ) {
+                // Captures user-initiated seeks; transition-driven discontinuities
+                // are already covered by onMediaItemTransition.
+                if (reason == Player.DISCONTINUITY_REASON_SEEK) saveCurrentSession()
+            }
+
+            override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
+                saveCurrentSession()
+            }
+
+            override fun onRepeatModeChanged(repeatMode: Int) {
+                saveCurrentSession()
             }
 
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
@@ -396,6 +424,19 @@ class BombestMediaService : MediaLibraryService() {
             while (true) {
                 kotlinx.coroutines.delay(60_000)
                 PerformanceMetricsManager.flush()
+            }
+        }
+
+        // Snapshot the listening session every 5s while playing — captures the
+        // mid-song position so an OOM-kill or force-quit leaves a resume point
+        // within ~5s of where the user actually was. Listener hooks handle the
+        // sharper events (transitions, pause, seek, mode changes); this loop
+        // is the safety net for "still playing track X for 4 minutes".
+        serviceScope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(5_000)
+                val p = this@BombestMediaService.player ?: continue
+                if (p.isPlaying) saveCurrentSession()
             }
         }
 
@@ -921,6 +962,79 @@ class BombestMediaService : MediaLibraryService() {
             .build()
     }
 
+    /**
+     * Snapshot the current queue + position into [sessionStore].
+     *
+     * Reads the player on the calling thread — this MUST be called from the
+     * main thread (all ExoPlayer access points already are: listener callbacks
+     * fire on the application looper, the periodic loop runs under
+     * `serviceScope` which is `Dispatchers.Main`, and the final-flush hooks in
+     * `onTaskRemoved` / `onDestroy` are lifecycle callbacks on main).
+     *
+     * If [sync] is true the write goes through `commit()` instead of `apply()`
+     * — only worth the I/O hit for final-flush calls when the process is
+     * about to exit.
+     */
+    private fun saveCurrentSession(sync: Boolean = false) {
+        val p = this.player ?: return
+        val count = p.mediaItemCount
+        if (count == 0) return
+        val ids = ArrayList<String>(count)
+        for (i in 0 until count) ids.add(p.getMediaItemAt(i).mediaId)
+        sessionStore.save(
+            queueIds = ids,
+            currentMediaId = p.currentMediaItem?.mediaId,
+            positionMs = p.currentPosition,
+            shuffleEnabled = p.shuffleModeEnabled,
+            repeatMode = p.repeatMode,
+            sync = sync,
+        )
+    }
+
+    /**
+     * Re-hydrate [player] with [saved] resolved against the freshly-loaded
+     * library snapshot. Returns true if a queue was restored; false if the
+     * saved ids couldn't be matched (caller falls back to the default
+     * full-library queue).
+     */
+    private fun applySavedSession(
+        player: Player,
+        saved: PlaybackSessionStore.SavedSession,
+        snapshot: List<MediaItem>,
+    ): Boolean {
+        val byId = snapshot.associateBy { it.mediaId }
+        val resolved = saved.queueIds.mapNotNull { byId[it] }
+        if (resolved.isEmpty()) {
+            android.util.Log.w(
+                "BombestMediaService",
+                "Saved session had ${saved.queueIds.size} ids but none resolved against library snapshot — falling back to full library"
+            )
+            return false
+        }
+
+        // Prefer the explicit saved id; fall back to the saved index clamped to
+        // the new (possibly-shrunken) queue, then position 0.
+        val idx = saved.currentMediaId
+            ?.let { id -> resolved.indexOfFirst { it.mediaId == id } }
+            ?.takeIf { it >= 0 }
+            ?: 0
+
+        player.setMediaItems(resolved, idx, saved.positionMs)
+        player.shuffleModeEnabled = saved.shuffleEnabled
+        player.repeatMode = saved.repeatMode
+        player.prepare()
+        // Intentionally leaving playWhenReady alone — restore should land the
+        // user back on the same song at the same position, paused, ready to
+        // tap play. Matches Spotify / YouTube Music behaviour and avoids
+        // surprise playback when the user reopens the app to browse.
+
+        android.util.Log.i(
+            "BombestMediaService",
+            "Restored session: ${resolved.size}/${saved.queueIds.size} tracks, idx=$idx, pos=${saved.positionMs}ms, shuffle=${saved.shuffleEnabled}, repeat=${saved.repeatMode}"
+        )
+        return true
+    }
+
     private fun expandPlaybackItems(items: List<MediaItem>): List<MediaItem> {
         val snap = librarySnapshot
         val out = ArrayList<MediaItem>()
@@ -1049,8 +1163,12 @@ class BombestMediaService : MediaLibraryService() {
 
                 // Only set media items when player is idle - don't clobber active playback during refresh
                 if (player.playbackState == Player.STATE_IDLE || player.mediaItemCount == 0) {
-                    player.setMediaItems(mediaItems)
-                    player.prepare()
+                    val saved = sessionStore.load()
+                    val restored = saved != null && applySavedSession(player, saved, mediaItems)
+                    if (!restored) {
+                        player.setMediaItems(mediaItems)
+                        player.prepare()
+                    }
                 }
 
                 // Notify session that children changed
@@ -1074,6 +1192,10 @@ class BombestMediaService : MediaLibraryService() {
             // after the user swipes the phone app from recents.
             return
         }
+        // User swiped away with playback paused / stopped — capture the resume
+        // point synchronously before tearing down so the next launch can pick
+        // up exactly where they left off.
+        saveCurrentSession(sync = true)
         mediaSession?.player?.run {
             stop()
             clearMediaItems()
@@ -1083,6 +1205,10 @@ class BombestMediaService : MediaLibraryService() {
     }
 
     override fun onDestroy() {
+        // Final resume-point snapshot before the player is released. sync=true
+        // forces commit() so the write is on disk before the process exits —
+        // apply()'s background fsync can lose the last save on a fast kill.
+        runCatching { saveCurrentSession(sync = true) }
         try {
             connectivityManager.unregisterNetworkCallback(networkCallback)
         } catch (_: Exception) {}
