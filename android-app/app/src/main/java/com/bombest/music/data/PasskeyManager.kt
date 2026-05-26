@@ -1,6 +1,7 @@
 package com.bombest.music.data
 
 import android.content.Context
+import android.os.Build
 import android.util.Base64
 import android.util.Log
 import androidx.credentials.*
@@ -43,6 +44,41 @@ class PasskeyManager(
                 .replace('+', '-')
                 .replace('/', '_')
                 .replace("=", "")
+        }
+
+        /**
+         * Best-effort human label for THIS device, sent to the backend at
+         * registration so the Manage Passkeys list shows "Pixel 10" instead
+         * of "Passkey 7". Heuristic:
+         *  - If [Build.MODEL] already starts with a recognisable consumer
+         *    brand ("Pixel", "Galaxy", "OnePlus"), use it as-is — "Google
+         *    Pixel 10" is redundant.
+         *  - If the model string already contains the manufacturer name,
+         *    use the model alone.
+         *  - Otherwise concatenate manufacturer + model with the
+         *    manufacturer's first letter title-cased ("samsung SM-G998U"
+         *    → "Samsung SM-G998U").
+         *  - If both are blank/unknown, fall back to "Android device".
+         */
+        fun defaultDeviceName(): String {
+            val rawManufacturer = Build.MANUFACTURER.orEmpty().trim()
+            val rawModel = Build.MODEL.orEmpty().trim()
+            val manufacturer = rawManufacturer.replaceFirstChar { c ->
+                if (c.isLowerCase()) c.titlecase() else c.toString()
+            }
+            return when {
+                rawModel.isEmpty() && manufacturer.isEmpty() -> "Android device"
+                rawModel.isEmpty() -> manufacturer
+                manufacturer.isEmpty() -> rawModel
+                // Model already encodes a recognisable consumer brand — avoid
+                // "Google Pixel 10" / "OnePlus OnePlus 12" style duplication.
+                rawModel.startsWith("Pixel", ignoreCase = true) ||
+                    rawModel.startsWith("Galaxy", ignoreCase = true) ||
+                    rawModel.startsWith("OnePlus", ignoreCase = true) ||
+                    rawModel.startsWith("Nothing", ignoreCase = true) -> rawModel
+                rawModel.contains(manufacturer, ignoreCase = true) -> rawModel
+                else -> "$manufacturer $rawModel"
+            }
         }
     }
     
@@ -253,7 +289,11 @@ class PasskeyManager(
             response = PasskeyAttestationResponse(
                 attestationObject = responseObj.getString("attestationObject"),
                 clientDataJSON = responseObj.getString("clientDataJSON")
-            )
+            ),
+            // Auto-label this passkey with the current device model so it
+            // surfaces as e.g. "Pixel 10" in Manage Passkeys instead of the
+            // opaque "Passkey 7" fallback.
+            name = defaultDeviceName(),
         )
     }
     

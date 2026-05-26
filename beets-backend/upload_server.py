@@ -2268,10 +2268,19 @@ def init_passkey_table():
             credential_id TEXT NOT NULL UNIQUE,
             public_key TEXT NOT NULL,
             sign_count INTEGER DEFAULT 0,
+            name TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users(id)
         )
     ''')
+    # Idempotent migration for databases created before the `name` column existed.
+    # SQLite has no ADD COLUMN IF NOT EXISTS, so we swallow the duplicate-column
+    # OperationalError on the second-and-later starts.
+    try:
+        cursor.execute("ALTER TABLE passkey_credentials ADD COLUMN name TEXT")
+    except sqlite3.OperationalError as e:
+        if 'duplicate column name' not in str(e).lower():
+            raise
     # Key is a string: user_id for register flow, random login_id for login flow.
     # challenge is bytes (BLOB). origins stored as JSON array.
     cursor.execute('''
@@ -2405,18 +2414,31 @@ def passkey_register_verify():
             expected_rp_id=rp_id,
             expected_origin=origins,
         )
-        
+
+        # Optional human-readable name supplied by the client (typically the
+        # device model, e.g. "Pixel 10" or "iPhone 15 Pro") so the Manage
+        # Passkeys list can show "Pixel 10" instead of "Passkey 7". Trimmed
+        # and capped at 100 chars to keep the column predictable. Missing /
+        # blank name → NULL → clients fall back to "Passkey <id>".
+        raw_name = data.get('name') if isinstance(data, dict) else None
+        passkey_name = None
+        if isinstance(raw_name, str):
+            trimmed = raw_name.strip()[:100]
+            if trimmed:
+                passkey_name = trimmed
+
         # Store the credential
         conn = sqlite3.connect(USERS_DB)
         cursor = conn.cursor()
         cursor.execute('''
-            INSERT INTO passkey_credentials (user_id, credential_id, public_key, sign_count)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO passkey_credentials (user_id, credential_id, public_key, sign_count, name)
+            VALUES (?, ?, ?, ?, ?)
         ''', (
             current_user_id,
             bytes_to_base64url(verification.credential_id),
             bytes_to_base64url(verification.credential_public_key),
             verification.sign_count,
+            passkey_name,
         ))
         conn.commit()
         conn.close()
@@ -2427,6 +2449,10 @@ def passkey_register_verify():
         return jsonify({'success': True, 'message': 'Passkey registered successfully'})
     except Exception as e:
         _passkey_challenge_pop(current_user_id)
+        # Log the full traceback server-side so we can debug 400s without a
+        # round-trip through the client. The sanitised message still surfaces
+        # to the caller in the JSON response body.
+        logger.exception('Passkey register verification failed for user_id=%s', current_user_id)
         err_msg = str(e)
         if 'already registered' in err_msg.lower() or 'credentials already' in err_msg.lower():
             err_msg = 'This passkey is already registered to your account. Try a different device or passkey, or remove the existing one first.'
@@ -2557,17 +2583,17 @@ def passkey_login_verify():
 def passkey_list():
     """List user's registered passkeys"""
     current_user_id = get_jwt_identity()
-    
+
     conn = sqlite3.connect(USERS_DB)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute(
-        "SELECT id, credential_id, created_at FROM passkey_credentials WHERE user_id = ?",
+        "SELECT id, credential_id, name, created_at FROM passkey_credentials WHERE user_id = ?",
         (current_user_id,)
     )
     creds = cursor.fetchall()
     conn.close()
-    
+
     return jsonify([dict(c) for c in creds])
 
 @app.route('/auth/passkey/delete/<int:passkey_id>', methods=['DELETE'])
@@ -2595,12 +2621,12 @@ def passkey_delete(passkey_id):
 def list_passkeys():
     """List all passkeys for the current user"""
     current_user_id = get_jwt_identity()
-    
+
     conn = sqlite3.connect(USERS_DB)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute(
-        "SELECT id, credential_id, created_at FROM passkey_credentials WHERE user_id = ?",
+        "SELECT id, credential_id, name, created_at FROM passkey_credentials WHERE user_id = ?",
         (current_user_id,)
     )
     passkeys = [dict(row) for row in cursor.fetchall()]

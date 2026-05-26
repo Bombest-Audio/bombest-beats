@@ -54,7 +54,18 @@ interface AuthApi {
 
 data class ChangePasswordRequest(val current_password: String, val new_password: String)
 // data class PasskeysListResponse removed
-data class PasskeyInfo(val id: Int, val credential_id: String, val created_at: String?)
+/**
+ * One row from `GET /auth/passkeys`. [name] is the human-readable device label
+ * the client supplied at registration time (e.g. "Pixel 10", "iPhone 15 Pro");
+ * legacy rows registered before the column existed will have it as null and
+ * AccountScreen falls back to "Passkey <id>" for those.
+ */
+data class PasskeyInfo(
+    val id: Int,
+    val credential_id: String,
+    val name: String? = null,
+    val created_at: String?,
+)
 data class GenericResponse(val success: Boolean, val message: String? = null, val error: String? = null)
 
 data class LoginRequest(val username: String, val password: String)
@@ -111,7 +122,13 @@ data class PasskeyCredentialRequest(
     val id: String,
     val rawId: String,
     val type: String,
-    val response: PasskeyAttestationResponse
+    val response: PasskeyAttestationResponse,
+    /**
+     * Optional client-supplied device label. Backend stores this verbatim in
+     * `passkey_credentials.name` and returns it on `GET /auth/passkeys` so the
+     * Manage Passkeys list can show "Pixel 10" instead of "Passkey 7".
+     */
+    val name: String? = null,
 )
 data class PasskeyAttestationResponse(val attestationObject: String, val clientDataJSON: String)
 data class PasskeyRegisterResponse(val success: Boolean, val message: String?)

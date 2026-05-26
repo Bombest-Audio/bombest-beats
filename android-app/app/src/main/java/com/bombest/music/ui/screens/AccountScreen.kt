@@ -648,7 +648,12 @@ fun ManagePasskeysDialog(
                                     ) {
                                         Column(modifier = Modifier.weight(1f)) {
                                             Text(
-                                                text = "Passkey ${passkey.id}",
+                                                // Prefer the device label the client recorded at
+                                                // registration (e.g. "Pixel 10"). Legacy rows that
+                                                // were registered before the name column existed
+                                                // have name=null → fall back to the opaque id label.
+                                                text = passkey.name?.takeIf { it.isNotBlank() }
+                                                    ?: "Passkey ${passkey.id}",
                                                 color = Color.White,
                                                 fontWeight = FontWeight.Medium
                                             )
