@@ -59,9 +59,7 @@ import androidx.compose.material.icons.filled.Fingerprint
 // API classes imported from com.bombest.music.data.api
 
 class LoginActivity : ComponentActivity() {
-    
-    private lateinit var authApi: com.bombest.music.data.api.AuthApi
-    
+
     override fun onCreate(savedInstanceState: Bundle?) {
         // Install splash screen with exit animation - must be called before super.onCreate()
         val splashScreen = installSplashScreen()
@@ -98,13 +96,9 @@ class LoginActivity : ComponentActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
         window.statusBarColor = android.graphics.Color.TRANSPARENT
         
-        // Setup API (Removed duplicate local setup)
-        // NetworkModule is already initialized and holds the correct configuration
-        
-        authApi = NetworkModule.authApi
-        
-        
-        // Setup PasskeyManager
+        // AuthRepository owns login/register/passkey persistence so all three
+        // auth paths share the same DataStore-write semantics (see
+        // AuthRepository.saveAuth).
         val authRepository = AuthRepository(this, NetworkModule.authApi)
         val passkeyManager = PasskeyManager(this, authRepository)
         
@@ -129,68 +123,36 @@ class LoginActivity : ComponentActivity() {
                 if (!isCheckingAuthState) {
                     AuthScreens(
                         onLogin = { username, password, onResult ->
+                            // Route through AuthRepository.login so the refresh-token
+                            // persistence (including the null → remove clear) lives in
+                            // exactly one place — AuthRepository.saveAuth — alongside
+                            // the passkey-login flow. Earlier rounds had the persistence
+                            // duplicated inline here and could drift from saveAuth's
+                            // semantics.
                             lifecycleScope.launch {
-                                try {
-                                    val response = authApi.login(com.bombest.music.data.api.LoginRequest(username, password))
-                                    authDataStore.edit { prefs ->
-                                        prefs[AuthPreferences.TOKEN_KEY] = response.access_token
-                                        // Without persisting the refresh token, JwtAuthenticator
-                                        // can't mint a new access token when the current one
-                                        // expires (~30d) — so once the access token dies the
-                                        // user gets silent 401s on every authenticated endpoint
-                                        // (playlists, metrics, /auth/me, …) until they log in
-                                        // again. Backend always returns refresh_token on
-                                        // /auth/login (upload_server.py:2150). Explicitly clear
-                                        // any previously-stored refresh token when the response
-                                        // omits one (older backends) so we don't carry a stale
-                                        // refresh token from a prior session alongside this
-                                        // fresh access token + user identity.
-                                        val newRefresh = response.refresh_token
-                                        if (newRefresh != null) {
-                                            prefs[AuthPreferences.REFRESH_TOKEN_KEY] = newRefresh
-                                        } else {
-                                            prefs.remove(AuthPreferences.REFRESH_TOKEN_KEY)
-                                        }
-                                        prefs[AuthPreferences.USER_KEY] = response.user.username
-                                        prefs[AuthPreferences.USER_ID_KEY] = response.user.id.toString()
-                                        prefs[AuthPreferences.ROLE_KEY] = response.user.role
+                                authRepository.login(username, password)
+                                    .onSuccess {
+                                        onResult(true, null)
+                                        goToMain()
                                     }
-                                    onResult(true, null)
-                                    goToMain()
-                                } catch (e: Exception) {
-                                    onResult(false, e.message ?: "Login failed")
-                                }
+                                    .onFailure { e ->
+                                        onResult(false, e.message ?: "Login failed")
+                                    }
                             }
                         },
                         onRegister = { username, password, inviteCode, onResult ->
+                            // Same delegation as login — AuthRepository.register routes
+                            // through saveAuth, which captures or clears refresh_token
+                            // atomically with the other auth fields.
                             lifecycleScope.launch {
-                                try {
-                                    val response = authApi.register(com.bombest.music.data.api.RegisterRequest(username, password, inviteCode))
-                                    authDataStore.edit { prefs ->
-                                        prefs[AuthPreferences.TOKEN_KEY] = response.access_token
-                                        // Same refresh-token-persistence requirement as the
-                                        // login path above — registration returns a fresh
-                                        // session so we have to capture the refresh token now
-                                        // or the user hits silent 401s once the access token
-                                        // expires (~30d later). Same null-handling: if the
-                                        // response omits a refresh token, clear any prior one
-                                        // so we don't keep a stale refresh token from a
-                                        // previous account alongside this fresh registration.
-                                        val newRefresh = response.refresh_token
-                                        if (newRefresh != null) {
-                                            prefs[AuthPreferences.REFRESH_TOKEN_KEY] = newRefresh
-                                        } else {
-                                            prefs.remove(AuthPreferences.REFRESH_TOKEN_KEY)
-                                        }
-                                        prefs[AuthPreferences.USER_KEY] = response.user.username
-                                        prefs[AuthPreferences.USER_ID_KEY] = response.user.id.toString()
-                                        prefs[AuthPreferences.ROLE_KEY] = response.user.role
+                                authRepository.register(username, password, inviteCode)
+                                    .onSuccess {
+                                        onResult(true, null)
+                                        goToMain()
                                     }
-                                    onResult(true, null)
-                                    goToMain()
-                                } catch (e: Exception) {
-                                    onResult(false, e.message ?: "Registration failed")
-                                }
+                                    .onFailure { e ->
+                                        onResult(false, e.message ?: "Registration failed")
+                                    }
                             }
                         },
                         onPasskeyLogin = { onResult ->
