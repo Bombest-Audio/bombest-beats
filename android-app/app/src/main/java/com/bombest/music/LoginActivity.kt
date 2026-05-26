@@ -31,7 +31,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.core.view.WindowCompat
-import androidx.datastore.preferences.core.edit
 import androidx.lifecycle.lifecycleScope
 import com.bombest.music.data.AuthPreferences
 import com.bombest.music.data.authDataStore
@@ -41,22 +40,11 @@ import android.view.animation.AccelerateInterpolator
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
-import okhttp3.OkHttpClient
-import okhttp3.logging.HttpLoggingInterceptor
-import retrofit2.Retrofit
-import retrofit2.converter.moshi.MoshiConverterFactory
-import retrofit2.http.Body
-import retrofit2.http.POST
-import java.util.concurrent.TimeUnit
 import com.bombest.music.data.PasskeyManager
 import com.bombest.music.data.repository.AuthRepository
 import com.bombest.music.data.NetworkModule
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Fingerprint
-
-
-// API
-// API classes imported from com.bombest.music.data.api
 
 class LoginActivity : ComponentActivity() {
 
