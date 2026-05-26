@@ -463,7 +463,11 @@ class BombestMediaService : MediaLibraryService() {
         serviceScope.launch {
             while (true) {
                 kotlinx.coroutines.delay(5_000)
-                val p = this@BombestMediaService.player ?: continue
+                // Use the active session player (ExoPlayer OR CastPlayer after
+                // switchToPlayer), not the field-stored ExoPlayer — see
+                // activePlayer's KDoc. Without this, casting sessions would
+                // never get a periodic position save.
+                val p = activePlayer() ?: continue
                 if (p.isPlaying) saveCurrentPosition()
             }
         }
@@ -991,6 +995,20 @@ class BombestMediaService : MediaLibraryService() {
     }
 
     /**
+     * Read the active [Player] for persistence: the one currently bound to
+     * the session, which might be ExoPlayer or [androidx.media3.cast.CastPlayer]
+     * (after [switchToPlayer] swaps it). Falls back to the local ExoPlayer
+     * field for early-startup cases before the session is built.
+     *
+     * Without this, [saveCurrentPosition] would always read from the
+     * field-stored ExoPlayer — but [switchToPlayer] calls `current.stop()`
+     * on it when handing the session over to CastPlayer, leaving its
+     * `currentPosition` at 0. A final-flush in `onDestroy` would then
+     * overwrite the user's valid mid-track position with 0.
+     */
+    private fun activePlayer(): Player? = mediaSession?.player ?: this.player
+
+    /**
      * Save the cheap, frequently-changing part of the listening session
      * (position, current id, queue index, shuffle/repeat). Does NOT touch the
      * persisted queue list — the queue is saved separately via
@@ -1009,7 +1027,7 @@ class BombestMediaService : MediaLibraryService() {
      * is cheap.
      */
     private fun saveCurrentPosition(sync: Boolean = false) {
-        val p = this.player ?: return
+        val p = activePlayer() ?: return
         if (p.mediaItemCount == 0) return
         sessionStore.savePosition(
             currentMediaId = p.currentMediaItem?.mediaId,
@@ -1026,9 +1044,12 @@ class BombestMediaService : MediaLibraryService() {
      * a `PLAYLIST_CHANGED` event fires (which is exactly when the persisted
      * queue would otherwise go stale). The in-memory dedup cache inside
      * [PlaybackSessionStore.saveQueue] short-circuits redundant writes.
+     *
+     * Reads the active session player (see [activePlayer]) so cast sessions
+     * persist the cast-side queue rather than the stopped local ExoPlayer's.
      */
     private fun saveCurrentQueue() {
-        val p = this.player ?: return
+        val p = activePlayer() ?: return
         val count = p.mediaItemCount
         if (count == 0) return
         val ids = ArrayList<String>(count)

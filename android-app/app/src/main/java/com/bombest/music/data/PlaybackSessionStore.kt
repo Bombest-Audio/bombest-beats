@@ -37,10 +37,11 @@ class PlaybackSessionStore(context: Context) {
     private val appContext = context.applicationContext
 
     /**
-     * Queue file. ONE key (`queue_ids`) only, written `apply()`-only and only
-     * when the timeline actually changes. Kept in its own file so the
-     * synchronous final-flush in [savePosition] doesn't pay the cost of
-     * rewriting a potentially-large joined-mediaIds blob.
+     * Queue file. ONE key (`queue_ids`) only. In production [saveQueue] writes
+     * here via `apply()` and only when the timeline actually changes; tests
+     * can opt into `commit()` via the `sync` parameter. Kept in its own file
+     * so the synchronous final-flush in [savePosition] doesn't pay the cost
+     * of rewriting a potentially-large joined-mediaIds blob.
      *
      * Reuses the original PREFS file name so existing devices upgrade
      * in-place — the queue payload lives where it always did. Position keys
@@ -176,8 +177,15 @@ class PlaybackSessionStore(context: Context) {
      * Copy state keys (everything except queue_ids) that may have been written
      * by older versions of this class into the new state file, then remove
      * them from the queue file. Safe to call on a fresh install (no-op) and
-     * on every subsequent launch (idempotent — the state file already wins
-     * on second-and-later loads).
+     * on every subsequent launch (idempotent — the state file already wins on
+     * second-and-later loads).
+     *
+     * Crash-safety: both writes use `commit()`, and the state-prefs write is
+     * fully durable before the legacy keys are removed. A process kill at any
+     * point either leaves the data fully in the old location (state-prefs
+     * write didn't land yet) or fully in the new location (state-prefs write
+     * landed, legacy removal may or may not have). The migration is
+     * idempotent, so a repeat on next launch is harmless.
      */
     private fun migrateLegacyStateIfNeeded() {
         // Skip if the new state file already has data (already migrated, or
@@ -192,7 +200,12 @@ class PlaybackSessionStore(context: Context) {
         editor.putBoolean(KEY_SHUFFLE, queuePrefs.getBoolean(KEY_SHUFFLE, false))
         editor.putInt(KEY_REPEAT_MODE, queuePrefs.getInt(KEY_REPEAT_MODE, Player.REPEAT_MODE_OFF))
         editor.putLong(KEY_SAVED_AT, queuePrefs.getLong(KEY_SAVED_AT, 0L))
-        editor.apply()
+        // commit() so the new-file write is fully durable BEFORE we touch the
+        // legacy keys. With apply() the two writes could ack out of order on
+        // a crash, leaving the legacy keys removed but never persisted to
+        // statePrefs — silently losing the user's saved session position.
+        // This runs once per install, so the synchronous I/O cost is fine.
+        editor.commit()
         queuePrefs.edit()
             .remove(KEY_CURRENT_MEDIA_ID)
             .remove(KEY_CURRENT_INDEX)
@@ -200,7 +213,7 @@ class PlaybackSessionStore(context: Context) {
             .remove(KEY_SHUFFLE)
             .remove(KEY_REPEAT_MODE)
             .remove(KEY_SAVED_AT)
-            .apply()
+            .commit()
     }
 
     data class SavedSession(
