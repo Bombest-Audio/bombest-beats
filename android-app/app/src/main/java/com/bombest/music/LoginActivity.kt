@@ -140,9 +140,17 @@ class LoginActivity : ComponentActivity() {
                                         // user gets silent 401s on every authenticated endpoint
                                         // (playlists, metrics, /auth/me, …) until they log in
                                         // again. Backend always returns refresh_token on
-                                        // /auth/login (upload_server.py:2150); the `?.let`
-                                        // is a defensive guard against older backends.
-                                        response.refresh_token?.let { prefs[AuthPreferences.REFRESH_TOKEN_KEY] = it }
+                                        // /auth/login (upload_server.py:2150). Explicitly clear
+                                        // any previously-stored refresh token when the response
+                                        // omits one (older backends) so we don't carry a stale
+                                        // refresh token from a prior session alongside this
+                                        // fresh access token + user identity.
+                                        val newRefresh = response.refresh_token
+                                        if (newRefresh != null) {
+                                            prefs[AuthPreferences.REFRESH_TOKEN_KEY] = newRefresh
+                                        } else {
+                                            prefs.remove(AuthPreferences.REFRESH_TOKEN_KEY)
+                                        }
                                         prefs[AuthPreferences.USER_KEY] = response.user.username
                                         prefs[AuthPreferences.USER_ID_KEY] = response.user.id.toString()
                                         prefs[AuthPreferences.ROLE_KEY] = response.user.role
@@ -164,8 +172,16 @@ class LoginActivity : ComponentActivity() {
                                         // login path above — registration returns a fresh
                                         // session so we have to capture the refresh token now
                                         // or the user hits silent 401s once the access token
-                                        // expires (~30d later).
-                                        response.refresh_token?.let { prefs[AuthPreferences.REFRESH_TOKEN_KEY] = it }
+                                        // expires (~30d later). Same null-handling: if the
+                                        // response omits a refresh token, clear any prior one
+                                        // so we don't keep a stale refresh token from a
+                                        // previous account alongside this fresh registration.
+                                        val newRefresh = response.refresh_token
+                                        if (newRefresh != null) {
+                                            prefs[AuthPreferences.REFRESH_TOKEN_KEY] = newRefresh
+                                        } else {
+                                            prefs.remove(AuthPreferences.REFRESH_TOKEN_KEY)
+                                        }
                                         prefs[AuthPreferences.USER_KEY] = response.user.username
                                         prefs[AuthPreferences.USER_ID_KEY] = response.user.id.toString()
                                         prefs[AuthPreferences.ROLE_KEY] = response.user.role
