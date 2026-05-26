@@ -134,6 +134,15 @@ class LoginActivity : ComponentActivity() {
                                     val response = authApi.login(com.bombest.music.data.api.LoginRequest(username, password))
                                     authDataStore.edit { prefs ->
                                         prefs[AuthPreferences.TOKEN_KEY] = response.access_token
+                                        // Without persisting the refresh token, JwtAuthenticator
+                                        // can't mint a new access token when the current one
+                                        // expires (~30d) — so once the access token dies the
+                                        // user gets silent 401s on every authenticated endpoint
+                                        // (playlists, metrics, /auth/me, …) until they log in
+                                        // again. Backend always returns refresh_token on
+                                        // /auth/login (upload_server.py:2150); the `?.let`
+                                        // is a defensive guard against older backends.
+                                        response.refresh_token?.let { prefs[AuthPreferences.REFRESH_TOKEN_KEY] = it }
                                         prefs[AuthPreferences.USER_KEY] = response.user.username
                                         prefs[AuthPreferences.USER_ID_KEY] = response.user.id.toString()
                                         prefs[AuthPreferences.ROLE_KEY] = response.user.role
@@ -151,6 +160,12 @@ class LoginActivity : ComponentActivity() {
                                     val response = authApi.register(com.bombest.music.data.api.RegisterRequest(username, password, inviteCode))
                                     authDataStore.edit { prefs ->
                                         prefs[AuthPreferences.TOKEN_KEY] = response.access_token
+                                        // Same refresh-token-persistence requirement as the
+                                        // login path above — registration returns a fresh
+                                        // session so we have to capture the refresh token now
+                                        // or the user hits silent 401s once the access token
+                                        // expires (~30d later).
+                                        response.refresh_token?.let { prefs[AuthPreferences.REFRESH_TOKEN_KEY] = it }
                                         prefs[AuthPreferences.USER_KEY] = response.user.username
                                         prefs[AuthPreferences.USER_ID_KEY] = response.user.id.toString()
                                         prefs[AuthPreferences.ROLE_KEY] = response.user.role
