@@ -86,3 +86,14 @@ def test_passkey_challenges_table_exists(users_db):
     row = cur.fetchone()
     conn.close()
     assert row is not None, 'passkey_challenges table should be created by upload_server init'
+
+
+def test_assetlinks_includes_credential_relation(client):
+    """`/.well-known/assetlinks.json` must include get_login_creds for Android passkeys."""
+    resp = client.get('/.well-known/assetlinks.json')
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert isinstance(data, list) and len(data) > 0
+    relations = data[0]["relation"]
+    assert "delegate_permission/common.get_login_creds" in relations
+    assert "delegate_permission/common.handle_all_urls" in relations

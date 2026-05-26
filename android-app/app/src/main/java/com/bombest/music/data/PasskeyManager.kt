@@ -9,6 +9,7 @@ import com.bombest.music.data.api.*
 import com.bombest.music.data.repository.AuthRepository
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Manager class for handling passkey (WebAuthn) operations using Android's Credential Manager.
@@ -19,7 +20,8 @@ class PasskeyManager(
     private val authRepository: AuthRepository
 ) {
     private val credentialManager = CredentialManager.create(context)
-    
+    private val registrationInProgress = AtomicBoolean(false)
+
     companion object {
         private const val TAG = "PasskeyManager"
         
@@ -51,6 +53,9 @@ class PasskeyManager(
      * @return Result with success boolean or error
      */
     suspend fun registerPasskey(): Result<Boolean> {
+        if (!registrationInProgress.compareAndSet(false, true)) {
+            return Result.failure(Exception("Registration already in progress"))
+        }
         return try {
             // 1. Get registration options from the backend
             Log.d(TAG, "Getting passkey registration options from backend...")
@@ -105,6 +110,8 @@ class PasskeyManager(
         } catch (e: Exception) {
             Log.e(TAG, "Passkey registration failed", e)
             Result.failure(e)
+        } finally {
+            registrationInProgress.set(false)
         }
     }
     
