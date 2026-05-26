@@ -1073,14 +1073,15 @@ class BombestMediaService : MediaLibraryService() {
             ?.takeIf { it >= 0 }
             ?: saved.currentIndex.coerceIn(0, resolved.size - 1)
 
+        // Prime the dedup cache BEFORE setMediaItems — ExoPlayer can fire
+        // onTimelineChanged synchronously inside setMediaItems, and that
+        // callback's saveCurrentQueue would otherwise rewrite the same queue
+        // we just loaded.
+        sessionStore.markQueueAsSaved(saved.queueIds)
         player.setMediaItems(resolved, idx, saved.positionMs)
         player.shuffleModeEnabled = saved.shuffleEnabled
         player.repeatMode = saved.repeatMode
         player.prepare()
-        // setMediaItems above will fire onTimelineChanged → saveCurrentQueue.
-        // Tell the dedup cache the restored queue is already on disk so the
-        // immediate callback doesn't re-write what we just loaded.
-        sessionStore.markQueueAsSaved(saved.queueIds)
         // Intentionally leaving playWhenReady alone — restore should land the
         // user back on the same song at the same position, paused, ready to
         // tap play. Matches Spotify / YouTube Music behaviour and avoids

@@ -34,8 +34,35 @@ import androidx.media3.common.Player
  */
 class PlaybackSessionStore(context: Context) {
 
-    private val prefs = context.applicationContext
-        .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    private val appContext = context.applicationContext
+
+    /**
+     * Queue file. ONE key (`queue_ids`) only, written `apply()`-only and only
+     * when the timeline actually changes. Kept in its own file so the
+     * synchronous final-flush in [savePosition] doesn't pay the cost of
+     * rewriting a potentially-large joined-mediaIds blob.
+     *
+     * Reuses the original PREFS file name so existing devices upgrade
+     * in-place — the queue payload lives where it always did. Position keys
+     * from the original single-file layout are migrated to [statePrefs] on
+     * first [load].
+     */
+    private val queuePrefs = appContext.getSharedPreferences(PREFS_QUEUE, Context.MODE_PRIVATE)
+
+    /**
+     * State file. Holds the 6 cheap keys (currentMediaId, currentIndex,
+     * positionMs, shuffleEnabled, repeatMode, savedAt). [savePosition] writes
+     * only here, so a sync `commit()` on teardown only rewrites this small
+     * file — never the queue blob.
+     */
+    private val statePrefs = appContext.getSharedPreferences(PREFS_STATE, Context.MODE_PRIVATE)
+
+    /**
+     * One-shot flag: have we migrated the legacy single-file payload to the
+     * new two-file layout yet? Set after the first [load] runs the migration.
+     */
+    @Volatile
+    private var migratedFromLegacy = false
 
     /**
      * In-memory cache of the last successfully-persisted queue. [saveQueue]
@@ -52,8 +79,13 @@ class PlaybackSessionStore(context: Context) {
     /**
      * Persist the cheap, frequently-changing part of the session: position
      * within the current track, current track id, queue index, and listening
-     * mode. Does NOT rewrite [KEY_QUEUE] — callers must invoke [saveQueue]
+     * mode. Does NOT rewrite the queue — callers must invoke [saveQueue]
      * separately when the timeline actually changes.
+     *
+     * Writes go to [statePrefs] only, so a `sync = true` final-flush rewrites
+     * only the small state file — never the queue blob. The whole point of
+     * splitting prefs files in this store is to keep this path's synchronous
+     * commit truly small even when the queue grows large.
      *
      * Skips writes that would clobber a valid prior save with a half-built
      * state (e.g. virtual `special:` ids reaching the player before they're
@@ -68,7 +100,7 @@ class PlaybackSessionStore(context: Context) {
         sync: Boolean = false,
     ) {
         if (currentMediaId == null || currentMediaId.startsWith(SPECIAL_PREFIX)) return
-        val editor = prefs.edit()
+        val editor = statePrefs.edit()
             .putString(KEY_CURRENT_MEDIA_ID, currentMediaId)
             .putInt(KEY_CURRENT_INDEX, currentIndex.coerceAtLeast(0))
             .putLong(KEY_POSITION_MS, positionMs.coerceAtLeast(0L))
@@ -85,16 +117,17 @@ class PlaybackSessionStore(context: Context) {
      * defensive filter here keeps a partially-expanded queue from poisoning
      * the save.
      *
-     * Cheap when called with an unchanged queue: the in-memory
-     * [lastSavedQueue] cache short-circuits the joinToString + write entirely.
-     * Returns whether a disk write was actually scheduled.
+     * Writes go to [queuePrefs] (its own file), so they never affect the
+     * state-file's commit cost. Cheap when called with an unchanged queue:
+     * the in-memory [lastSavedQueue] cache short-circuits the joinToString +
+     * write entirely. Returns whether a disk write was actually scheduled.
      */
     fun saveQueue(queueIds: List<String>, sync: Boolean = false): Boolean {
         val clean = queueIds.filterNot { it.startsWith(SPECIAL_PREFIX) }
         if (clean.isEmpty()) return false
         if (clean == lastSavedQueue) return false
         lastSavedQueue = clean
-        val editor = prefs.edit().putString(KEY_QUEUE, clean.joinToString(SEP))
+        val editor = queuePrefs.edit().putString(KEY_QUEUE, clean.joinToString(SEP))
         if (sync) editor.commit() else editor.apply()
         return true
     }
@@ -111,23 +144,63 @@ class PlaybackSessionStore(context: Context) {
     }
 
     fun load(): SavedSession? {
-        val raw = prefs.getString(KEY_QUEUE, null) ?: return null
+        // First call after upgrade: copy any legacy state keys from the old
+        // single-file layout into the new state file, then drop the legacy
+        // copies. Idempotent — guarded by migratedFromLegacy. The queue lives
+        // in queuePrefs (the same file name as before) and needs no migration.
+        if (!migratedFromLegacy) {
+            migrateLegacyStateIfNeeded()
+            migratedFromLegacy = true
+        }
+        val raw = queuePrefs.getString(KEY_QUEUE, null) ?: return null
         val ids = raw.split(SEP).filter { it.isNotEmpty() }
         if (ids.isEmpty()) return null
         return SavedSession(
             queueIds = ids,
-            currentMediaId = prefs.getString(KEY_CURRENT_MEDIA_ID, null),
-            currentIndex = prefs.getInt(KEY_CURRENT_INDEX, 0),
-            positionMs = prefs.getLong(KEY_POSITION_MS, 0L),
-            shuffleEnabled = prefs.getBoolean(KEY_SHUFFLE, false),
-            repeatMode = prefs.getInt(KEY_REPEAT_MODE, Player.REPEAT_MODE_OFF),
-            savedAt = prefs.getLong(KEY_SAVED_AT, 0L),
+            currentMediaId = statePrefs.getString(KEY_CURRENT_MEDIA_ID, null),
+            currentIndex = statePrefs.getInt(KEY_CURRENT_INDEX, 0),
+            positionMs = statePrefs.getLong(KEY_POSITION_MS, 0L),
+            shuffleEnabled = statePrefs.getBoolean(KEY_SHUFFLE, false),
+            repeatMode = statePrefs.getInt(KEY_REPEAT_MODE, Player.REPEAT_MODE_OFF),
+            savedAt = statePrefs.getLong(KEY_SAVED_AT, 0L),
         )
     }
 
     fun clear() {
         lastSavedQueue = null
-        prefs.edit().clear().apply()
+        queuePrefs.edit().clear().apply()
+        statePrefs.edit().clear().apply()
+    }
+
+    /**
+     * Copy state keys (everything except queue_ids) that may have been written
+     * by older versions of this class into the new state file, then remove
+     * them from the queue file. Safe to call on a fresh install (no-op) and
+     * on every subsequent launch (idempotent — the state file already wins
+     * on second-and-later loads).
+     */
+    private fun migrateLegacyStateIfNeeded() {
+        // Skip if the new state file already has data (already migrated, or
+        // the user started fresh on the new layout).
+        if (statePrefs.contains(KEY_CURRENT_MEDIA_ID)) return
+        if (!queuePrefs.contains(KEY_CURRENT_MEDIA_ID)) return
+        val editor = statePrefs.edit()
+        queuePrefs.getString(KEY_CURRENT_MEDIA_ID, null)
+            ?.let { editor.putString(KEY_CURRENT_MEDIA_ID, it) }
+        editor.putInt(KEY_CURRENT_INDEX, queuePrefs.getInt(KEY_CURRENT_INDEX, 0))
+        editor.putLong(KEY_POSITION_MS, queuePrefs.getLong(KEY_POSITION_MS, 0L))
+        editor.putBoolean(KEY_SHUFFLE, queuePrefs.getBoolean(KEY_SHUFFLE, false))
+        editor.putInt(KEY_REPEAT_MODE, queuePrefs.getInt(KEY_REPEAT_MODE, Player.REPEAT_MODE_OFF))
+        editor.putLong(KEY_SAVED_AT, queuePrefs.getLong(KEY_SAVED_AT, 0L))
+        editor.apply()
+        queuePrefs.edit()
+            .remove(KEY_CURRENT_MEDIA_ID)
+            .remove(KEY_CURRENT_INDEX)
+            .remove(KEY_POSITION_MS)
+            .remove(KEY_SHUFFLE)
+            .remove(KEY_REPEAT_MODE)
+            .remove(KEY_SAVED_AT)
+            .apply()
     }
 
     data class SavedSession(
@@ -147,7 +220,12 @@ class PlaybackSessionStore(context: Context) {
     )
 
     companion object {
-        private const val PREFS = "bombest_playback_session"
+        // Queue file: keeps the original PREFS name so existing devices
+        // upgrade in-place (the queue blob's been here all along).
+        private const val PREFS_QUEUE = "bombest_playback_session"
+        // State file: new name for the cheap per-tick keys, separated so the
+        // synchronous final-flush only rewrites this small file.
+        private const val PREFS_STATE = "bombest_playback_session_state"
         private const val KEY_QUEUE = "queue_ids"
         private const val KEY_CURRENT_MEDIA_ID = "current_media_id"
         private const val KEY_CURRENT_INDEX = "current_index"
