@@ -111,7 +111,18 @@ class AuthRepository(private val context: Context, private val authApi: AuthApi)
     private suspend fun saveAuth(token: String, refreshToken: String?, user: User) {
         context.authDataStore.edit { prefs ->
             prefs[TOKEN_KEY] = token
-            if (refreshToken != null) prefs[REFRESH_TOKEN_KEY] = refreshToken
+            // Symmetric with LoginActivity's password/register paths: when the
+            // response omits a refresh token (older backends), explicitly clear
+            // any previously-stored one so we don't carry a stale refresh token
+            // from a prior session alongside this fresh access token + user
+            // identity. JwtAuthenticator would otherwise attempt to refresh
+            // against the wrong session. Affects the passkey login + register
+            // flows that route through this helper.
+            if (refreshToken != null) {
+                prefs[REFRESH_TOKEN_KEY] = refreshToken
+            } else {
+                prefs.remove(REFRESH_TOKEN_KEY)
+            }
             prefs[USER_ID_KEY] = user.id.toString()
             prefs[USERNAME_KEY] = user.username
             prefs[ROLE_KEY] = user.role
