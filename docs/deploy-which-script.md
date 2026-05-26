@@ -49,7 +49,7 @@ Creates the bucket if missing, enables Block Public Access, removes any public b
 
 ## Deprecated: deploy-ec2.sh
 
-> **Do not use.** This script references the old Docker image (`thomasphillips3/...`) and is superseded by `deploy-to-ec2.sh` (which uses `tomdabomb2u/bombest-beats`).
+> **Do not use.** Superseded by `deploy-to-ec2.sh`, which builds and pushes the canonical `${DOCKER_USERNAME:-thomasphillips3}/bombest-beats:latest` image and updates the EC2 container via SSM.
 
 ## Cloudflare DNS (required for web app)
 

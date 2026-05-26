@@ -15,7 +15,7 @@ SG_NAME="bombest-beats-sg"
 INSTANCE_TAG="bombest-beats"
 PEM_FILE="${KEY_NAME}.pem"
 # Must match the image you push with deploy-aws.sh (DOCKER_USERNAME/bombest-beats:latest)
-DOCKER_IMAGE="${DOCKER_IMAGE:-tomdabomb2u/bombest-beats:latest}"
+DOCKER_IMAGE="${DOCKER_IMAGE:-thomasphillips3/bombest-beats:latest}"
 
 echo "Region: $REGION"
 echo "Key pair: $KEY_NAME"

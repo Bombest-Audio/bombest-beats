@@ -41,7 +41,7 @@ A cross-platform music streaming application with Android, iOS, and web clients 
 | S3 Bucket (music) | `s3://bombest-beats-music` (us-west-2) |
 | S3 Bucket (web) | `s3://bombest-beats-web` (us-east-1) |
 | CloudFront dist | `E1RBYOEP5K0UI3` (aliases: `beats-app.bom.best`, `bom.best`) |
-| Docker Image | `tomdabomb2u/bombest-beats:latest` |
+| Docker Image | `thomasphillips3/bombest-beats:latest` |
 
 Full EC2, S3, tunnel, and admin setup: see [docs/architecture.md](docs/architecture.md).
 

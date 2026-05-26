@@ -157,7 +157,7 @@
 | `DATA_DIR` | Backend | Directory for `users.db` (Docker: `/app/data`) |
 | `FLASK_ENV` | Backend | `development` enables localhost CORS origins |
 | `FLASK_DEBUG` | Backend | `1` enables localhost CORS origins |
-| `DOCKER_USERNAME` | Deploy | Docker Hub username (default: `tomdabomb2u`) |
+| `DOCKER_USERNAME` | Deploy | Docker Hub username (default: `thomasphillips3`) |
 | `CLOUDFRONT_DIST_ID` | Deploy | CloudFront distribution for cache invalidation |
 | `FRONTEND_BUCKET` | Deploy | S3 bucket for web frontend (default: `bombest-beats-web`) |
 
@@ -183,7 +183,7 @@
 - AWS S3 (`bombest-beats-web` in us-east-1) for web frontend static files
 - AWS CloudFront (`E1RBYOEP5K0UI3`) for web frontend CDN
 - Cloudflare DNS proxy for `beats.bom.best` (API) and `bom.best` (web)
-- Docker Hub (`tomdabomb2u/bombest-beats:latest`) for image distribution
+- Docker Hub (`thomasphillips3/bombest-beats:latest`) for image distribution
 - nginx on EC2 as reverse proxy (port 80 -> Flask 8338)
 
 ---

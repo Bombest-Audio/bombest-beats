@@ -69,7 +69,7 @@ Backend runs in Docker on EC2. Stay within [AWS Free Tier](https://aws.amazon.co
 
 - Start Docker Desktop.
 - From repo root: `./deploy-aws.sh`
-- Pushes `tomdabomb2u/bombest-beats:latest` to Docker Hub (image includes `music/` and beets import; build where `beets-backend/music/` exists).
+- Pushes `thomasphillips3/bombest-beats:latest` to Docker Hub (image includes `music/` and beets import; build where `beets-backend/music/` exists).
 
 ### 2a. Create EC2 with AWS CLI (recommended)
 
@@ -132,11 +132,11 @@ export S3_REGION=us-west-2
 # export JWT_SECRET_KEY=...
 # (email in config.yaml or env as needed)
 
-sudo docker pull tomdabomb2u/bombest-beats:latest
+sudo docker pull thomasphillips3/bombest-beats:latest
 sudo docker run -d --name bombest-beats -p 8338:8338 --restart unless-stopped \
   -v /data/beets:/app/music \
   -e S3_BUCKET -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e S3_REGION \
-  tomdabomb2u/bombest-beats:latest
+  thomasphillips3/bombest-beats:latest
 ```
 
 ### 5. Env var checklist
@@ -192,7 +192,7 @@ To run the update without the script:
 - On EC2: pull, stop, remove container, then run the same `docker run` (keep `-v /data/beets:/app/music` so DB persists):
 
 ```bash
-sudo docker pull tomdabomb2u/bombest-beats:latest
+sudo docker pull thomasphillips3/bombest-beats:latest
 sudo docker stop bombest-beats && sudo docker rm bombest-beats
 # Run the same docker run command as in step 4 (with -v /data/beets:/app/music)
 ```
