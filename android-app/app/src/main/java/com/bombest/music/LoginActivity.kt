@@ -31,7 +31,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.core.view.WindowCompat
-import androidx.datastore.preferences.core.edit
 import androidx.lifecycle.lifecycleScope
 import com.bombest.music.data.AuthPreferences
 import com.bombest.music.data.authDataStore
@@ -41,27 +40,14 @@ import android.view.animation.AccelerateInterpolator
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
-import okhttp3.OkHttpClient
-import okhttp3.logging.HttpLoggingInterceptor
-import retrofit2.Retrofit
-import retrofit2.converter.moshi.MoshiConverterFactory
-import retrofit2.http.Body
-import retrofit2.http.POST
-import java.util.concurrent.TimeUnit
 import com.bombest.music.data.PasskeyManager
 import com.bombest.music.data.repository.AuthRepository
 import com.bombest.music.data.NetworkModule
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Fingerprint
 
-
-// API
-// API classes imported from com.bombest.music.data.api
-
 class LoginActivity : ComponentActivity() {
-    
-    private lateinit var authApi: com.bombest.music.data.api.AuthApi
-    
+
     override fun onCreate(savedInstanceState: Bundle?) {
         // Install splash screen with exit animation - must be called before super.onCreate()
         val splashScreen = installSplashScreen()
@@ -98,13 +84,9 @@ class LoginActivity : ComponentActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
         window.statusBarColor = android.graphics.Color.TRANSPARENT
         
-        // Setup API (Removed duplicate local setup)
-        // NetworkModule is already initialized and holds the correct configuration
-        
-        authApi = NetworkModule.authApi
-        
-        
-        // Setup PasskeyManager
+        // AuthRepository owns login/register/passkey persistence so all three
+        // auth paths share the same DataStore-write semantics (see
+        // AuthRepository.saveAuth).
         val authRepository = AuthRepository(this, NetworkModule.authApi)
         val passkeyManager = PasskeyManager(this, authRepository)
         
@@ -129,37 +111,36 @@ class LoginActivity : ComponentActivity() {
                 if (!isCheckingAuthState) {
                     AuthScreens(
                         onLogin = { username, password, onResult ->
+                            // Route through AuthRepository.login so the refresh-token
+                            // persistence (including the null → remove clear) lives in
+                            // exactly one place — AuthRepository.saveAuth — alongside
+                            // the passkey-login flow. Earlier rounds had the persistence
+                            // duplicated inline here and could drift from saveAuth's
+                            // semantics.
                             lifecycleScope.launch {
-                                try {
-                                    val response = authApi.login(com.bombest.music.data.api.LoginRequest(username, password))
-                                    authDataStore.edit { prefs ->
-                                        prefs[AuthPreferences.TOKEN_KEY] = response.access_token
-                                        prefs[AuthPreferences.USER_KEY] = response.user.username
-                                        prefs[AuthPreferences.USER_ID_KEY] = response.user.id.toString()
-                                        prefs[AuthPreferences.ROLE_KEY] = response.user.role
+                                authRepository.login(username, password)
+                                    .onSuccess {
+                                        onResult(true, null)
+                                        goToMain()
                                     }
-                                    onResult(true, null)
-                                    goToMain()
-                                } catch (e: Exception) {
-                                    onResult(false, e.message ?: "Login failed")
-                                }
+                                    .onFailure { e ->
+                                        onResult(false, e.message ?: "Login failed")
+                                    }
                             }
                         },
                         onRegister = { username, password, inviteCode, onResult ->
+                            // Same delegation as login — AuthRepository.register routes
+                            // through saveAuth, which captures or clears refresh_token
+                            // atomically with the other auth fields.
                             lifecycleScope.launch {
-                                try {
-                                    val response = authApi.register(com.bombest.music.data.api.RegisterRequest(username, password, inviteCode))
-                                    authDataStore.edit { prefs ->
-                                        prefs[AuthPreferences.TOKEN_KEY] = response.access_token
-                                        prefs[AuthPreferences.USER_KEY] = response.user.username
-                                        prefs[AuthPreferences.USER_ID_KEY] = response.user.id.toString()
-                                        prefs[AuthPreferences.ROLE_KEY] = response.user.role
+                                authRepository.register(username, password, inviteCode)
+                                    .onSuccess {
+                                        onResult(true, null)
+                                        goToMain()
                                     }
-                                    onResult(true, null)
-                                    goToMain()
-                                } catch (e: Exception) {
-                                    onResult(false, e.message ?: "Registration failed")
-                                }
+                                    .onFailure { e ->
+                                        onResult(false, e.message ?: "Registration failed")
+                                    }
                             }
                         },
                         onPasskeyLogin = { onResult ->
