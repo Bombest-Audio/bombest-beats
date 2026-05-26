@@ -11,7 +11,7 @@
 set -e
 
 REGION="${1:-us-west-2}"
-DOCKER_IMAGE="${DOCKER_IMAGE:-tomdabomb2u/bombest-beats:latest}"
+DOCKER_IMAGE="${DOCKER_IMAGE:-thomasphillips3/bombest-beats:latest}"
 
 if [ -n "$INSTANCE_ID" ]; then
   echo "Using instance: $INSTANCE_ID"
