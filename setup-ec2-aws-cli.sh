@@ -14,8 +14,11 @@ KEY_NAME="bombest-beats-key"
 SG_NAME="bombest-beats-sg"
 INSTANCE_TAG="bombest-beats"
 PEM_FILE="${KEY_NAME}.pem"
-# Must match the image you push with deploy-aws.sh (DOCKER_USERNAME/bombest-beats:latest)
-DOCKER_IMAGE="${DOCKER_IMAGE:-thomasphillips3/bombest-beats:latest}"
+# Match the image you push with deploy-aws.sh by deriving from DOCKER_USERNAME
+# (so DOCKER_USERNAME=other ./setup-ec2-aws-cli.sh stays consistent with
+# DOCKER_USERNAME=other ./deploy-aws.sh). Callers can still set DOCKER_IMAGE
+# explicitly to override.
+DOCKER_IMAGE="${DOCKER_IMAGE:-${DOCKER_USERNAME:-thomasphillips3}/bombest-beats:latest}"
 
 echo "Region: $REGION"
 echo "Key pair: $KEY_NAME"

@@ -11,7 +11,12 @@
 set -e
 
 REGION="${1:-us-west-2}"
-DOCKER_IMAGE="${DOCKER_IMAGE:-thomasphillips3/bombest-beats:latest}"
+# Derive the image name from DOCKER_USERNAME so a single env-var override
+# (DOCKER_USERNAME=other ./deploy-to-ec2.sh) drives both `docker push` in
+# deploy-aws.sh AND `docker pull` here — otherwise the push and pull can
+# end up targeting different accounts and EC2 would deploy a stale image.
+# Callers can still override DOCKER_IMAGE explicitly for full control.
+DOCKER_IMAGE="${DOCKER_IMAGE:-${DOCKER_USERNAME:-thomasphillips3}/bombest-beats:latest}"
 
 if [ -n "$INSTANCE_ID" ]; then
   echo "Using instance: $INSTANCE_ID"
