@@ -1,0 +1,4 @@
+[submodule "music-frontend"]
+	path = music-frontend
+	url = git@github.com:Bombest-Audio/music-frontend.git
+	branch = master
