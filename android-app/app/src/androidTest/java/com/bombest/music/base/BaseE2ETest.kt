@@ -15,6 +15,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
+import org.junit.After
 import org.junit.Assume.assumeTrue
 import org.junit.Before
 
@@ -42,7 +43,22 @@ abstract class BaseE2ETest {
         // Clear stored auth token so LoginActivity always shows the login form
         runBlocking { ctx.authDataStore.edit { it.clear() } }
 
-        // Go to home screen then relaunch via am start (guarantees foreground on Android 16)
+        // Stop BombestMediaService before launching the login UI.
+        // AndroidAutoBrowseTest (which runs first) starts the service, which fetches 46 tracks
+        // and buffers 45+ seconds of audio into ExoPlayer. That heap usage (15-39 MB) triggers
+        // continuous GC that blocks Compose composition for 60+ seconds — preventing EditText
+        // from ever appearing in the accessibility tree. Stopping the service releases its
+        // memory before LoginActivity tries to render.
+        // Note: am stopservice is safe here — unlike am force-stop, it only stops the named
+        // service component and does NOT kill the instrumentation process.
+        device.executeShellCommand("am stopservice -n $pkg/com.bombest.music.service.BombestMediaService")
+        device.waitForIdle()
+
+        // Go to home screen then bring LoginActivity to the foreground.
+        // tearDown() below fires an am-start after each test so that LoginActivity is
+        // already rendering (or rendered) by the time the next setup() runs. Reusing
+        // an already-rendered instance is <1 s; a cold start on this API 29 swiftshader
+        // emulator takes 30-60 s due to JIT compilation + GC pressure.
         device.pressHome()
         device.waitForIdle()
         device.executeShellCommand("am start -n $pkg/.LoginActivity")
@@ -54,8 +70,38 @@ abstract class BaseE2ETest {
             device.waitForIdle()
         }
 
-        // Wait for our package to be visible in the foreground
-        device.wait(Until.hasObject(By.pkg(pkg)), 10_000)
+        // Wait for our package to be visible in the foreground. LoginActivity can take 6-10s
+        // to first-render on a cold API 29 swiftshader emulator; 60s gives headroom for GC
+        // to settle after BombestMediaService stops releasing its heap.
+        device.wait(Until.hasObject(By.pkg(pkg)), 60_000)
+    }
+
+    @After
+    fun tearDown() {
+        val ctx = InstrumentationRegistry.getInstrumentation().targetContext
+        val pkg = ctx.packageName
+        // Clear auth state so the next test always starts from the login screen.
+        runBlocking { ctx.authDataStore.edit { it.clear() } }
+        // Stop BombestMediaService to release its ExoPlayer buffers and track-list heap
+        // BEFORE the next test's setup() tries to render LoginActivity. This prevents
+        // the continuous GC thrash (heap at 0-1% free) that blocks Compose composition.
+        device.executeShellCommand("am stopservice -n $pkg/com.bombest.music.service.BombestMediaService")
+        device.waitForIdle()
+        // Give ART's concurrent GC 15 seconds to fully reclaim the service heap.
+        // Without this sleep, the next test's By.pkg() wait starts while GC is still
+        // in full swing — continuous GC pauses stall the Compose main thread and prevent
+        // any accessibility nodes from appearing for 60+ seconds.
+        Thread.sleep(15_000)
+        // Fire-and-forget am start: kick off LoginActivity so it begins rendering in the
+        // background while JUnit transitions to the next test. By the time setup() runs
+        // its 60-second wait, LoginActivity is already rendered or well underway —
+        // avoiding the 30-60 s cold-start penalty on this slow emulator.
+        device.pressHome()
+        device.waitForIdle()
+        device.executeShellCommand("am start -n $pkg/.LoginActivity")
+        // Give LoginActivity a head start. This short idle lets the process begin composing
+        // before the next test's setup() fires.
+        device.waitForIdle()
     }
 
     // ---------------------------------------------------------------------------
